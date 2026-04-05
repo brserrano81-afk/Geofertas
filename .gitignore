@@ -1,6 +1,7 @@
 # Logs
 logs
 *.log
+codex-logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -8,9 +9,26 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+api/node_modules
 dist
 dist-ssr
 *.local
+
+# Environment
+.env
+.env.*
+!.env.example
+!.env.integration.example
+
+# Runtime / sessions
+.wwebjs_cache/
+whatsapp-session/
+
+# Local debug artifacts
+sefaz_*.html
+test_env.ts
+test_pup.js
+alpha1-snapshot.log
 
 # Editor directories and files
 .vscode/*
