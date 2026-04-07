@@ -1,18 +1,12 @@
 """
-Receipt OCR handler using Claude Sonnet Vision.
-Feature 9 from the product spec.
-Runs as a background task to avoid blocking the webhook response.
+Receipt OCR handler — feature 9.
+Stores receipts under users/{phone}/receipts.
+Runs OCR in background and sends result proactively.
 """
 import base64
 import logging
 from datetime import datetime, timezone
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from app.models.user import User
-from app.models.receipt import Receipt, ReceiptItem
-from app.models.price import Price
-from app.models.store import Store
-from app.models.product import Product
+from app.core.firebase import get_db, fs_set, fs_add, fs_batch_set
 from app.services.claude_client import analyze_receipt_image
 from app.services.evolution_client import get_evolution_client
 from app.handlers.price_handler import find_product
@@ -20,24 +14,23 @@ from app.handlers.price_handler import find_product
 logger = logging.getLogger(__name__)
 
 
-async def handle_receipt_queued(
-    user: User, image_data: bytes, db: AsyncSession
-) -> str:
+async def handle_receipt_queued(user: dict, image_data: bytes, session: dict) -> str:
     """
-    Immediate response when user sends a receipt photo.
-    The actual OCR runs in background.
-    Returns a quick acknowledgment message.
+    Immediate acknowledgment when user sends a receipt.
+    Creates a pending receipt document in Firestore.
+    Returns the ack message; OCR runs in background.
     """
-    # Create a pending receipt record
-    image_b64 = base64.b64encode(image_data).decode("utf-8")
+    phone = user["phone"]
+    db = get_db()
+    receipts_ref = db.collection("users").document(phone).collection("receipts")
 
-    receipt = Receipt(
-        user_id=user.id,
-        status="pending",
-        ocr_raw=image_b64,  # Store temporarily; will be replaced with URL
-    )
-    db.add(receipt)
-    await db.flush()
+    receipt_data = {
+        "user_phone": phone,
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "image_b64_tmp": base64.b64encode(image_data).decode("utf-8"),
+    }
+    await fs_add(receipts_ref, receipt_data)
 
     return (
         "📷 *Cupom recebido!* Processando...\n\n"
@@ -47,137 +40,152 @@ async def handle_receipt_queued(
 
 
 async def process_receipt_background(
-    receipt_id: str,
-    user_phone: str,
+    phone: str,
     image_data: bytes,
     media_type: str = "image/jpeg",
 ) -> None:
     """
-    Background task: OCR the receipt and send result to user.
-    Called from the webhook handler via FastAPI BackgroundTasks.
+    Background task: run Claude Vision OCR and notify user.
     """
-    from app.core.database import AsyncSessionLocal
+    evolution = get_evolution_client()
+    db = get_db()
 
-    async with AsyncSessionLocal() as db:
-        try:
-            image_b64 = base64.b64encode(image_data).decode("utf-8")
+    try:
+        image_b64 = base64.b64encode(image_data).decode("utf-8")
+        ocr_result = await analyze_receipt_image(image_b64, media_type)
 
-            # Run Claude Vision OCR
-            ocr_result = await analyze_receipt_image(image_b64, media_type)
-
-            async with db.begin():
-                # Load receipt
-                receipt = await db.get(Receipt, receipt_id)
-                if not receipt:
-                    logger.error(f"Receipt {receipt_id} not found for OCR")
-                    return
-
-                if not ocr_result:
-                    receipt.status = "failed"
-                    evolution = get_evolution_client()
-                    await evolution.send_message(
-                        user_phone,
-                        "😔 Não consegui ler o cupom. Pode tirar uma foto mais nítida e de frente? 📸"
-                    )
-                    return
-
-                # Save OCR data to receipt
-                receipt.store_name_raw = ocr_result.get("store_name")
-                receipt.total_amount = ocr_result.get("total")
-                receipt.ocr_raw = str(ocr_result)
-                receipt.status = "processed"
-
-                if ocr_result.get("purchase_date"):
-                    try:
-                        receipt.purchased_at = datetime.fromisoformat(ocr_result["purchase_date"])
-                    except Exception:
-                        receipt.purchased_at = datetime.now(timezone.utc)
-
-                # Find store
-                if ocr_result.get("store_chain") and ocr_result["store_chain"] != "outro":
-                    store_result = await db.execute(
-                        select(Store)
-                        .where(Store.chain == ocr_result["store_chain"])
-                        .limit(1)
-                    )
-                    store = store_result.scalar_one_or_none()
-                    if store:
-                        receipt.store_id = store.id
-
-                # Save receipt items and update prices
-                items_saved = 0
-                price_updates = 0
-                items = ocr_result.get("items", [])
-
-                for item_data in items:
-                    if not item_data.get("product_name_raw"):
-                        continue
-
-                    ri = ReceiptItem(
-                        receipt_id=receipt.id,
-                        product_name_raw=item_data["product_name_raw"],
-                        quantity=item_data.get("quantity", 1),
-                        unit_price=item_data.get("unit_price"),
-                        total_price=item_data.get("total_price"),
-                    )
-
-                    # Try to match product for price crowdsourcing
-                    normalized = item_data.get("product_normalized", item_data["product_name_raw"])
-                    product = await find_product(db, normalized)
-                    if product and receipt.store_id and item_data.get("unit_price"):
-                        ri.product_id = product.id
-                        # Add price observation
-                        db.add(Price(
-                            product_id=product.id,
-                            store_id=receipt.store_id,
-                            price=item_data["unit_price"],
-                            source="ocr",
-                        ))
-                        price_updates += 1
-
-                    db.add(ri)
-                    items_saved += 1
-
-            # Send result to user
-            msg = _build_ocr_response(ocr_result, items_saved, price_updates, receipt)
-            evolution = get_evolution_client()
-            await evolution.send_message(user_phone, msg)
-
-        except Exception as e:
-            logger.error(f"Receipt OCR background task failed: {e}", exc_info=True)
-            evolution = get_evolution_client()
+        if not ocr_result:
             await evolution.send_message(
-                user_phone,
-                "😔 Tive um problema ao processar o cupom. Tenta de novo mais tarde!"
+                phone,
+                "😔 Não consegui ler o cupom. Pode tirar uma foto mais nítida e de frente? 📸"
             )
+            return
+
+        # Find or create receipt doc
+        receipts_ref = db.collection("users").document(phone).collection("receipts")
+        import asyncio
+        pending_docs = await asyncio.to_thread(
+            lambda: list(receipts_ref.where("status", "==", "pending").limit(1).stream())
+        )
+
+        receipt_id: str
+        if pending_docs:
+            receipt_id = pending_docs[0].id
+        else:
+            _, ref = await asyncio.to_thread(lambda: receipts_ref.add({"status": "pending"}))
+            receipt_id = ref.id
+
+        receipt_ref = receipts_ref.document(receipt_id)
+
+        # Parse OCR result
+        purchased_at = ocr_result.get("purchase_date") or datetime.now(timezone.utc).date().isoformat()
+        total = ocr_result.get("total")
+        store_name = ocr_result.get("store_name") or ""
+        store_chain = ocr_result.get("store_chain") or ""
+
+        # Find matching store
+        store_id = None
+        if store_chain and store_chain != "outro":
+            store_docs = await asyncio.to_thread(
+                lambda: list(db.collection("markets").where("chain", "==", store_chain).limit(1).stream())
+            )
+            if store_docs:
+                store_id = store_docs[0].id
+
+        # Update receipt document
+        receipt_update = {
+            "status": "processed",
+            "store_id": store_id,
+            "store_name_raw": store_name,
+            "store_chain": store_chain,
+            "total_amount": float(total) if total else None,
+            "purchased_at": purchased_at,
+            "ocr_raw": str(ocr_result),
+            "image_b64_tmp": None,  # clear large field
+        }
+        await asyncio.to_thread(lambda: receipt_ref.set(receipt_update, merge=True))
+
+        # Save items and update prices (batch)
+        items = ocr_result.get("items") or []
+        items_ref = receipt_ref.collection("items")
+        price_updates = 0
+        batch = db.batch()
+        batch_count = 0
+
+        for item_data in items:
+            if not item_data.get("product_name_raw"):
+                continue
+
+            item_doc = {
+                "product_name_raw": item_data["product_name_raw"],
+                "product_normalized": item_data.get("product_normalized"),
+                "category": item_data.get("category", "outros"),
+                "quantity": item_data.get("quantity", 1),
+                "unit_price": float(item_data["unit_price"]) if item_data.get("unit_price") else None,
+                "total_price": float(item_data["total_price"]) if item_data.get("total_price") else None,
+            }
+
+            # Match product and update latestPrices
+            normalized = item_data.get("product_normalized") or item_data["product_name_raw"]
+            product = await find_product(normalized)
+            if product and store_id and item_data.get("unit_price"):
+                item_doc["product_id"] = product.get("_id")
+                price_ref = (
+                    db.collection("products").document(product["_id"])
+                      .collection("latestPrices").document(store_id)
+                )
+                batch.set(price_ref, {
+                    "store_id": store_id,
+                    "price": float(item_data["unit_price"]),
+                    "observed_at": purchased_at,
+                    "source": "ocr",
+                }, merge=True)
+                price_updates += 1
+                batch_count += 1
+
+            new_item_ref = items_ref.document()
+            batch.set(new_item_ref, item_doc)
+            batch_count += 1
+
+            # Commit in batches of 400 (Firestore limit is 500)
+            if batch_count >= 400:
+                await asyncio.to_thread(batch.commit)
+                batch = db.batch()
+                batch_count = 0
+
+        if batch_count > 0:
+            await asyncio.to_thread(batch.commit)
+
+        # Send result to user
+        msg = _build_ocr_response(ocr_result, len(items), price_updates)
+        await evolution.send_message(phone, msg)
+
+    except Exception as e:
+        logger.error(f"OCR background task failed for {phone}: {e}", exc_info=True)
+        await evolution.send_message(
+            phone,
+            "😔 Tive um problema ao processar o cupom. Tenta de novo mais tarde!"
+        )
 
 
-def _build_ocr_response(ocr_result: dict, items_count: int, price_updates: int, receipt: Receipt) -> str:
-    """Build the WhatsApp message with receipt analysis results."""
-    store_name = ocr_result.get("store_name", "Mercado")
-    total = ocr_result.get("total", 0)
-    date_str = ocr_result.get("purchase_date", "")
+def _build_ocr_response(ocr_result: dict, items_count: int, price_updates: int) -> str:
+    store_name = ocr_result.get("store_name") or "Mercado"
+    total = ocr_result.get("total")
+    date_str = ocr_result.get("purchase_date") or datetime.now().strftime("%d/%m/%Y")
 
-    if date_str:
-        try:
-            dt = datetime.fromisoformat(date_str)
-            date_formatted = dt.strftime("%d/%m/%Y")
-        except Exception:
-            date_formatted = date_str
-    else:
-        date_formatted = datetime.now().strftime("%d/%m/%Y")
+    try:
+        from datetime import datetime as dt
+        date_formatted = dt.fromisoformat(date_str).strftime("%d/%m/%Y")
+    except Exception:
+        date_formatted = date_str
 
     lines = [f"🧾 *{store_name.upper()}* — {date_formatted}\n"]
-
     if total:
         lines.append(f"💰 Total: *R$ {float(total):.2f}*")
-
     if items_count > 0:
         lines.append(f"📦 Itens processados: *{items_count}*")
-
     if price_updates > 0:
-        lines.append(f"✅ *{price_updates} preços atualizados* no banco de dados!")
-        lines.append("_Obrigado por contribuir!_ 💚")
+        lines.append(f"✅ *{price_updates} preços atualizados!* Obrigado por contribuir 💚")
 
     lines.append("\n_Manda_ *quanto gastei esse mês* _pra ver seu resumo!_ 📊")
     return "\n".join(lines)

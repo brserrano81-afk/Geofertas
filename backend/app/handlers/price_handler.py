@@ -1,199 +1,181 @@
 """
-Handles price lookup and brand comparison queries.
-Features 1 and 2 from the product spec.
+Handles price lookup and brand comparison — features 1 & 2.
+Queries Firestore collections: products, products/{id}/latestPrices, offers, markets.
 """
 import logging
-from decimal import Decimal
-from datetime import datetime, timedelta, timezone
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text
-from app.models.product import Product
-from app.models.store import Store
-from app.models.price import Price
-from app.models.offer import Offer
-from app.models.user import User
+from datetime import datetime, timezone
+from app.core.firebase import get_db, fs_query, fs_get
 
 logger = logging.getLogger(__name__)
 
 CATEGORY_EMOJI = {
-    "carnes": "🥩",
-    "mercearia": "🛒",
-    "bebidas": "🍺",
-    "laticinios": "🥛",
-    "padaria": "🍞",
-    "higiene": "🧴",
-    "limpeza": "🧹",
-    "hortifruti": "🥦",
+    "carnes": "🥩", "mercearia": "🛒", "bebidas": "🍺",
+    "laticinios": "🥛", "padaria": "🍞", "higiene": "🧴",
+    "limpeza": "🧹", "hortifruti": "🥦",
 }
+STALE_DAYS = 14
 
-STALE_DAYS = 14  # warn if price is older than this
 
-
-async def find_product(db: AsyncSession, product_query: str) -> Product | None:
-    """Fuzzy-match a product by name or alias using pg_trgm similarity."""
+async def find_product(product_query: str) -> dict | None:
+    """
+    Find a product by name or alias using Firestore.
+    1. Try array_contains on 'aliases' field
+    2. Try case-insensitive name match in code
+    """
     if not product_query:
         return None
 
+    db = get_db()
     query_lower = product_query.lower().strip()
 
-    # First try exact alias match
-    result = await db.execute(
-        select(Product).where(
-            func.lower(Product.name) == query_lower
-        )
+    # 1. Alias array-contains match (exact)
+    results = await fs_query(
+        db.collection("products").where("aliases", "array_contains", query_lower)
     )
-    product = result.scalar_one_or_none()
-    if product:
-        return product
+    if results:
+        return results[0]
 
-    # Try array contains for aliases
-    result = await db.execute(
-        select(Product).where(
-            Product.aliases.any(func.lower(text("aliases_elem")) == query_lower)
-        )
-    )
-
-    # Fallback: trigram similarity search
-    result = await db.execute(
-        text("""
-            SELECT id FROM products
-            WHERE similarity(lower(name), :q) > 0.2
-               OR :q = ANY(SELECT lower(a) FROM unnest(aliases) AS a)
-            ORDER BY similarity(lower(name), :q) DESC
-            LIMIT 1
-        """),
-        {"q": query_lower},
-    )
-    row = result.fetchone()
-    if row:
-        p = await db.get(Product, row[0])
-        return p
+    # 2. Fetch all products and do substring match in code (fallback)
+    all_products = await fs_query(db.collection("products"))
+    for p in all_products:
+        name = (p.get("name") or "").lower()
+        aliases = [a.lower() for a in (p.get("aliases") or [])]
+        if query_lower in name or name in query_lower:
+            return p
+        if any(query_lower in a or a in query_lower for a in aliases):
+            return p
 
     return None
 
 
-async def get_current_prices(
-    db: AsyncSession, product: Product, store_chain: str | None = None
-) -> list[dict]:
-    """Get the latest price for a product across all (or filtered) stores."""
-    # Subquery: latest price per (product, store)
-    subq = (
-        select(
-            Price.store_id,
-            func.max(Price.observed_at).label("latest_at"),
-        )
-        .where(Price.product_id == product.id)
-        .group_by(Price.store_id)
-        .subquery()
+async def get_current_prices(product: dict, store_chain: str | None = None) -> list[dict]:
+    """
+    Get latest price per store for a product.
+    Uses products/{id}/latestPrices subcollection (one doc per store_id).
+    Falls back to markets collection for store names.
+    """
+    db = get_db()
+    product_id = product.get("_id") or product.get("id", "")
+
+    # Fetch from latestPrices subcollection
+    price_docs = await fs_query(
+        db.collection("products").document(product_id).collection("latestPrices")
     )
 
-    stmt = (
-        select(Price, Store)
-        .join(subq, (Price.store_id == subq.c.store_id) & (Price.observed_at == subq.c.latest_at))
-        .join(Store, Price.store_id == Store.id)
-        .where(Store.active == True)
-    )
+    if not price_docs:
+        return []
 
-    if store_chain:
-        stmt = stmt.where(Store.chain == store_chain.lower())
-
-    result = await db.execute(stmt.order_by(Price.price.asc()))
-    rows = result.all()
+    # Load all markets once for name lookup
+    markets = await fs_query(db.collection("markets").where("active", "==", True))
+    market_map = {m.get("_id"): m for m in markets}
 
     prices = []
-    for price, store in rows:
-        age_days = (datetime.now(timezone.utc) - price.observed_at.replace(tzinfo=timezone.utc)).days
+    now = datetime.now(timezone.utc)
+
+    for p in price_docs:
+        store_id = p.get("store_id") or p.get("_id")
+        store = market_map.get(store_id) or {}
+        chain = store.get("chain", "")
+
+        if store_chain and chain.lower() != store_chain.lower():
+            continue
+
+        observed_raw = p.get("observed_at") or p.get("updatedAt")
+        age_days = 0
+        if observed_raw:
+            try:
+                if hasattr(observed_raw, "timestamp"):
+                    observed_dt = datetime.fromtimestamp(observed_raw.timestamp(), tz=timezone.utc)
+                else:
+                    observed_dt = datetime.fromisoformat(str(observed_raw).replace("Z", "+00:00"))
+                age_days = (now - observed_dt).days
+            except Exception:
+                pass
+
         prices.append({
-            "store_id": str(store.id),
-            "store_name": store.name,
-            "store_chain": store.chain,
-            "neighborhood": store.neighborhood,
-            "price": float(price.price),
-            "observed_at": price.observed_at.isoformat(),
+            "store_id": store_id,
+            "store_name": store.get("name", chain.title()),
+            "store_chain": chain,
+            "neighborhood": store.get("neighborhood", ""),
+            "price": float(p.get("price", 0)),
             "age_days": age_days,
             "is_stale": age_days > STALE_DAYS,
-            "source": price.source,
+            "source": p.get("source", "manual"),
         })
 
-    return prices
+    return sorted(prices, key=lambda x: x["price"])
 
 
-async def get_active_offers(db: AsyncSession, product: Product) -> list[dict]:
-    """Check if there are active promotional offers for a product."""
-    today = datetime.now(timezone.utc).date()
-    result = await db.execute(
-        select(Offer, Store)
-        .join(Store, Offer.store_id == Store.id)
-        .where(Offer.product_id == product.id)
-        .where(Offer.valid_until >= today)
-        .order_by(Offer.offer_price.asc())
-    )
-    rows = result.all()
+async def get_active_offers(product: dict) -> list[dict]:
+    """Get active promotional offers for a product from 'offers' collection."""
+    db = get_db()
+    product_id = product.get("_id") or product.get("id", "")
+    today_str = datetime.now(timezone.utc).date().isoformat()
 
-    return [
-        {
-            "store_name": store.name,
-            "store_chain": store.chain,
-            "offer_price": float(offer.offer_price),
-            "regular_price": float(offer.regular_price) if offer.regular_price else None,
-            "discount_pct": float(offer.discount_pct) if offer.discount_pct else None,
-            "valid_until": offer.valid_until.isoformat(),
-        }
-        for offer, store in rows
-    ]
+    # Try offers collection first, then ofertas_v2
+    for collection in ("offers", "ofertas_v2"):
+        try:
+            results = await fs_query(
+                db.collection(collection)
+                  .where("product_id", "==", product_id)
+                  .where("valid_until", ">=", today_str)
+                  .order_by("valid_until")
+                  .order_by("offer_price")
+                  .limit(5)
+            )
+            if results:
+                return results
+        except Exception:
+            continue
+
+    return []
 
 
-def format_price_response(
-    product: Product,
-    prices: list[dict],
-    offers: list[dict],
-    store_filter: str | None,
-    user: User,
+def _format_price_response(
+    product: dict, prices: list[dict], offers: list[dict], store_filter: str | None
 ) -> str:
-    """Build the WhatsApp-formatted price comparison message."""
-    emoji = CATEGORY_EMOJI.get(product.category or "", "🛒")
+    """Build WhatsApp-formatted price comparison message."""
+    category = product.get("category", "mercearia")
+    emoji = CATEGORY_EMOJI.get(category, "🛒")
+    name = product.get("name", "Produto").upper()
 
     if not prices:
         store_hint = f" no {store_filter.title()}" if store_filter else ""
         return (
-            f"{emoji} *{product.name.upper()}*\n\n"
-            f"Ainda não tenho preços{store_hint} cadastrados pra esse produto 😔\n\n"
+            f"{emoji} *{name}*\n\n"
+            f"Ainda não tenho preços{store_hint} cadastrados 😔\n\n"
             "Se souber o preço, me fala que eu registro! 🙏\n"
             "_Ex: café no Extrabom tá R$ 12,90_"
         )
 
-    best = prices[0]
-    worst = prices[-1]
+    lines = [f"{emoji} *{name}*\n"]
+    icons = ["🟢", "🟡", "🔴", "🔴", "🔴"]
 
-    lines = [f"{emoji} *{product.name.upper()}*\n"]
-
-    for i, p in enumerate(prices[:5]):  # max 5 stores
-        icon = "🟢" if i == 0 else ("🟡" if i == 1 else "🔴")
-        stale_warn = " ⚠️" if p["is_stale"] else ""
-        lines.append(f"{icon} *R$ {p['price']:.2f}* – {p['store_name']}{stale_warn}")
+    for i, p in enumerate(prices[:5]):
+        icon = icons[min(i, len(icons) - 1)]
+        warn = " ⚠️" if p["is_stale"] else ""
+        lines.append(f"{icon} *R$ {p['price']:.2f}* – {p['store_name']}{warn}")
 
     if len(prices) > 1:
-        savings = worst["price"] - best["price"]
+        savings = prices[-1]["price"] - prices[0]["price"]
         lines.append(f"\n💰 Você economiza: *R$ {savings:.2f}*")
 
-    # Highlight active offers
     if offers:
-        offer = offers[0]
-        disc = f" ({offer['discount_pct']:.0f}% off)" if offer.get("discount_pct") else ""
-        lines.append(f"\n🔥 *OFERTA:* R$ {offer['offer_price']:.2f} – {offer['store_name']}{disc}")
-        if offer.get("valid_until"):
-            lines.append(f"   _Válida até {offer['valid_until']}_")
+        o = offers[0]
+        disc = f" ({float(o.get('discount_pct', 0)):.0f}% off)" if o.get("discount_pct") else ""
+        store_name = o.get("store_name") or o.get("store_id", "")
+        lines.append(f"\n🔥 *OFERTA:* R$ {float(o.get('offer_price', 0)):.2f} – {store_name}{disc}")
+        if o.get("valid_until"):
+            lines.append(f"   _Válida até {o['valid_until']}_")
 
-    # Stale price warning
     if any(p["is_stale"] for p in prices):
         lines.append("\n⚠️ _Alguns preços podem estar desatualizados_")
 
     lines.append("\nQuer adicionar à sua lista? Manda _sim_ 👍")
-
     return "\n".join(lines)
 
 
-async def handle_price_lookup(entities: dict, user: User, db: AsyncSession) -> str:
+async def handle_price_lookup(entities: dict, user: dict, session: dict) -> str:
     """Main handler for price_lookup and price_compare intents."""
     product_query = entities.get("product_normalized") or entities.get("product") or ""
     store_filter = entities.get("store_filter")
@@ -201,7 +183,7 @@ async def handle_price_lookup(entities: dict, user: User, db: AsyncSession) -> s
     if not product_query:
         return "De qual produto você quer saber o preço? 😊"
 
-    product = await find_product(db, product_query)
+    product = await find_product(product_query)
 
     if not product:
         return (
@@ -210,7 +192,15 @@ async def handle_price_lookup(entities: dict, user: User, db: AsyncSession) -> s
             f"_Ex: {product_query} no Extrabom tá R$ XX,XX_"
         )
 
-    prices = await get_current_prices(db, product, store_filter)
-    offers = await get_active_offers(db, product)
+    prices, offers = await _gather_price_data(product, store_filter)
+    return _format_price_response(product, prices, offers, store_filter)
 
-    return format_price_response(product, prices, offers, store_filter, user)
+
+async def _gather_price_data(product: dict, store_filter: str | None):
+    """Fetch prices and offers concurrently."""
+    import asyncio
+    prices, offers = await asyncio.gather(
+        get_current_prices(product, store_filter),
+        get_active_offers(product),
+    )
+    return prices, offers

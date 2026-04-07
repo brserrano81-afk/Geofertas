@@ -1,82 +1,107 @@
 """
-Manages user sessions and conversation state.
-Each user (identified by phone) has one active session.
+Manages user sessions and conversation state using Firestore.
+Users are identified by phone number (document ID in 'users' collection).
+Each user has a single 'session' sub-document with the rolling context.
 """
 import logging
 from datetime import datetime, timezone
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from app.models.user import User
-from app.models.session import ConversationSession
+from app.core.firebase import get_db, fs_get, fs_set, fs_update
 
 logger = logging.getLogger(__name__)
 
 MAX_CONTEXT_MESSAGES = 10
 
 
-async def get_or_create_user(db: AsyncSession, phone: str, name: str | None = None) -> User:
-    """Get existing user or create new one. Always updates last_seen_at."""
-    result = await db.execute(select(User).where(User.phone == phone))
-    user = result.scalar_one_or_none()
+def _users_ref():
+    return get_db().collection("users")
+
+
+async def get_or_create_user(phone: str, name: str | None = None) -> dict:
+    """
+    Get existing user or create a new one.
+    Returns a dict with user data (always includes 'phone').
+    """
+    ref = _users_ref().document(phone)
+    user = await fs_get(ref)
+
+    now = datetime.now(timezone.utc).isoformat()
 
     if user is None:
-        user = User(phone=phone, name=name)
-        db.add(user)
-        await db.flush()
+        user = {
+            "phone": phone,
+            "name": name or "",
+            "neighborhood": "",
+            "vehicle_type": "",
+            "fuel_price": None,
+            "preferences": {},
+            "consent_at": None,
+            "created_at": now,
+            "last_seen_at": now,
+            "active": True,
+        }
+        await fs_set(ref, user, merge=False)
         logger.info(f"New user created: {phone}")
     else:
-        user.last_seen_at = datetime.now(timezone.utc)
-        if name and not user.name:
-            user.name = name
+        updates: dict = {"last_seen_at": now}
+        if name and not user.get("name"):
+            updates["name"] = name
+        await fs_update(ref, updates)
+        user.update(updates)
 
     return user
 
 
-async def get_or_create_session(db: AsyncSession, user: User) -> ConversationSession:
-    """Get existing conversation session or create a fresh one."""
-    result = await db.execute(
-        select(ConversationSession).where(ConversationSession.user_id == user.id)
-    )
-    session = result.scalar_one_or_none()
+async def get_or_create_session(phone: str) -> dict:
+    """
+    Get or create the conversation session for a user.
+    Stored at users/{phone}/session (single document).
+    """
+    ref = _users_ref().document(phone).collection("session").document("current")
+    session = await fs_get(ref)
 
     if session is None:
-        session = ConversationSession(user_id=user.id, state="idle", context={"messages": []})
-        db.add(session)
-        await db.flush()
+        session = {
+            "state": "idle",
+            "context": {"messages": []},
+            "last_intent": None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await fs_set(ref, session, merge=False)
 
     return session
 
 
-async def add_message_to_context(
-    session: ConversationSession, role: str, text: str
-) -> None:
-    """Append a message to the rolling context window (max 10 messages)."""
-    ctx = session.context or {}
-    messages = ctx.get("messages", [])
+async def save_session(phone: str, session: dict) -> None:
+    """Persist session state back to Firestore."""
+    ref = _users_ref().document(phone).collection("session").document("current")
+    session["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await fs_set(ref, session, merge=True)
+
+
+async def add_message_to_context(session: dict, role: str, text: str) -> None:
+    """Append a message to the rolling context window (max 10 messages). Mutates session in-place."""
+    ctx = session.get("context") or {}
+    messages = ctx.get("messages") or []
     messages.append({
         "role": role,
         "text": text,
         "ts": datetime.now(timezone.utc).isoformat(),
     })
-    # Keep only last MAX_CONTEXT_MESSAGES
     ctx["messages"] = messages[-MAX_CONTEXT_MESSAGES:]
-    session.context = ctx
+    session["context"] = ctx
 
 
 async def update_session_state(
-    session: ConversationSession,
+    session: dict,
     state: str,
     intent: str | None = None,
     extra_context: dict | None = None,
 ) -> None:
-    """Update session state machine and optional context fields."""
-    session.state = state
+    """Update state machine fields on the session dict in-place."""
+    session["state"] = state
     if intent:
-        session.last_intent = intent
-
+        session["last_intent"] = intent
     if extra_context:
-        ctx = session.context or {}
+        ctx = session.get("context") or {}
         ctx.update(extra_context)
-        session.context = ctx
-
-    session.updated_at = datetime.now(timezone.utc)
+        session["context"] = ctx

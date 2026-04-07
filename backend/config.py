@@ -9,8 +9,9 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 
-    # Database (Supabase PostgreSQL)
-    database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/economizafacil"
+    # Firebase
+    firebase_credentials_path: str = "./firebase-credentials.json"
+    firebase_project_id: str = "geofertas-325b0"
 
     # Anthropic
     anthropic_api_key: str = ""
@@ -22,16 +23,13 @@ class Settings(BaseSettings):
     evolution_api_key: str = ""
     evolution_instance: str = "economizafacil"
 
-    # Redis
-    redis_url: str = "redis://localhost:6379/0"
+    # WhatsApp bot number (international, no +)
+    bot_phone: str = "5527998862440"
 
-    # WhatsApp bot number (international format, no +)
-    bot_phone: str = ""
-
-    # Webhook secret (to validate Evolution API requests)
+    # Webhook secret
     webhook_secret: str = ""
 
-    # Fuel price default (R$/litro) for trip calculator
+    # Fuel defaults for trip calculator
     default_fuel_price: float = 5.89
     default_fuel_efficiency: float = 10.0  # km/l
 

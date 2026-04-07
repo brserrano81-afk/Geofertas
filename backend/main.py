@@ -30,6 +30,11 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     logger.info(f"🚀 {settings.app_name} starting...")
 
+    # Initialize Firebase
+    from app.core.firebase import init_firebase
+    init_firebase(settings.firebase_credentials_path, settings.firebase_project_id)
+    logger.info(f"🔥 Firebase connected to project '{settings.firebase_project_id}'")
+
     # Ensure Evolution API instance exists
     from app.services.evolution_client import get_evolution_client
     evolution = get_evolution_client()

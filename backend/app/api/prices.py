@@ -1,77 +1,85 @@
 """REST API for price data — used by the React dashboard."""
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from app.core.database import get_db
-from app.models.product import Product
-from app.models.store import Store
-from app.models.price import Price
+import asyncio
+from fastapi import APIRouter
+from app.core.firebase import get_db, fs_query
 
 router = APIRouter(prefix="/api/v1/prices", tags=["prices"])
 
 
 @router.get("/products")
-async def list_products(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Product).order_by(Product.category, Product.name))
-    products = result.scalars().all()
+async def list_products():
+    db = get_db()
+    products = await fs_query(
+        db.collection("products").order_by("category").order_by("name")
+    )
     return [
         {
-            "id": str(p.id),
-            "name": p.name,
-            "category": p.category,
-            "unit": p.unit,
-            "emoji": p.emoji,
+            "id": p["_id"],
+            "name": p.get("name", ""),
+            "category": p.get("category", ""),
+            "unit": p.get("unit", ""),
+            "emoji": p.get("emoji", ""),
+            "aliases": p.get("aliases", []),
         }
         for p in products
     ]
 
 
 @router.get("/stores")
-async def list_stores(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Store).where(Store.active == True).order_by(Store.chain, Store.name)
+async def list_stores():
+    db = get_db()
+    stores = await fs_query(
+        db.collection("markets").where("active", "==", True)
     )
-    stores = result.scalars().all()
+    stores.sort(key=lambda s: (s.get("chain", ""), s.get("name", "")))
     return [
         {
-            "id": str(s.id),
-            "name": s.name,
-            "chain": s.chain,
-            "neighborhood": s.neighborhood,
-            "latitude": float(s.latitude) if s.latitude else None,
-            "longitude": float(s.longitude) if s.longitude else None,
+            "id": s["_id"],
+            "name": s.get("name", ""),
+            "chain": s.get("chain", ""),
+            "neighborhood": s.get("neighborhood", ""),
+            "latitude": s.get("latitude"),
+            "longitude": s.get("longitude"),
         }
         for s in stores
     ]
 
 
 @router.get("/compare/{product_id}")
-async def compare_product_prices(product_id: str, db: AsyncSession = Depends(get_db)):
+async def compare_product_prices(product_id: str):
     """Get latest price for a product across all stores."""
-    subq = (
-        select(Price.store_id, func.max(Price.observed_at).label("latest_at"))
-        .where(Price.product_id == product_id)
-        .group_by(Price.store_id)
-        .subquery()
-    )
-    stmt = (
-        select(Price, Store)
-        .join(subq, (Price.store_id == subq.c.store_id) & (Price.observed_at == subq.c.latest_at))
-        .join(Store, Price.store_id == Store.id)
-        .where(Store.active == True)
-        .order_by(Price.price.asc())
-    )
-    result = await db.execute(stmt)
-    rows = result.all()
+    db = get_db()
 
-    return [
-        {
-            "store_id": str(store.id),
-            "store_name": store.name,
-            "store_chain": store.chain,
-            "price": float(price.price),
-            "observed_at": price.observed_at.isoformat(),
-            "source": price.source,
-        }
-        for price, store in rows
-    ]
+    # Fetch all latestPrices subcollection entries for this product
+    prices = await fs_query(
+        db.collection("products").document(product_id).collection("latestPrices")
+    )
+
+    if not prices:
+        return []
+
+    # Fetch active stores for name lookup
+    stores = await fs_query(
+        db.collection("markets").where("active", "==", True)
+    )
+    store_map = {s["_id"]: s for s in stores}
+
+    results = []
+    for p in prices:
+        store_id = p.get("store_id") or p["_id"]
+        store = store_map.get(store_id, {})
+        if not store:
+            continue
+        results.append(
+            {
+                "store_id": store_id,
+                "store_name": store.get("name", store_id),
+                "store_chain": store.get("chain", ""),
+                "price": float(p["price"]) if p.get("price") else None,
+                "observed_at": p.get("observed_at", ""),
+                "source": p.get("source", "manual"),
+            }
+        )
+
+    results.sort(key=lambda x: x["price"] or 9999)
+    return results

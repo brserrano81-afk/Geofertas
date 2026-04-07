@@ -1,44 +1,62 @@
 """
-Manages shopping lists via WhatsApp.
-Features 6, 7, and 8 from the product spec.
+Shopping list management — features 6, 7 & 8.
+Stores lists under users/{phone}/lists/{list_id}/items/{item_id}.
 """
-import logging
 import secrets
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from app.models.shopping_list import ShoppingList, ListItem
-from app.models.user import User
-from app.models.session import ConversationSession
+import logging
+from datetime import datetime, timezone
+from app.core.firebase import get_db, fs_get, fs_set, fs_update, fs_delete, fs_query, fs_add
 
 logger = logging.getLogger(__name__)
 
 
-async def get_active_list(db: AsyncSession, user: User) -> ShoppingList | None:
-    result = await db.execute(
-        select(ShoppingList)
-        .where(ShoppingList.user_id == user.id)
-        .where(ShoppingList.status == "active")
-        .order_by(ShoppingList.created_at.desc())
+def _lists_ref(phone: str):
+    return get_db().collection("users").document(phone).collection("lists")
+
+
+async def get_active_list(phone: str) -> dict | None:
+    """Return the user's active list document, or None."""
+    results = await fs_query(
+        _lists_ref(phone)
+        .where("status", "==", "active")
+        .order_by("created_at", direction="DESCENDING")
         .limit(1)
     )
-    return result.scalar_one_or_none()
+    return results[0] if results else None
 
 
-async def get_or_create_active_list(db: AsyncSession, user: User) -> ShoppingList:
-    lst = await get_active_list(db, user)
-    if lst is None:
-        lst = ShoppingList(
-            user_id=user.id,
-            share_token=secrets.token_hex(16),
-        )
-        db.add(lst)
-        await db.flush()
-    return lst
+async def get_or_create_active_list(phone: str) -> dict:
+    """Return or create the user's active list."""
+    lst = await get_active_list(phone)
+    if lst:
+        return lst
+
+    now = datetime.now(timezone.utc).isoformat()
+    new_list = {
+        "user_phone": phone,
+        "name": "Minha Lista",
+        "status": "active",
+        "share_token": secrets.token_hex(16),
+        "created_at": now,
+        "updated_at": now,
+    }
+    list_id = await fs_add(_lists_ref(phone), new_list)
+    new_list["_id"] = list_id
+    return new_list
 
 
-async def handle_list_add(entities: dict, user: User, db: AsyncSession) -> str:
-    """Add one or multiple items to the active shopping list."""
-    # Support both single product and items_list
+async def _get_items(phone: str, list_id: str) -> list[dict]:
+    db = get_db()
+    return await fs_query(
+        db.collection("users").document(phone)
+          .collection("lists").document(list_id)
+          .collection("items")
+          .order_by("added_at")
+    )
+
+
+async def handle_list_add(entities: dict, user: dict, session: dict) -> str:
+    phone = user["phone"]
     items_raw: list[str] = []
 
     items_list = entities.get("items_list")
@@ -52,178 +70,163 @@ async def handle_list_add(entities: dict, user: User, db: AsyncSession) -> str:
     if not items_raw:
         return "O que você quer adicionar na lista? 🛒\n_Ex: add arroz, feijão e café_"
 
-    lst = await get_or_create_active_list(db, user)
+    lst = await get_or_create_active_list(phone)
+    list_id = lst["_id"]
 
-    # Check for duplicates
-    result = await db.execute(
-        select(ListItem).where(ListItem.list_id == lst.id)
+    existing_items = await _get_items(phone, list_id)
+    existing_names = {i["product_name_raw"].lower() for i in existing_items}
+
+    db = get_db()
+    items_ref = (
+        db.collection("users").document(phone)
+          .collection("lists").document(list_id)
+          .collection("items")
     )
-    existing = {item.product_name_raw.lower() for item in result.scalars().all()}
 
-    added = []
-    skipped = []
+    added, skipped = [], []
     for item_name in items_raw:
-        if item_name.lower() in existing:
+        if item_name.lower() in existing_names:
             skipped.append(item_name)
         else:
-            quantity = entities.get("quantity")
-            unit = entities.get("unit")
-            db.add(ListItem(
-                list_id=lst.id,
-                product_name_raw=item_name,
-                quantity=quantity or 1,
-                unit=unit,
-            ))
+            await fs_add(items_ref, {
+                "product_name_raw": item_name,
+                "quantity": entities.get("quantity") or 1,
+                "unit": entities.get("unit") or "",
+                "checked": False,
+                "added_at": datetime.now(timezone.utc).isoformat(),
+            })
             added.append(item_name)
 
     if not added:
         return f"{'Esses itens já estão' if len(skipped) > 1 else 'Esse item já está'} na sua lista! 😊\n_Manda_ *minha lista* _pra ver tudo._"
 
-    await db.flush()
-
     lines = ["✅ *Adicionado à sua lista:*"]
     for item in added:
         lines.append(f"• {item.title()}")
-
     if skipped:
         lines.append(f"\n_(já tinha: {', '.join(skipped)})_")
-
     lines.append("\nManda _minha lista_ pra ver tudo 🛒")
     return "\n".join(lines)
 
 
-async def handle_list_view(user: User, db: AsyncSession) -> str:
-    """Show all items in the active shopping list."""
-    lst = await get_active_list(db, user)
+async def handle_list_view(user: dict, session: dict) -> str:
+    phone = user["phone"]
+    lst = await get_active_list(phone)
 
-    if lst is None:
-        return (
-            "Sua lista está vazia 📋\n\n"
-            "Adiciona produtos assim:\n"
-            "_add arroz, feijão e café_ 🛒"
-        )
+    if not lst:
+        return "Sua lista está vazia 📋\n\n_add arroz, feijão e café_ 🛒"
 
-    result = await db.execute(
-        select(ListItem)
-        .where(ListItem.list_id == lst.id)
-        .order_by(ListItem.added_at.asc())
-    )
-    items = result.scalars().all()
+    items = await _get_items(phone, lst["_id"])
 
     if not items:
-        return (
-            "Sua lista está vazia 📋\n\n"
-            "_add arroz, feijão e café_ 🛒"
-        )
+        return "Sua lista está vazia 📋\n\n_add arroz, feijão e café_ 🛒"
 
     lines = [f"🛒 *Sua lista* ({len(items)} {'item' if len(items) == 1 else 'itens'}):\n"]
     for i, item in enumerate(items, 1):
-        check = "✅" if item.checked else "⬜"
-        qty = f" {item.quantity:.0f}" if item.quantity and item.quantity != 1 else ""
-        unit = f"{item.unit}" if item.unit else ""
-        lines.append(f"{check} {i}. {item.product_name_raw.title()}{qty}{unit}")
+        check = "✅" if item.get("checked") else "⬜"
+        qty = item.get("quantity", 1)
+        qty_str = f" {float(qty):.0f}" if qty and float(qty) != 1 else ""
+        unit_str = f"{item.get('unit', '')}" if item.get("unit") else ""
+        lines.append(f"{check} {i}. {item['product_name_raw'].title()}{qty_str}{unit_str}")
 
     lines.append("\n_onde comprar minha lista_ — ver onde é mais barato 🏪")
     return "\n".join(lines)
 
 
-async def handle_list_remove(
-    entities: dict, user: User, session: ConversationSession, db: AsyncSession
-) -> str:
-    """Remove an item from the shopping list."""
-    lst = await get_active_list(db, user)
-    if lst is None:
+async def handle_list_remove(entities: dict, user: dict, session: dict) -> str:
+    phone = user["phone"]
+    lst = await get_active_list(phone)
+    if not lst:
         return "Sua lista está vazia! 📋"
 
-    product_query = entities.get("product_normalized") or entities.get("product") or ""
-
-    # If no product specified but last action was list_add, remove that last item
-    if not product_query:
-        ctx = session.context or {}
-        product_query = ctx.get("last_added_item", "")
+    product_query = (
+        entities.get("product_normalized")
+        or entities.get("product")
+        or (session.get("context") or {}).get("last_added_item", "")
+    )
 
     if not product_query:
         return "Qual item você quer tirar da lista?\n_Ex: tira o café_"
 
-    result = await db.execute(
-        select(ListItem)
-        .where(ListItem.list_id == lst.id)
-        .where(ListItem.product_name_raw.ilike(f"%{product_query}%"))
-        .limit(1)
+    items = await _get_items(phone, lst["_id"])
+    matched = next(
+        (i for i in items if product_query.lower() in i["product_name_raw"].lower()),
+        None
     )
-    item = result.scalar_one_or_none()
 
-    if item is None:
+    if not matched:
         return f"Não achei *{product_query}* na sua lista 🤔\nManda _minha lista_ pra ver o que tem."
 
-    await db.delete(item)
-    return f"✅ *{item.product_name_raw.title()}* removido da lista!\n\nManda _minha lista_ pra ver o que ficou 🛒"
+    db = get_db()
+    item_ref = (
+        db.collection("users").document(phone)
+          .collection("lists").document(lst["_id"])
+          .collection("items").document(matched["_id"])
+    )
+    await fs_delete(item_ref)
+    return f"✅ *{matched['product_name_raw'].title()}* removido!\n\nManda _minha lista_ pra ver o que ficou 🛒"
 
 
-async def handle_list_clear(user: User, db: AsyncSession) -> str:
-    """Clear/reset the active shopping list."""
-    lst = await get_active_list(db, user)
-    if lst is None:
+async def handle_list_clear(user: dict, session: dict) -> str:
+    phone = user["phone"]
+    lst = await get_active_list(phone)
+    if not lst:
         return "Sua lista já está vazia! 📋"
 
-    # Archive current list and start fresh
-    lst.status = "archived"
-
+    db = get_db()
+    list_ref = (
+        db.collection("users").document(phone)
+          .collection("lists").document(lst["_id"])
+    )
+    await fs_update(list_ref, {"status": "archived"})
     return "🗑️ Lista apagada!\n\nBora montar uma nova? Manda os itens 🛒\n_Ex: add arroz, feijão e leite_"
 
 
-async def handle_list_optimize(user: User, db: AsyncSession) -> str:
-    """Find the cheapest store(s) to buy everything on the list."""
+async def handle_list_optimize(user: dict, session: dict) -> str:
+    """Find cheapest store combination for the entire list."""
     from app.handlers.price_handler import find_product, get_current_prices
 
-    lst = await get_active_list(db, user)
-    if lst is None:
+    phone = user["phone"]
+    lst = await get_active_list(phone)
+    if not lst:
         return "Sua lista está vazia! Adiciona produtos primeiro 🛒"
 
-    result = await db.execute(
-        select(ListItem).where(ListItem.list_id == lst.id)
-    )
-    items = result.scalars().all()
-
+    items = await _get_items(phone, lst["_id"])
     if not items:
         return "Sua lista está vazia! Adiciona produtos primeiro 🛒"
 
-    # For each item, get prices at each store
     store_totals: dict[str, float] = {}
     store_names: dict[str, str] = {}
     found_count = 0
 
     for item in items:
-        product = await find_product(db, item.product_name_raw)
+        product = await find_product(item["product_name_raw"])
         if not product:
             continue
         found_count += 1
-        prices = await get_current_prices(db, product)
+        prices = await get_current_prices(product)
         for p in prices:
             chain = p["store_chain"]
-            if chain not in store_totals:
-                store_totals[chain] = 0.0
-                store_names[chain] = p["store_name"]
-            store_totals[chain] += p["price"] * float(item.quantity or 1)
+            qty = float(item.get("quantity") or 1)
+            store_totals[chain] = store_totals.get(chain, 0.0) + p["price"] * qty
+            store_names[chain] = p["store_name"]
 
     if not store_totals:
         return (
-            f"Não encontrei preços suficientes para os {len(items)} itens da sua lista 😔\n\n"
+            f"Não encontrei preços suficientes para os {len(items)} itens 😔\n\n"
             "Tente escanear um cupom fiscal para alimentar os preços! 📸"
         )
 
     sorted_stores = sorted(store_totals.items(), key=lambda x: x[1])
     medals = ["1️⃣", "2️⃣", "3️⃣"]
+    lines = [f"🛒 *Melhor mercado pra sua lista* ({found_count}/{len(items)} itens)\n"]
 
-    lines = [f"🛒 *Melhor mercado pra sua lista* ({found_count}/{len(items)} itens com preço)\n"]
     for i, (chain, total) in enumerate(sorted_stores[:3]):
         name = store_names.get(chain, chain.title())
         lines.append(f"{medals[i]} {name} — *R$ {total:.2f}*")
 
     if len(sorted_stores) >= 2:
-        best_total = sorted_stores[0][1]
-        worst_total = sorted_stores[-1][1]
-        savings = worst_total - best_total
+        savings = sorted_stores[-1][1] - sorted_stores[0][1]
         best_name = store_names.get(sorted_stores[0][0], "")
         lines.append(f"\n💰 Indo no *{best_name}* você economiza *R$ {savings:.2f}*!")
 
@@ -235,37 +238,24 @@ async def handle_list_optimize(user: User, db: AsyncSession) -> str:
     return "\n".join(lines)
 
 
-async def handle_list_share(user: User, db: AsyncSession) -> str:
-    """Generate a shareable link for the shopping list."""
-    from config import get_settings
-    settings = get_settings()
-
-    lst = await get_active_list(db, user)
-    if lst is None:
+async def handle_list_share(user: dict, session: dict) -> str:
+    phone = user["phone"]
+    lst = await get_active_list(phone)
+    if not lst:
         return "Sua lista está vazia! Adiciona produtos primeiro 🛒"
 
-    result = await db.execute(
-        select(ListItem).where(ListItem.list_id == lst.id)
-    )
-    items = result.scalars().all()
-
+    items = await _get_items(phone, lst["_id"])
     if not items:
         return "Sua lista está vazia! Adiciona produtos primeiro 🛒"
 
-    # Ensure share token exists
-    if not lst.share_token:
-        lst.share_token = secrets.token_hex(16)
-        await db.flush()
-
-    # Build item preview
-    item_lines = "\n".join(f"• {item.product_name_raw.title()}" for item in items[:8])
+    item_lines = "\n".join(f"• {i['product_name_raw'].title()}" for i in items[:8])
     if len(items) > 8:
         item_lines += f"\n... e mais {len(items) - 8}"
 
+    token = lst.get("share_token", lst["_id"][:8])
     return (
         f"📤 *Compartilhe sua lista:*\n\n"
         f"{item_lines}\n\n"
-        f"🔗 Link: _[abrir no app para compartilhar]_\n\n"
-        f"_Token: {lst.share_token[:8]}..._\n"
-        f"Mande o link pelo WhatsApp para a família! 💚"
+        f"🔗 _Token: {token[:8]}..._\n"
+        f"Mande esse token pelo WhatsApp pra família! 💚"
     )

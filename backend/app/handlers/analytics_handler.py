@@ -1,15 +1,10 @@
 """
-Spending analytics handler.
-Feature 10 from the product spec.
+Spending analytics — feature 10.
+Uses users/{phone}/receipts and integration_events collections.
 """
 import logging
 from datetime import datetime, timezone
-from calendar import month_name
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from app.models.analytics_event import AnalyticsEvent
-from app.models.receipt import Receipt, ReceiptItem
-from app.models.user import User
+from app.core.firebase import get_db, fs_query
 
 logger = logging.getLogger(__name__)
 
@@ -20,66 +15,74 @@ MONTH_PT = {
 }
 
 
-async def handle_analytics(entities: dict, user: User, db: AsyncSession) -> str:
-    """Show spending summary for current or specified month."""
+async def handle_analytics(entities: dict, user: dict, session: dict) -> str:
+    phone = user["phone"]
     now = datetime.now(timezone.utc)
-    month = now.month
-    year = now.year
+    month_name = MONTH_PT[now.month]
 
-    # Query receipts for the month
-    result = await db.execute(
-        select(Receipt)
-        .where(Receipt.user_id == user.id)
-        .where(Receipt.status == "processed")
-        .where(func.extract("month", Receipt.purchased_at) == month)
-        .where(func.extract("year", Receipt.purchased_at) == year)
-        .order_by(Receipt.purchased_at.desc())
-    )
-    receipts = result.scalars().all()
+    # Build month start/end strings for date filtering
+    month_start = f"{now.year}-{now.month:02d}-01"
+    if now.month == 12:
+        month_end = f"{now.year + 1}-01-01"
+    else:
+        month_end = f"{now.year}-{now.month + 1:02d}-01"
+
+    db = get_db()
+
+    # Fetch processed receipts for this month
+    try:
+        receipts = await fs_query(
+            db.collection("users").document(phone)
+              .collection("receipts")
+              .where("status", "==", "processed")
+              .where("purchased_at", ">=", month_start)
+              .where("purchased_at", "<", month_end)
+              .order_by("purchased_at", direction="DESCENDING")
+        )
+    except Exception:
+        receipts = []
 
     if not receipts:
         return (
-            f"📊 Ainda não tenho cupons do *{MONTH_PT[month]}* seus registrados 😔\n\n"
+            f"📊 Ainda não tenho cupons do *{month_name}* seus registrados 😔\n\n"
             "Me manda a foto do cupom depois das compras que eu analiso pra você! 📸"
         )
 
-    total = sum(float(r.total_amount or 0) for r in receipts)
-
-    # Category breakdown from receipt items
-    cat_result = await db.execute(
-        select(ReceiptItem)
-        .where(ReceiptItem.receipt_id.in_([r.id for r in receipts]))
-    )
-    items = cat_result.scalars().all()
-
-    # Simple category aggregation
-    category_totals: dict[str, float] = {}
-    for item in items:
-        if item.total_price:
-            cat = "outros"  # TODO: join with products for category
-            category_totals[cat] = category_totals.get(cat, 0) + float(item.total_price)
-
-    lines = [f"📊 *Seus gastos — {MONTH_PT[month]} {year}*\n"]
+    total = sum(float(r.get("total_amount") or 0) for r in receipts)
+    lines = [f"📊 *Seus gastos — {month_name} {now.year}*\n"]
     lines.append(f"💰 Total: *R$ {total:.2f}*")
     lines.append(f"🛒 Compras no mês: *{len(receipts)} {'vez' if len(receipts) == 1 else 'vezes'}*")
 
-    if category_totals:
-        lines.append("\n*Maiores gastos:*")
-        for cat, val in sorted(category_totals.items(), key=lambda x: x[1], reverse=True)[:5]:
-            lines.append(f"• {cat.title()}: R$ {val:.2f}")
+    # Savings from integration_events
+    try:
+        events = await fs_query(
+            db.collection("integration_events")
+              .where("user_phone", "==", phone)
+              .where("created_at", ">=", month_start)
+              .where("created_at", "<", month_end)
+        )
+        total_savings = sum(float(e.get("savings_amount") or 0) for e in events if e.get("savings_amount"))
+        if total_savings > 0:
+            lines.append(f"\n✅ *Economia estimada: R$ {total_savings:.2f}* 💚")
+    except Exception:
+        pass
 
-    # Savings from analytics events
-    savings_result = await db.execute(
-        select(func.sum(AnalyticsEvent.savings_amount))
-        .where(AnalyticsEvent.user_id == user.id)
-        .where(func.extract("month", AnalyticsEvent.created_at) == month)
-        .where(func.extract("year", AnalyticsEvent.created_at) == year)
-        .where(AnalyticsEvent.savings_amount.isnot(None))
-    )
-    total_savings = savings_result.scalar() or 0
-
-    if total_savings > 0:
-        lines.append(f"\n✅ *Economia estimada: R$ {float(total_savings):.2f}* 💚")
-
-    lines.append("\n_Quer detalhar por categoria? Me pergunta!_")
+    lines.append("\n_Quer detalhar mais? Me pergunta!_")
     return "\n".join(lines)
+
+
+async def log_event(phone: str, event_type: str, payload: dict = None, savings: float = None) -> None:
+    """Fire-and-forget analytics event logger."""
+    try:
+        db = get_db()
+        data = {
+            "user_phone": phone,
+            "event_type": event_type,
+            "payload": payload or {},
+            "savings_amount": savings,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        import asyncio
+        await asyncio.to_thread(lambda: db.collection("integration_events").add(data))
+    except Exception as e:
+        logger.debug(f"Failed to log event {event_type}: {e}")
