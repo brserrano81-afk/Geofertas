@@ -1,0 +1,112 @@
+[
+  {
+    "name": "Extrabom Jardim Camburi",
+    "chain": "extrabom",
+    "address": "Av. Adalberto Simão Nader, 1001, Jardim Camburi",
+    "neighborhood": "Jardim Camburi",
+    "city": "Vitória",
+    "state": "ES",
+    "latitude": -20.2694,
+    "longitude": -40.2967
+  },
+  {
+    "name": "Extrabom Bairro de Lourdes",
+    "chain": "extrabom",
+    "address": "Av. Leitão da Silva, 1645, Bairro de Lourdes",
+    "neighborhood": "Bairro de Lourdes",
+    "city": "Vitória",
+    "state": "ES",
+    "latitude": -20.3124,
+    "longitude": -40.3198
+  },
+  {
+    "name": "Extrabom Praia do Canto",
+    "chain": "extrabom",
+    "address": "Av. Saturnino de Brito, 515, Praia do Canto",
+    "neighborhood": "Praia do Canto",
+    "city": "Vitória",
+    "state": "ES",
+    "latitude": -20.2812,
+    "longitude": -40.3058
+  },
+  {
+    "name": "Extrabom Carapina",
+    "chain": "extrabom",
+    "address": "Av. Central, s/n, Carapina",
+    "neighborhood": "Carapina",
+    "city": "Serra",
+    "state": "ES",
+    "latitude": -20.1857,
+    "longitude": -40.2398
+  },
+  {
+    "name": "Extrabom Laranjeiras",
+    "chain": "extrabom",
+    "address": "Av. das Laranjeiras, 1120, Laranjeiras",
+    "neighborhood": "Laranjeiras",
+    "city": "Serra",
+    "state": "ES",
+    "latitude": -20.1334,
+    "longitude": -40.2702
+  },
+  {
+    "name": "Atacadão Serra",
+    "chain": "atacadao",
+    "address": "Rod. BR-101, km 266, Serra",
+    "neighborhood": "Serra",
+    "city": "Serra",
+    "state": "ES",
+    "latitude": -20.1246,
+    "longitude": -40.2812
+  },
+  {
+    "name": "Atacadão Cariacica",
+    "chain": "atacadao",
+    "address": "Av. Expedito Garcia, 1285, Campo Grande",
+    "neighborhood": "Campo Grande",
+    "city": "Cariacica",
+    "state": "ES",
+    "latitude": -20.2618,
+    "longitude": -40.4124
+  },
+  {
+    "name": "Atacadão Vila Velha",
+    "chain": "atacadao",
+    "address": "Av. Carlos Lindenberg, 2355, Vila Velha",
+    "neighborhood": "Centro",
+    "city": "Vila Velha",
+    "state": "ES",
+    "latitude": -20.3501,
+    "longitude": -40.2912
+  },
+  {
+    "name": "Carone Jardim da Penha",
+    "chain": "carone",
+    "address": "Av. Dante Michelini, 800, Jardim da Penha",
+    "neighborhood": "Jardim da Penha",
+    "city": "Vitória",
+    "state": "ES",
+    "latitude": -20.2734,
+    "longitude": -40.2845
+  },
+  {
+    "name": "Carone Bento Ferreira",
+    "chain": "carone",
+    "address": "R. Sete de Setembro, 100, Bento Ferreira",
+    "neighborhood": "Bento Ferreira",
+    "city": "Vitória",
+    "state": "ES",
+    "latitude": -20.3012,
+    "longitude": -40.3156
+  },
+  {
+    "name": "Carone Serra",
+    "chain": "carone",
+    "address": "Av. Talma Rodrigues Ribeiro, 5900, Serra",
+    "neighborhood": "Serra",
+    "city": "Serra",
+    "state": "ES",
+    "latitude": -20.1589,
+    "longitude": -40.2634
+  }
+]
