@@ -480,9 +480,20 @@ app.post('/webhook/whatsapp-entrada/:event', async (req, res) => {
     }
 });
 
-const PORT = Number(process.env.API_PORT || 3001);
+const PORT =
+    Number(process.env.PORT) ||
+    Number(process.env.API_PORT) ||
+    3001;
+
+app.get('/', (_req, res) => {
+    res.status(200).send('Geofertas API online');
+});
+
 app.listen(PORT, () => {
-    const firebaseSource = process.env.VITE_FIREBASE_PROJECT_ID ? '.env' : 'fallback-local';
+    const firebaseSource = process.env.VITE_FIREBASE_PROJECT_ID
+        ? '.env'
+        : 'fallback-local';
+
     console.log(`[Geofertas API] Proxy + webhook server running on port ${PORT}`);
     console.log(`[Geofertas API] Firebase config source: ${firebaseSource}`);
 });
