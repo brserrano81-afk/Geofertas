@@ -1,55 +1,23 @@
-import { useNavigate } from "react-router-dom";
+import type { CSSProperties } from "react";
+
+const WHATSAPP_URL =
+  import.meta.env.VITE_WHATSAPP_ENTRY_URL ||
+  "https://api.whatsapp.com/send?text=Oi%2C%20quero%20economizar%20na%20compra";
+
+const cardStyle: CSSProperties = {
+  width: "100%",
+  textAlign: "left",
+  background: "white",
+  border: "1px solid rgba(0,0,0,0.10)",
+  borderRadius: 14,
+  padding: 14,
+  display: "flex",
+  gap: 12,
+  alignItems: "flex-start",
+  boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
+};
 
 export default function Home() {
-  const navigate = useNavigate();
-
-  const Card = ({
-    title,
-    subtitle,
-    icon,
-    onClick,
-  }: {
-    title: string;
-    subtitle: string;
-    icon: string;
-    onClick?: () => void;
-  }) => (
-    <button
-      onClick={onClick}
-      style={{
-        width: "100%",
-        textAlign: "left",
-        background: "white",
-        border: "1px solid rgba(0,0,0,0.10)",
-        borderRadius: 14,
-        padding: 14,
-        display: "flex",
-        gap: 12,
-        alignItems: "center",
-        cursor: onClick ? "pointer" : "default",
-        boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
-      }}
-    >
-      <div
-        style={{
-          width: 40,
-          height: 40,
-          borderRadius: 999,
-          background: "rgba(11,95,85,0.10)",
-          display: "grid",
-          placeItems: "center",
-          fontSize: 18,
-        }}
-      >
-        {icon}
-      </div>
-      <div>
-        <div style={{ fontWeight: 800 }}>{title}</div>
-        <div style={{ fontSize: 12, color: "rgba(0,0,0,0.65)" }}>{subtitle}</div>
-      </div>
-    </button>
-  );
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div
@@ -59,9 +27,10 @@ export default function Home() {
           borderRadius: 14,
           padding: 14,
           fontWeight: 700,
+          lineHeight: 1.4,
         }}
       >
-        👋 Olá! Eu vou te ajudar a economizar no mercado.
+        Economiza Facil agora opera em modo WhatsApp-first.
       </div>
 
       <div
@@ -69,39 +38,40 @@ export default function Home() {
           background: "white",
           border: "1px solid rgba(0,0,0,0.08)",
           borderRadius: 14,
-          padding: 12,
-          fontWeight: 700,
+          padding: 14,
         }}
       >
-        O que você quer fazer hoje?
+        <div style={{ fontWeight: 800, marginBottom: 8 }}>Como usar</div>
+        <div style={{ fontSize: 14, color: "rgba(0,0,0,0.72)", lineHeight: 1.5 }}>
+          Consultas de preco, lista de compras, compartilhamento e conversa com a IA
+          acontecem no WhatsApp. A web nao e mais canal principal do produto.
+        </div>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <Card
-          title="Consultar preço"
-          subtitle="Digite o produto e compare rapidamente."
-          icon="🔎"
-        />
-        <Card
-          title="Criar lista"
-          subtitle="Lista simples pra não esquecer nada."
-          icon="🧾"
-        />
-        <Card
-          title="Cupom Escanear"
-          subtitle="Enviar cupom e organizar gastos."
-          icon="📷"
-        />
-        <Card
-          title="Ver perto"
-          subtitle="Achar ofertas próximas de você."
-          icon="📍"
-        />
+      <div style={cardStyle}>
+        <div style={{ fontSize: 18 }}>1</div>
+        <div>
+          <div style={{ fontWeight: 800 }}>Abra o WhatsApp</div>
+          <div style={{ fontSize: 13, color: "rgba(0,0,0,0.65)" }}>
+            Envie uma mensagem para iniciar o atendimento e montar sua compra por la.
+          </div>
+        </div>
       </div>
 
-      {/* Ponto claro de ir para Análises */}
-      <button
-        onClick={() => navigate("/analises")}
+      <div style={cardStyle}>
+        <div style={{ fontSize: 18 }}>2</div>
+        <div>
+          <div style={{ fontWeight: 800 }}>Mande texto, audio, foto ou localizacao</div>
+          <div style={{ fontSize: 13, color: "rgba(0,0,0,0.65)" }}>
+            O fluxo principal foi desenhado para conversa curta, objetiva e mobile.
+          </div>
+        </div>
+      </div>
+
+      <a
+        href={WHATSAPP_URL}
+        target="_blank"
+        rel="noreferrer"
         style={{
           marginTop: 6,
           width: "100%",
@@ -112,13 +82,15 @@ export default function Home() {
           color: "white",
           fontWeight: 800,
           cursor: "pointer",
+          textAlign: "center",
+          textDecoration: "none",
         }}
       >
-        Ir para Análises →
-      </button>
+        Abrir no WhatsApp
+      </a>
 
-      <div style={{ fontSize: 12, color: "rgba(0,0,0,0.55)", marginTop: 4 }}>
-        Dica: você pode usar tudo pelo WhatsApp.
+      <div style={{ fontSize: 12, color: "rgba(0,0,0,0.55)", marginTop: 4, lineHeight: 1.5 }}>
+        Se quiser, podemos trocar esse link pelo numero oficial assim que ele estiver definido.
       </div>
     </div>
   );

@@ -1,0 +1,11 @@
+## codex/github-hygiene...origin/codex/github-hygiene
+ M package-lock.json
+ M package.json
+ M src/pages/Analises.tsx
+?? api/
+?? scripts/
+?? src/app/
+?? src/scripts/
+?? src/services/
+?? src/whatsapp/
+?? src/workers/
