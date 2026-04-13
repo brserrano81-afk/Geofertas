@@ -16,6 +16,12 @@ import { aiService } from '../services/AiService';
 
 console.log('🤖 Iniciando Economiza Fácil - WhatsApp Bridge (Alpha 1)...');
 
+if (process.env.ENABLE_LEGACY_WHATSAPP_BRIDGE !== 'true') {
+    console.error('[WhatsappBridge] Execucao bloqueada. Use o pipeline oficial Evolution webhook -> worker em nuvem.');
+    console.error('[WhatsappBridge] Para rodar o bridge legado local, defina ENABLE_LEGACY_WHATSAPP_BRIDGE=true conscientemente.');
+    process.exit(1);
+}
+
 const client = new Client({
     authStrategy: new LocalAuth({ dataPath: './whatsapp-session' }),
     puppeteer: {

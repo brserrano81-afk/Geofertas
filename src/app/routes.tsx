@@ -3,12 +3,25 @@ import Layout from "./Layout";
 
 import Home from "../pages/Home";
 import Analises from "../pages/Analises";
+import AdminHome from "../pages/admin/AdminHome";
+import AdminOffers from "../pages/admin/AdminOffers";
+import AdminMarkets from "../pages/admin/AdminMarkets";
+import AdminCampaigns from "../pages/admin/AdminCampaigns";
+import AdminLogin from "../pages/admin/AdminLogin";
+import AdminRouteGuard from "../pages/admin/AdminRouteGuard";
 
 export default function AppRoutes() {
   return (
     <Routes>
       <Route element={<Layout />}>
         <Route path="/" element={<Home />} />
+        <Route path="/admin/login" element={<AdminLogin />} />
+        <Route element={<AdminRouteGuard />}>
+          <Route path="/admin" element={<AdminHome />} />
+          <Route path="/admin/offers" element={<AdminOffers />} />
+          <Route path="/admin/markets" element={<AdminMarkets />} />
+          <Route path="/admin/campaigns" element={<AdminCampaigns />} />
+        </Route>
         <Route path="/analises" element={<Analises />} />
         <Route path="/criar-lista" element={<Navigate to="/" replace />} />
         <Route path="/consultar-preco" element={<Navigate to="/" replace />} />

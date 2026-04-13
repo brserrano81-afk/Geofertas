@@ -20,29 +20,42 @@ const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, '..');
 const WEBHOOK_LOG_DIR = path.join(ROOT_DIR, 'logs', 'evolution-webhooks');
 
-const fallbackFirebaseConfig = {
-    apiKey: 'AIzaSyDVW8oK9luHCFZhRl28XjcoZlDgeVA2y0Y',
-    authDomain: 'geofertas-325b0.firebaseapp.com',
-    projectId: 'geofertas-325b0',
-    storageBucket: 'geofertas-325b0.firebasestorage.app',
-    messagingSenderId: '333137067503',
-    appId: '1:333137067503:web:f2ad402d55e33a0c60ca1a',
-};
+function readEnv(...names) {
+    for (const name of names) {
+        const value = process.env[name];
+        if (typeof value === 'string' && value.trim()) {
+            return value.trim();
+        }
+    }
 
-const firebaseConfig = {
-    apiKey: process.env.VITE_FIREBASE_API_KEY || fallbackFirebaseConfig.apiKey,
-    authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || fallbackFirebaseConfig.authDomain,
-    projectId: process.env.VITE_FIREBASE_PROJECT_ID || fallbackFirebaseConfig.projectId,
-    storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET || fallbackFirebaseConfig.storageBucket,
-    messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || fallbackFirebaseConfig.messagingSenderId,
-    appId: process.env.VITE_FIREBASE_APP_ID || fallbackFirebaseConfig.appId,
-};
+    return '';
+}
 
-const hasFirebaseConfig = Object.values(firebaseConfig).every(Boolean);
-const firebaseApp = hasFirebaseConfig
-    ? (getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig))
-    : null;
-const db = firebaseApp ? getFirestore(firebaseApp) : null;
+function requireFirebaseConfig() {
+    const firebaseConfig = {
+        apiKey: readEnv('FIREBASE_API_KEY', 'VITE_FIREBASE_API_KEY'),
+        authDomain: readEnv('FIREBASE_AUTH_DOMAIN', 'VITE_FIREBASE_AUTH_DOMAIN'),
+        projectId: readEnv('FIREBASE_PROJECT_ID', 'VITE_FIREBASE_PROJECT_ID'),
+        storageBucket: readEnv('FIREBASE_STORAGE_BUCKET', 'VITE_FIREBASE_STORAGE_BUCKET'),
+        messagingSenderId: readEnv('FIREBASE_MESSAGING_SENDER_ID', 'VITE_FIREBASE_MESSAGING_SENDER_ID'),
+        appId: readEnv('FIREBASE_APP_ID', 'VITE_FIREBASE_APP_ID'),
+    };
+
+    const missing = Object.entries(firebaseConfig)
+        .filter(([, value]) => !value)
+        .map(([key]) => key);
+
+    if (missing.length > 0) {
+        throw new Error(`[Geofertas API] Missing Firebase env vars: ${missing.join(', ')}`);
+    }
+
+    return firebaseConfig;
+}
+
+const firebaseConfig = requireFirebaseConfig();
+const firebaseApp = getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp);
+const ENABLE_FILE_LOGS = readEnv('ENABLE_FILE_LOGS').toLowerCase() === 'true';
 
 function nowIso() {
     return new Date().toISOString();
@@ -151,10 +164,6 @@ async function findExistingInboxMessage(normalizedEvent) {
 }
 
 async function persistPipelineAudit(normalizedEvent, extra = {}) {
-    if (!db) {
-        return;
-    }
-
     try {
         await addDoc(collection(db, 'integration_events'), {
             source: normalizedEvent.source,
@@ -178,10 +187,6 @@ async function persistPipelineAudit(normalizedEvent, extra = {}) {
 }
 
 async function enqueueInboundMessage(normalizedEvent) {
-    if (!db) {
-        return { inboxId: null, duplicate: false };
-    }
-
     const validation = validateNormalizedEvent(normalizedEvent);
     if (!validation.ok) {
         return { inboxId: null, duplicate: false, ignoredReason: validation.reason };
@@ -228,41 +233,40 @@ async function enqueueInboundMessage(normalizedEvent) {
 }
 
 async function persistEvolutionEvent(normalizedEvent, extra = {}) {
-    ensureWebhookLogDir();
+    let filePath = null;
 
-    const safeFileName = `${Date.now()}_${(normalizedEvent.event || 'event').replace(/[^a-zA-Z0-9_-]/g, '_')}.json`;
-    const filePath = path.join(WEBHOOK_LOG_DIR, safeFileName);
-    fs.writeFileSync(filePath, JSON.stringify(normalizedEvent, null, 2), 'utf8');
-
-    if (db) {
-        try {
-            await addDoc(collection(db, 'integration_events'), {
-                kind: 'webhook_event',
-                correlationId: normalizedEvent.correlationId,
-                messageId: normalizedEvent.messageId || null,
-                source: normalizedEvent.source,
-                event: normalizedEvent.event,
-                instance: normalizedEvent.instance,
-                remoteJid: normalizedEvent.remoteJid,
-                userId: normalizedEvent.userId,
-                fromMe: normalizedEvent.fromMe,
-                direction: normalizedEvent.direction,
-                messageType: normalizedEvent.messageType,
-                textPreview: normalizedEvent.textPreview,
-                payload: normalizedEvent.raw,
-                receivedAtIso: normalizedEvent.receivedAtIso,
-                createdAtIso: nowIso(),
-                createdAt: serverTimestamp(),
-                ...extra,
-            });
-        } catch (err) {
-            console.error('[EvolutionWebhook] Firestore persistence failed:', err.message);
-        }
-    } else {
-        console.warn('[EvolutionWebhook] Firebase config ausente no .env. Evento salvo apenas em arquivo local.');
+    if (ENABLE_FILE_LOGS) {
+        ensureWebhookLogDir();
+        const safeFileName = `${Date.now()}_${(normalizedEvent.event || 'event').replace(/[^a-zA-Z0-9_-]/g, '_')}.json`;
+        filePath = path.join(WEBHOOK_LOG_DIR, safeFileName);
+        fs.writeFileSync(filePath, JSON.stringify(normalizedEvent, null, 2), 'utf8');
     }
 
-    return filePath;
+    try {
+        await addDoc(collection(db, 'integration_events'), {
+            kind: 'webhook_event',
+            correlationId: normalizedEvent.correlationId,
+            messageId: normalizedEvent.messageId || null,
+            source: normalizedEvent.source,
+            event: normalizedEvent.event,
+            instance: normalizedEvent.instance,
+            remoteJid: normalizedEvent.remoteJid,
+            userId: normalizedEvent.userId,
+            fromMe: normalizedEvent.fromMe,
+            direction: normalizedEvent.direction,
+            messageType: normalizedEvent.messageType,
+            textPreview: normalizedEvent.textPreview,
+            payload: normalizedEvent.raw,
+            receivedAtIso: normalizedEvent.receivedAtIso,
+            createdAtIso: nowIso(),
+            createdAt: serverTimestamp(),
+            ...extra,
+        });
+    } catch (err) {
+        console.error('[EvolutionWebhook] Firestore persistence failed:', err.message);
+    }
+
+    return filePath || 'firestore-only';
 }
 
 app.get('/health', (_req, res) => {
@@ -490,10 +494,7 @@ app.get('/', (_req, res) => {
 });
 
 app.listen(PORT, () => {
-    const firebaseSource = process.env.VITE_FIREBASE_PROJECT_ID
-        ? '.env'
-        : 'fallback-local';
-
     console.log(`[Geofertas API] Proxy + webhook server running on port ${PORT}`);
-    console.log(`[Geofertas API] Firebase config source: ${firebaseSource}`);
+    console.log('[Geofertas API] Firebase config source: env');
+    console.log(`[Geofertas API] File webhook logs: ${ENABLE_FILE_LOGS ? 'enabled' : 'disabled'}`);
 });

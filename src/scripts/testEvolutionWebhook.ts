@@ -1,4 +1,5 @@
-const targetUrl = process.env.TEST_WEBHOOK_URL || 'http://127.0.0.1:3001/webhook/whatsapp-entrada';
+const apiBaseUrl = process.env.API_BASE_URL || process.env.TEST_API_BASE_URL || '';
+const targetUrl = process.env.TEST_WEBHOOK_URL || (apiBaseUrl ? `${apiBaseUrl.replace(/\/$/, '')}/webhook/whatsapp-entrada` : '');
 const remoteJid = process.env.TEST_REMOTE_JID || '5527998862440@s.whatsapp.net';
 const text = process.argv.slice(2).join(' ') || 'teste controlado economizafacil';
 
@@ -20,6 +21,10 @@ const payload = {
 };
 
 async function main() {
+    if (!targetUrl) {
+        throw new Error('Configure TEST_WEBHOOK_URL ou API_BASE_URL antes de testar o webhook.');
+    }
+
     console.log(`[testEvolutionWebhook] POST ${targetUrl}`);
     console.log(`[testEvolutionWebhook] Payload text: ${text}`);
 

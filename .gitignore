@@ -40,3 +40,4 @@ alpha1-snapshot.log
 *.njsproj
 *.sln
 *.sw?
+.vercel

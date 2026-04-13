@@ -12,6 +12,39 @@ interface PipelineResult {
     source?: 'sefaz' | 'vision' | 'qr' | 'price_tag';
 }
 
+function readRuntimeEnv(name: string): string {
+    try {
+        const viteValue = import.meta.env?.[name as keyof ImportMetaEnv];
+        if (typeof viteValue === 'string' && viteValue.trim()) {
+            return viteValue.trim();
+        }
+    } catch {
+        // ignore import.meta access outside Vite/browser
+    }
+
+    if (typeof process !== 'undefined') {
+        const processValue = process.env?.[name];
+        if (typeof processValue === 'string' && processValue.trim()) {
+            return processValue.trim();
+        }
+    }
+
+    return '';
+}
+
+function resolveApiBaseUrl(): string {
+    const configuredBaseUrl = readRuntimeEnv('VITE_API_BASE_URL') || readRuntimeEnv('API_BASE_URL');
+    if (configuredBaseUrl) {
+        return configuredBaseUrl.replace(/\/$/, '');
+    }
+
+    if (typeof window !== 'undefined' && window.location?.origin) {
+        return window.location.origin.replace(/\/$/, '');
+    }
+
+    throw new Error('API_BASE_URL not configured for SEFAZ proxy access.');
+}
+
 class IngestionPipeline {
     async processUserSubmission(input: string | Uint8Array): Promise<PipelineResult> {
         // Se for binário (imagem)
@@ -89,8 +122,7 @@ class IngestionPipeline {
     private async processSefazLink(url: string): Promise<PipelineResult> {
         console.log(`[IngestionPipeline] Processing SEFAZ link: ${url}`);
         try {
-            // Usar o proxy local para bypass CORS e WAF
-            const proxyUrl = `http://localhost:3001/proxy?url=${encodeURIComponent(url)}`;
+            const proxyUrl = `${resolveApiBaseUrl()}/proxy?url=${encodeURIComponent(url)}`;
             const response = await fetch(proxyUrl);
 
             if (!response.ok) {

@@ -1,71 +1,134 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { isAdminAuthenticated, logoutAdmin } from "../pages/admin/adminAuth";
 
-const navLinkStyle = (isActive: boolean) => ({
-  flex: 1,
-  textAlign: "center" as const,
-  padding: "10px 12px",
-  borderRadius: 12,
-  textDecoration: "none",
-  fontWeight: 700,
-  color: isActive ? "white" : "#0b5f55",
-  background: isActive ? "#0b5f55" : "rgba(11,95,85,0.08)",
-});
+const WHATSAPP_URL =
+  import.meta.env.VITE_WHATSAPP_ENTRY_URL ||
+  "https://api.whatsapp.com/send?text=Oi%2C%20quero%20economizar%20nas%20compras%20com%20o%20Economiza%20Facil";
 
 export default function Layout() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const isAdminArea = location.pathname.startsWith("/admin");
+  const isHomePage = location.pathname === "/";
+  const showAdminLogout = isAdminArea && isAdminAuthenticated();
+
+  function handleAdminLogout() {
+    logoutAdmin();
+    navigate("/admin/login", { replace: true });
+  }
+
+  if (isHomePage) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          background:
+            "linear-gradient(180deg, #f9f4ea 0%, #eef2ee 42%, #e0ebe6 100%)",
+          padding: "16px 0 40px",
+        }}
+      >
+        <Outlet />
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
         minHeight: "100vh",
         background:
-          "radial-gradient(circle at top, #f5efe7 0%, #e9dfd7 45%, #ddd0c3 100%)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 24,
+          "radial-gradient(circle at top, #fff6e9 0%, #eef4ef 42%, #dbe7e1 100%)",
+        padding: "20px clamp(16px, 3vw, 28px) 40px",
       }}
     >
       <div
         style={{
-          width: 420,
-          maxWidth: "100%",
-          borderRadius: 18,
-          background: "#f7f7f7",
-          boxShadow: "0 10px 30px rgba(0,0,0,0.18)",
-          overflow: "hidden",
-          border: "1px solid rgba(0,0,0,0.06)",
+          width: "min(1180px, 100%)",
+          margin: "0 auto",
+          display: "grid",
+          gap: 20,
         }}
       >
-        <div style={{ background: "#0b5f55", padding: "18px 18px 14px" }}>
-          <div style={{ color: "white", fontWeight: 800, letterSpacing: 0.5 }}>
-            GEOOFERTAS
-          </div>
-          <div style={{ color: "rgba(255,255,255,0.85)", fontSize: 12 }}>
-            produto focado em WhatsApp first
-          </div>
-        </div>
-
-        <div style={{ padding: 16 }}>
-          <Outlet />
-        </div>
-
-        <div
+        <header
           style={{
-            borderTop: "1px solid rgba(0,0,0,0.08)",
-            padding: 12,
             display: "flex",
-            gap: 10,
+            alignItems: "center",
             justifyContent: "space-between",
-            background: "white",
+            gap: 16,
+            padding: "16px 18px",
+            borderRadius: 24,
+            background: "rgba(255,255,255,0.72)",
+            border: "1px solid rgba(18,51,46,0.08)",
+            boxShadow: "0 12px 30px rgba(12,63,56,0.08)",
+            backdropFilter: "blur(10px)",
           }}
         >
-          <NavLink to="/" style={({ isActive }) => navLinkStyle(isActive)}>
-            Inicio
-          </NavLink>
+          <div>
+            <div
+              style={{
+                color: "#11342f",
+                fontWeight: 900,
+                letterSpacing: 0.4,
+                fontSize: 18,
+              }}
+            >
+              ECONOMIZA FACIL
+            </div>
+            <div style={{ color: "rgba(17,52,47,0.64)", fontSize: 13 }}>
+              assistente de compras em modo WhatsApp-first
+            </div>
+          </div>
 
-          <NavLink to="/analises" style={({ isActive }) => navLinkStyle(isActive)}>
-            Analises
-          </NavLink>
-        </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            {showAdminLogout ? (
+              <button
+                type="button"
+                onClick={handleAdminLogout}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  minHeight: 46,
+                  padding: "0 18px",
+                  borderRadius: 14,
+                  background: "rgba(17,52,47,0.08)",
+                  color: "#11342f",
+                  border: "1px solid rgba(17,52,47,0.12)",
+                  fontWeight: 800,
+                  whiteSpace: "nowrap",
+                  cursor: "pointer",
+                }}
+              >
+                Sair do admin
+              </button>
+            ) : null}
+
+            <a
+              href={WHATSAPP_URL}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minHeight: 46,
+                padding: "0 18px",
+                borderRadius: 14,
+                background: "#0f7b6c",
+                color: "white",
+                textDecoration: "none",
+                fontWeight: 800,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Entrar no WhatsApp
+            </a>
+          </div>
+        </header>
+
+        <main>
+          <Outlet />
+        </main>
       </div>
     </div>
   );

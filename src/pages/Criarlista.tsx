@@ -1,160 +1,121 @@
-import { useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ListManager } from "../services/ListManager";
-import type { ShoppingListItem } from "../types/shopping";
+import StatusBubble from "../components/StatusBubble";
 
-const WEB_USER_STORAGE_KEY = "geofertas:web-user-id";
+type ListItem = {
+  name: string;
+  qty: number;
+};
 
-function getWebUserId() {
-  const existing = window.localStorage.getItem(WEB_USER_STORAGE_KEY);
-  if (existing) return existing;
-
-  const generated = `web_user_${Math.random().toString(36).slice(2, 10)}`;
-  window.localStorage.setItem(WEB_USER_STORAGE_KEY, generated);
-  return generated;
-}
-
-function parseItems(rawText: string): ShoppingListItem[] {
-  return rawText
-    .split(/\n|,/)
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .map((name, index) => ({
-      id: `item-${index + 1}`,
-      name,
-      quantity: 1,
-    }));
-}
+const STORAGE_KEY = "geofertas_current_list";
 
 export default function CriarLista() {
   const navigate = useNavigate();
-  const [rawItems, setRawItems] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const previewItems = useMemo(() => parseItems(rawItems), [rawItems]);
+  const [input, setInput] = useState("");
+  const [qty, setQty] = useState(1);
+  const [items, setItems] = useState<ListItem[]>([]);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function addItem() {
+    const name = input.trim();
+    if (!name) return;
 
-    const items = parseItems(rawItems);
-    if (items.length === 0) {
-      setError("Adicione pelo menos um item para comparar.");
-      return;
-    }
+    setItems((prev) => {
+      const existing = prev.find((i) => i.name.toLowerCase() === name.toLowerCase());
 
-    setIsSaving(true);
-    setError(null);
+      if (existing) {
+        return prev.map((i) =>
+          i.name.toLowerCase() === name.toLowerCase()
+            ? { ...i, qty: i.qty + qty }
+            : i
+        );
+      }
 
-    try {
-      const userId = getWebUserId();
-      const listManager = new ListManager(userId);
-      await listManager.persistList(items);
-      navigate("/resultado-lista");
-    } catch (submitError) {
-      console.error("[CriarLista] error saving list", submitError);
-      setError("Nao foi possivel salvar sua lista agora. Tente novamente.");
-    } finally {
-      setIsSaving(false);
-    }
+      return [...prev, { name, qty }];
+    });
+
+    setInput("");
+    setQty(1);
+  }
+
+  function removeItem(name: string) {
+    setItems((prev) => prev.filter((i) => i.name !== name));
+  }
+
+  function handleVerResultado() {
+    if (!items.length) return;
+
+    const payload = {
+      createdAt: new Date().toISOString(),
+      items,
+    };
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    navigate("/resultado-lista");
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div>
-        <div style={{ fontSize: 24, fontWeight: 900 }}>Criar lista</div>
-        <div style={{ marginTop: 6, color: "rgba(0,0,0,0.68)" }}>
-          Digite um item por linha para montar a lista ativa do MVP.
+    <div className="container">
+      <div className="hero">
+        <div className="heroTitle">Montar Lista</div>
+        <div className="heroSub">
+          Adicione seus itens para comparar as lojas
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <textarea
-          value={rawItems}
-          onChange={(event) => setRawItems(event.target.value)}
-          placeholder={"Exemplo:\nArroz\nFeijao\nCafe\nLeite"}
-          rows={8}
-          style={{
-            width: "100%",
-            resize: "vertical",
-            borderRadius: 14,
-            border: "1px solid rgba(0,0,0,0.12)",
-            padding: 14,
-            fontSize: 15,
-            lineHeight: 1.4,
-            background: "white",
-            boxSizing: "border-box",
-          }}
+      <StatusBubble text="Adicione os produtos 🛒" />
+
+      <div className="card">
+        <input
+          className="input"
+          placeholder="Ex: arroz"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
         />
 
-        <div
-          style={{
-            background: "white",
-            border: "1px solid rgba(0,0,0,0.08)",
-            borderRadius: 14,
-            padding: 12,
-          }}
-        >
-          <div style={{ fontWeight: 800, marginBottom: 8 }}>
-            Itens detectados: {previewItems.length}
-          </div>
+        <input
+          className="input"
+          type="number"
+          min={1}
+          value={qty}
+          onChange={(e) => setQty(Number(e.target.value))}
+        />
 
-          {previewItems.length === 0 ? (
-            <div style={{ fontSize: 13, color: "rgba(0,0,0,0.60)" }}>
-              Sua lista aparece aqui conforme voce digita.
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {previewItems.map((item) => (
-                <div
-                  key={item.id}
-                  style={{
-                    padding: "8px 10px",
-                    borderRadius: 10,
-                    background: "rgba(11,95,85,0.06)",
-                    fontWeight: 600,
-                  }}
-                >
-                  {item.name}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {error ? (
-          <div
-            style={{
-              background: "#fff1f1",
-              border: "1px solid rgba(176,0,32,0.18)",
-              color: "#8a1c1c",
-              borderRadius: 12,
-              padding: 12,
-              fontSize: 14,
-            }}
-          >
-            {error}
-          </div>
-        ) : null}
-
-        <button
-          type="submit"
-          disabled={isSaving}
-          style={{
-            width: "100%",
-            padding: "13px 14px",
-            borderRadius: 14,
-            border: "none",
-            background: isSaving ? "#7aa8a1" : "#0b5f55",
-            color: "white",
-            fontWeight: 800,
-            cursor: isSaving ? "progress" : "pointer",
-          }}
-        >
-          {isSaving ? "Salvando lista..." : "Comparar lista"}
+        <button className="btn btnPrimary" onClick={addItem}>
+          + Adicionar
         </button>
-      </form>
+      </div>
+
+      {items.length > 0 && (
+        <>
+          <div className="card">
+            <div className="cardTitle">Itens da Lista</div>
+
+            <ul className="list">
+              {items.map((item) => (
+                <li key={item.name}>
+                  {item.name} (x{item.qty}){" "}
+                  <button
+                    className="btn btnDanger"
+                    onClick={() => removeItem(item.name)}
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="card ctaBox">
+            <div className="ctaTitle">Total de Itens</div>
+            <div className="ctaValue">{items.length}</div>
+
+            <button className="btn btnPrimary" onClick={handleVerResultado}>
+              Ver onde comprar mais barato
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

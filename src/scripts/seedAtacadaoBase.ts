@@ -3,15 +3,8 @@
 // npx tsx src/scripts/seedAtacadaoBase.ts
 // ─────────────────────────────────────────────
 
-import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, writeBatch } from 'firebase/firestore';
-
-const firebaseConfig = {
-    projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'economizafacil-8bf1c',
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+import { doc, writeBatch } from 'firebase/firestore';
+import { db } from '../firebase';
 
 async function seed() {
     console.log('🏪 Seeding Atacadão base...');

@@ -1,0 +1,28 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="630" rx="40" fill="url(#bg)" />
+  <circle cx="1048" cy="108" r="164" fill="rgba(255,255,255,0.08)" />
+  <circle cx="153" cy="538" r="224" fill="rgba(255,255,255,0.08)" />
+  <rect x="74" y="74" width="1052" height="482" rx="32" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.18)" />
+  <text x="110" y="168" fill="#D9FFF3" font-family="Arial, Helvetica, sans-serif" font-size="32" font-weight="700" letter-spacing="3">
+    ECONOMIZA FACIL
+  </text>
+  <text x="110" y="270" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="72" font-weight="800">
+    Economia no supermercado
+  </text>
+  <text x="110" y="352" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="72" font-weight="800">
+    direto no WhatsApp
+  </text>
+  <text x="110" y="436" fill="#E9FFF7" font-family="Arial, Helvetica, sans-serif" font-size="32" font-weight="500">
+    Landing oficial do MVP para compras mais claras, rapidas e objetivas.
+  </text>
+  <rect x="110" y="474" width="318" height="62" rx="18" fill="#F4FFF9" />
+  <text x="150" y="515" fill="#0E5E53" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="800">
+    economizafacil.ia.br
+  </text>
+  <defs>
+    <linearGradient id="bg" x1="86" y1="32" x2="1107" y2="606" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0C6E60" />
+      <stop offset="1" stop-color="#17A085" />
+    </linearGradient>
+  </defs>
+</svg>

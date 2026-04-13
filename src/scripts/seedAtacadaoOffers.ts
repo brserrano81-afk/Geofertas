@@ -1,10 +1,7 @@
 // Seed: Atacadão Ofertas
 // npx tsx src/scripts/seedAtacadaoOffers.ts
-import { initializeApp } from 'firebase/app';
-import { getFirestore, writeBatch, doc } from 'firebase/firestore';
-
-const app = initializeApp({ projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'economizafacil-8bf1c' });
-const db = getFirestore(app);
+import { writeBatch, doc } from 'firebase/firestore';
+import { db } from '../firebase';
 
 async function seed() {
     console.log('📦 Seeding Atacadão offers...');

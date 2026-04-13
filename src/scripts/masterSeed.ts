@@ -3,20 +3,8 @@
 // npx tsx src/scripts/masterSeed.ts
 // ═══════════════════════════════════════════════
 
-import { initializeApp } from 'firebase/app';
-import { getFirestore, writeBatch, doc } from 'firebase/firestore';
-
-const firebaseConfig = {
-    apiKey: "AIzaSyDVW8oK9luHCFZhRl28XjcoZlDgeVA2y0Y",
-    authDomain: "geofertas-325b0.firebaseapp.com",
-    projectId: "geofertas-325b0",
-    storageBucket: "geofertas-325b0.firebasestorage.app",
-    messagingSenderId: "333137067503",
-    appId: "1:333137067503:web:f2ad402d55e33a0c60ca1a"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+import { writeBatch, doc } from 'firebase/firestore';
+import { db } from '../firebase';
 
 const NOW = new Date().toISOString();
 const EXPIRES = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 dias
