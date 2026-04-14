@@ -115,6 +115,28 @@ function buildAbsoluteEvolutionUrl(pathOrUrl: string | undefined, fallbackPath: 
     return new URL(fallbackPath.replace(/^\//, ''), `${baseUrl.replace(/\/+$/, '')}/`).toString();
 }
 
+function ensureEvolutionEndpointInstance(url: string, endpointPrefix: string, instance: string): string {
+    const parsedUrl = new URL(url);
+    const normalizedPath = parsedUrl.pathname.replace(/\/+$/, '');
+    const normalizedPrefix = `/${endpointPrefix.replace(/^\/+|\/+$/g, '')}`;
+    const encodedInstance = encodeURIComponent(instance);
+
+    if (
+        normalizedPath === normalizedPrefix ||
+        normalizedPath === `${normalizedPrefix}/`
+    ) {
+        parsedUrl.pathname = `${normalizedPrefix}/${encodedInstance}`;
+        return parsedUrl.toString();
+    }
+
+    if (!normalizedPath.startsWith(`${normalizedPrefix}/`)) {
+        parsedUrl.pathname = `${normalizedPrefix}/${encodedInstance}`;
+        return parsedUrl.toString();
+    }
+
+    return parsedUrl.toString();
+}
+
 function getEvolutionInstance(): string | null {
     const instance =
         process.env.EVOLUTION_SEND_INSTANCE ||
@@ -134,10 +156,16 @@ function getEvolutionSendUrl(): string | null {
         return null;
     }
 
-    return buildAbsoluteEvolutionUrl(
+    const sendUrl = buildAbsoluteEvolutionUrl(
         process.env.EVOLUTION_SEND_TEXT_URL,
         `message/sendText/${instance}`,
     );
+
+    if (!sendUrl) {
+        return null;
+    }
+
+    return ensureEvolutionEndpointInstance(sendUrl, 'message/sendText', instance);
 }
 
 function getEvolutionPresenceUrl(): string | null {
@@ -146,10 +174,16 @@ function getEvolutionPresenceUrl(): string | null {
         return null;
     }
 
-    return buildAbsoluteEvolutionUrl(
+    const presenceUrl = buildAbsoluteEvolutionUrl(
         process.env.EVOLUTION_PRESENCE_URL,
         `chat/sendPresence/${instance}`,
     );
+
+    if (!presenceUrl) {
+        return null;
+    }
+
+    return ensureEvolutionEndpointInstance(presenceUrl, 'chat/sendPresence', instance);
 }
 
 async function loadPendingMessages(): Promise<Array<{ id: string; data: InboxMessage }>> {
