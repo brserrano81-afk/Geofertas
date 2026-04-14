@@ -13,7 +13,7 @@ export type Intent =
     | 'criar_lista' | 'montar_lista' | 'adicionar_item_lista' | 'remover_item_lista'
     | 'mostrar_lista' | 'gerenciar_lista' | 'limpar_lista' | 'ver_ultima_lista'
     | 'calcular_total_lista' | 'melhor_mercado_para_lista' | 'compartilhar_lista'
-    | 'extrair_cupom' | 'confirmar_registro' | 'cancelar_compra' | 'finalizar_compra'
+    | 'processar_comprovante_compra' | 'confirmar_registro' | 'cancelar_compra' | 'finalizar_compra'
     | 'compartilhar_localizacao' | 'find_nearby_markets'
     | 'definir_transporte' | 'definir_consumo'
     | 'definir_preferencia_usuario' | 'ver_perfil_usuario'
@@ -48,7 +48,7 @@ export interface Interpretation {
 const SYSTEM_PROMPT = `Voce e o classificador de intencoes do Economiza Facil, um assistente de economia no WhatsApp.
 
 REGRAS ABSOLUTAS:
-1. Se a pessoa pedir preco, oferta, comparacao, lista, mercado, gasto, historico ou cupom, classifique na intencao util mais proxima.
+1. Se a pessoa pedir preco, oferta, comparacao, lista, mercado, gasto, historico, cupom, tabloide, encarte ou foto de oferta, classifique na intencao util mais proxima.
 2. Se a mensagem parece busca de produto, use SEARCH_PRODUCT.
 3. Entenda erros, abreviacoes e girias como "kto ta o cafe", "oferta do extra", "add leite", "vale ir de carro".
 4. Nunca peca cadastro, CPF, login ou senha.
@@ -56,8 +56,10 @@ REGRAS ABSOLUTAS:
 6. "me ajuda a planejar o mes", "planejar compras", "o que preciso comprar esse mes" -> VIEW_CONSUMPTION_PATTERN.
 7. "o que voce sabe sobre mim", "o que lembra de mim", "me fala meu historico" -> SHOW_PROFILE.
 8. "tem coisa mais barata que o nescafe", "marca propria do arroz vale a pena", "qual oleo e mais em conta" -> SEARCH_PRODUCT.
-9. Palavra isolada que pareca produto -> SEARCH_PRODUCT.
-10. Evite UNKNOWN se houver leitura razoavel como produto, mercado, lista ou perfil.
+9. Pedido com cupom, nota fiscal, QR code da compra, comprovante da compra -> EXTRACT_RECEIPT.
+10. Pedido com foto de oferta, tabloide, encarte, etiqueta, preco de prateleira -> EXTRACT_RECEIPT.
+11. Palavra isolada que pareca produto -> SEARCH_PRODUCT.
+12. Evite UNKNOWN se houver leitura razoavel como produto, mercado, lista, perfil ou imagem de compra/oferta.
 
 Responda APENAS com JSON valido:
 {
@@ -88,7 +90,7 @@ const NLP_TO_INTENT: Record<string, Intent> = {
     'CLEAR_LIST': 'limpar_lista',
     'SHARE_LIST': 'compartilhar_lista',
     'CALCULATE_LIST': 'calcular_total_lista',
-    'EXTRACT_RECEIPT': 'extrair_cupom',
+    'EXTRACT_RECEIPT': 'processar_comprovante_compra',
     'CONFIRM_PURCHASE': 'confirmar_registro',
     'CANCEL_PURCHASE': 'cancelar_compra',
     'GREETING': 'saudacao',
@@ -132,7 +134,7 @@ class AiService {
         }
 
         if (message.match(/https?:\/\//i) || message.match(/sefaz/i) || message.match(/nfce/i)) {
-            return this.buildResult('extrair_cupom', { intent: 'EXTRACT_RECEIPT', entities: [{ value: message }], confidence: 1.0 });
+            return this.buildResult('processar_comprovante_compra', { intent: 'EXTRACT_RECEIPT', entities: [{ value: message }], confidence: 1.0 });
         }
 
         try {
@@ -213,7 +215,7 @@ class AiService {
 Sua personalidade: clara, útil, comercial e natural.
 Você entende gírias e erros de digitação, mas responde em bom português.
 Mantenha as mensagens curtas, escaneáveis e próprias para WhatsApp.
-Nunca altere números do sistema e nunca omita listas de ofertas ou produtos.`;
+Nunca altere números do sistema e nunca misture histórico pessoal de compra com colaboração para a base de ofertas.`;
 
         try {
             const formattedHistory = history.map((msg) => ({

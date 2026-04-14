@@ -1,15 +1,13 @@
-// ─────────────────────────────────────────────
-// IngestionPipeline — Chain of Responsibility para entrada do usuário
-// Detecta tipo de input: Link SEFAZ, Imagem, QR Code
-// ─────────────────────────────────────────────
+﻿// IngestionPipeline - Chain of Responsibility para entrada do usuario
+// Detecta tipo de input: link SEFAZ, imagem, QR code
 
 import { visionService } from './VisionService';
 
-interface PipelineResult {
+export interface PipelineResult {
     success: boolean;
     data?: any;
     error?: string;
-    source?: 'sefaz' | 'vision' | 'qr' | 'price_tag' | 'tabloid';
+    source?: 'receipt_sefaz' | 'receipt_vision' | 'community_price_tag' | 'community_tabloid';
 }
 
 function readRuntimeEnv(name: string): string {
@@ -47,15 +45,12 @@ function resolveApiBaseUrl(): string {
 
 class IngestionPipeline {
     async processUserSubmission(input: string | Uint8Array): Promise<PipelineResult> {
-        // Se for binário (imagem)
         if (input instanceof Uint8Array) {
             return this.processImage(input);
         }
 
-        // Se for string (link ou QR)  
         const text = input as string;
 
-        // Detectar link SEFAZ (mesmo sem http://)
         if (text.match(/(https?:\/\/)?.*(sefaz|nfce|fazenda)/i)) {
             let urlStr = text;
             if (!urlStr.startsWith('http')) {
@@ -64,20 +59,21 @@ class IngestionPipeline {
             return this.processSefazLink(urlStr);
         }
 
-        // Detectar QR code URL genérica
         if (text.match(/https?:\/\//)) {
             return this.processSefazLink(text);
         }
 
-        return { success: false, error: 'Não reconheci o formato. Envie um link de nota fiscal, QR Code ou foto do cupom.' };
+        return {
+            success: false,
+            error: 'Não reconheci o formato. Envie um link de nota fiscal, QR Code, foto do cupom ou foto de oferta.',
+        };
     }
 
     private async processImage(imageData: Uint8Array): Promise<PipelineResult> {
         console.log(`[IngestionPipeline] Processing image: ${imageData.length} bytes`);
         try {
             const result = await visionService.extractFromImage(imageData);
-            
-            // 1. Tentativa via Chave de 44 dígitos
+
             if (result && result.sefazKey) {
                 const cleanKey = result.sefazKey.replace(/\D/g, '');
                 if (cleanKey.length === 44) {
@@ -85,11 +81,10 @@ class IngestionPipeline {
                     console.log(`[IngestionPipeline] Chave encontrada: ${cleanKey}. Tentando scrap no proxy...`);
                     const proxyResult = await this.processSefazLink(generatedUrl);
                     if (proxyResult.success) return proxyResult;
-                    console.log(`[IngestionPipeline] Proxy falhou (Captcha Web?). Usando OCR/Vision fallback.`);
+                    console.log('[IngestionPipeline] Proxy falhou. Usando fallback de visao.');
                 }
             }
 
-            // 2. Tentativa via OCR da URL
             if (result && result.sefazUrl) {
                 let urlStr = result.sefazUrl;
                 if (!urlStr.startsWith('http')) {
@@ -98,29 +93,28 @@ class IngestionPipeline {
                 console.log(`[IngestionPipeline] URL encontrada: ${urlStr}. Tentando scrap no proxy...`);
                 const proxyResult = await this.processSefazLink(urlStr);
                 if (proxyResult.success) return proxyResult;
-                console.log(`[IngestionPipeline] Proxy falhou (Captcha Web?). Usando OCR/Vision fallback.`);
+                console.log('[IngestionPipeline] Proxy falhou. Usando fallback de visao.');
             }
 
-            // 3. Verifica Price Tag avulsa (produto �nico)
             if (result && result.type === 'price_tag') {
-                return { success: true, data: result, source: 'price_tag' };
+                return { success: true, data: result, source: 'community_price_tag' };
             }
 
-            // 4. Tabloide / Encarte � m�ltiplos produtos, vai para fila de revis�o
             if (result && result.type === 'tabloid' && Array.isArray(result.items) && result.items.length > 0) {
-                console.log('[IngestionPipeline] Tabloide: ' + result.items.length + ' produto(s). Roteando para fila.');
-                return { success: true, data: result, source: 'tabloid' };
+                console.log(`[IngestionPipeline] Contribuicao colaborativa: tabloide com ${result.items.length} produto(s).`);
+                return { success: true, data: result, source: 'community_tabloid' };
             }
-            
-            // 4. Fallback de Ouro: Usa os próprios itens que a IA Gemini já extraiu da imagem!
-            // Isso resolve o problema de telas com Captcha ou bloqueios da SEFAZ.
-            if (result && (result.items?.length > 0 || result.total > 0)) {
-                console.log(`[IngestionPipeline] Sucesso usando os dados lidos magicamente pela IA (Vision) na imagem!`);
-                return { success: true, data: result, source: 'vision' };
+
+            if (result && result.type === 'receipt' && (result.items?.length > 0 || result.total > 0)) {
+                console.log('[IngestionPipeline] Cupom fiscal identificado via visao.');
+                return { success: true, data: result, source: 'receipt_vision' };
             }
-            
-            return { success: false, error: 'Não consegui extrair dados da imagem. Tente uma foto mais nítida da prateleira ou do cupom.' };
-        } catch (err) {
+
+            return {
+                success: false,
+                error: 'Não consegui extrair dados da imagem. Tente uma foto mais nítida do cupom ou da oferta.',
+            };
+        } catch {
             return { success: false, error: 'Erro ao processar a imagem.' };
         }
     }
@@ -145,13 +139,15 @@ class IngestionPipeline {
                         marketName: data.supermarket || 'Desconhecido',
                         cnpj: data.cnpj || '',
                         total: data.totalValue || 0,
-                        items: data.items.map((i: any) => ({
-                            name: i.name,
-                            price: i.totalPrice || i.unitPrice || 0,
-                            quantity: i.quantity || 1,
+                        confidence: 0.99,
+                        type: 'receipt',
+                        items: data.items.map((item: any) => ({
+                            name: item.name,
+                            price: item.totalPrice || item.unitPrice || 0,
+                            quantity: item.quantity || 1,
                         })),
                     },
-                    source: 'sefaz',
+                    source: 'receipt_sefaz',
                 };
             }
 

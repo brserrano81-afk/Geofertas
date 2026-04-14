@@ -9,7 +9,7 @@ import { aiService, type Intent } from './AiService';
 import { offerEngine } from './OfferEngine';
 import { ListManager } from './ListManager';
 import { PurchaseManager } from './PurchaseManager';
-import { ingestionPipeline } from './IngestionPipeline';
+import { ingestionPipeline, type PipelineResult } from './IngestionPipeline';
 import { matchReceiptToList, type MatchResult } from './ReceiptMatcher';
 import { ConversationStateService, type PendingResolution } from './ConversationStateService';
 import { PurchaseAnalyticsService } from './PurchaseAnalyticsService';
@@ -32,6 +32,7 @@ export interface ChatResponse {
 }
 
 const INTENT_CONFIDENCE_THRESHOLD = 0.45;
+const RECEIPT_AUTO_SAVE_THRESHOLD = 0.9;
 const CHAT_FALLBACK_TEXT = 'Ainda não entendi bem o que você quer fazer. Posso te ajudar com preço de produto, ofertas de mercado, lista de compras ou seus gastos.';
 
 interface ListItem {
@@ -167,6 +168,14 @@ function isActionableIntent(intent: Intent, hasProducts: boolean): boolean {
     }
 
     return !['saudacao', 'ajuda', 'desconhecido'].includes(intent);
+}
+
+function shouldAutoSaveReceipt(pipelineResult: PipelineResult, receiptData: any): boolean {
+    if (pipelineResult.source === 'receipt_sefaz') {
+        return true;
+    }
+
+    return Number(receiptData?.confidence || 0) >= RECEIPT_AUTO_SAVE_THRESHOLD;
 }
 
 class ChatSession {
@@ -309,11 +318,11 @@ class ChatSession {
                 this.context.pendingPurchase = undefined;
                 this.context.pendingMatchResult = undefined;
                 conversationState.reset();
-                return { text: "âŒ Fechado, descartei essa nota. Como posso te ajudar agora?" };
+                return { text: 'Fechado. Não salvei esse cupom no seu histórico. Como posso te ajudar agora?' };
             }
 
             // Se ele digitar algo nada a ver no meio da confirmaÃ§Ã£o:
-            return { text: "âš ï¸ Parceiro, eu preciso que vocÃª me responda com **OK** para salvar a nota ou **CANCELAR** para descartar, blz?" };
+            return { text: 'Me responde com OK para salvar esse cupom no seu histórico ou CANCELAR para descartar.' };
         }
 
         // â”€â”€â”€ 0.1 FAST GREETING INTERCEPT â”€â”€â”€
@@ -766,83 +775,14 @@ class ChatSession {
             case 'ajuda':
                 return { text: "Pode perguntar de tudo: do pÃ£o atÃ© as comprinhas de farmÃ¡cia (tipo fralda, camisinha). ðŸ›’\nManda bala no que vocÃª precisa:\nâ€¢ _\"Quanto tÃ¡ o arroz?\"_\nâ€¢ _\"Lista: arroz, feijÃ£o, frango\"_\nâ€¢ Mude o mercado: _\"AtacadÃ£o\"_ ou _\"Extrabom\"_\nâ€¢ Envie a foto ou link do Cupom Fiscal!" };
 
-            // â”€â”€â”€ Cupom / Compra (via IngestionPipeline + ConferÃªncia Lista) â”€â”€â”€
-            case 'extrair_cupom': {
+            // â”€â”€â”€ Cupom / Comprovante / Foto de oferta â”€â”€â”€
+            case 'processar_comprovante_compra': {
                 return this.handleReceiptSubmission(message);
-                const pipelineResult = await ingestionPipeline.processUserSubmission(message);
-                const receiptData = pipelineResult.success ? pipelineResult.data : null;
-
-                if (!receiptData) {
-                    return { text: pipelineResult.error || "NÃ£o consegui extrair os dados. Envie um link de nota fiscal vÃ¡lido, foto do cupom ou placa de preÃ§o da prateleira. ðŸ“¸" };
-                }
-
-                // Modo Olheiro (Placa de Prateleira)
-                if (pipelineResult.source === 'price_tag') {
-                    this.context.pendingPurchase = receiptData;
-                    conversationState.transition('AWAITING_PRICE_TAG_CONFIRMATION', 'confirm_price_tag', receiptData, 'Salvar preÃ§o da prateleira?');
-                    
-                    const priceFormatted = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(receiptData.price);
-                    let msg = `ðŸ“¸ **Modo Olheiro Ativado!**\n\n`;
-                    msg += `Li a etiqueta que vocÃª mandou:\n`;
-                    msg += `â€¢ **Produto:** ${receiptData.product} ${receiptData.brand || ''} ${receiptData.unit || ''}\n`;
-                    msg += `â€¢ **PreÃ§o:** ${priceFormatted}\n`;
-                    if (receiptData.marketName) msg += `â€¢ **Mercado:** ${receiptData.marketName}\n`;
-                    msg += `\nQuer que eu grave isso na base para ajudar a galera? (Responda **OK** ou **Cancelar**)`;
-                    
-                    return { text: msg };
-                }
-
-                // Carregar lista ativa e fazer matching (Fluxo Normal NF)
-                const activeList = await this.listManager.loadActiveList();
-                const matchResult = matchReceiptToList(receiptData.items || [], activeList);
-
-                // Armazenar no contexto para uso na confirmaÃ§Ã£o
-                this.context.pendingPurchase = receiptData;
-                this.context.pendingMatchResult = matchResult;
-
-                // Gerar mensagem de conferÃªncia
-                const conference = this.purchaseManager.formatReceiptConference(receiptData, matchResult);
-
-                conversationState.transition('AWAITING_PURCHASE_CONFIRMATION', 'confirm_purchase', receiptData, 'OK para confirmar');
-                return { text: conference.text };
             }
             case 'confirmar_registro':
                 return this.handlePurchaseConfirmation();
-                if (this.context.pendingPurchase) {
-                    if (this.context.pendingPurchase.type === 'price_tag') {
-                        // TODO: Gravar no banco de ofertas de forma global
-                        console.log("[ChatService] PreÃ§o de prateleira salvo na base:", this.context.pendingPurchase);
-                        this.context.pendingPurchase = undefined;
-                        conversationState.reset();
-                        return { text: "âœ… PreÃ§o gravado com sucesso! Valeu por fortalecer a comunidade! ðŸ‘Š" };
-                    }
-
-                    const pendingMatchResult = this.context.pendingMatchResult;
-                    const allItems = pendingMatchResult
-                        ? [...pendingMatchResult!.matched, ...pendingMatchResult!.impulse]
-                        : undefined;
-                    const res = await this.purchaseManager.saveConfirmedPurchase(this.context.pendingPurchase, allItems);
-
-                    // Finalizar lista se houve match com cupom
-                    if (pendingMatchResult && pendingMatchResult!.matched.length > 0) {
-                        await this.listManager.finalizeListWithReceipt();
-                    }
-
-                    this.context.pendingPurchase = undefined;
-                    this.context.pendingMatchResult = undefined;
-                    conversationState.reset();
-                    return res;
-                }
-                return { text: "NÃ£o tenho nenhuma compra pendente para confirmar agora." };
             case 'cancelar_compra':
                 return this.handlePurchaseCancellation();
-                if (this.context.pendingPurchase) {
-                    this.context.pendingPurchase = undefined;
-                    this.context.pendingMatchResult = undefined;
-                    conversationState.reset();
-                    return { text: "âŒ Fechado. AÃ§Ã£o cancelada e dados descartados." };
-                }
-                return { text: "NÃ£o tenho nenhuma compra pendente para cancelar." };
             case 'finalizar_compra':
                 return { text: "Para registrar uma compra real, envie uma foto do cupom, QR Code ou do preÃ§o na prateleira. ðŸ“¸" };
 
@@ -1150,53 +1090,44 @@ class ChatSession {
         console.log(`[ChatService] >>> INCOMING IMAGE`);
         this.context.isFirstContact = false;
         conversationState.incrementTurn();
-        this.context.lastIntent = 'extrair_cupom';
+        this.context.lastIntent = 'processar_comprovante_compra';
         conversationState.addMessage(this.context.userId, 'user', '[IMAGEM]');
         await userProfileService.recordInteraction(this.context.userId, {
             role: 'user',
             content: '[IMAGEM]',
-            intent: 'extrair_cupom',
+            intent: 'processar_comprovante_compra',
         });
 
         const pipelineResult = await ingestionPipeline.processUserSubmission(imageData);
         const receiptData = pipelineResult.data;
 
         if (!pipelineResult.success || !pipelineResult.data) {
-            return { text: pipelineResult.error || "NÃ£o consegui extrair os dados da imagem. Envie uma foto mais nÃ­tida do cupom ou QR Code." };
+            return { text: pipelineResult.error || 'Não consegui extrair os dados da imagem. Envie uma foto mais nítida do cupom ou da oferta.' };
         }
 
-        // TABLOIDE: multiplos produtos -> fila de revisao
-        if (pipelineResult.source === 'tabloid') {
+        if (pipelineResult.source === 'community_tabloid') {
             const response = await this.enqueueTabloidToQueue(pipelineResult.data);
             conversationState.addMessage(this.context.userId, 'assistant', response.text);
-            await userProfileService.recordInteraction(this.context.userId, { role: 'assistant', content: response.text, intent: 'extrair_cupom' });
+            await userProfileService.recordInteraction(this.context.userId, { role: 'assistant', content: response.text, intent: 'processar_comprovante_compra' });
             return response;
         }
 
-        // ETIQUETA DE PRECO: produto unico -> fila de revisao
-        if (pipelineResult.source === 'price_tag') {
+        if (pipelineResult.source === 'community_price_tag') {
             const response = await this.enqueuePriceTagToQueue(pipelineResult.data);
             conversationState.addMessage(this.context.userId, 'assistant', response.text);
-            await userProfileService.recordInteraction(this.context.userId, { role: 'assistant', content: response.text, intent: 'extrair_cupom' });
+            await userProfileService.recordInteraction(this.context.userId, { role: 'assistant', content: response.text, intent: 'processar_comprovante_compra' });
             return response;
         }
 
-        const activeList = await this.listManager.loadActiveList();
-        const matchResult = matchReceiptToList(receiptData.items || [], activeList);
-
-        this.context.pendingPurchase = receiptData;
-        this.context.pendingMatchResult = matchResult;
-
-        const conference = this.purchaseManager.formatReceiptConference(receiptData, matchResult);
-        conversationState.transition('AWAITING_PURCHASE_CONFIRMATION', 'confirm_purchase', receiptData, 'OK para confirmar');
-        conversationState.addMessage(this.context.userId, 'assistant', conference.text);
+        const response = await this.handlePersonalReceiptFlow(pipelineResult, receiptData);
+        conversationState.addMessage(this.context.userId, 'assistant', response.text);
         await userProfileService.recordInteraction(this.context.userId, {
             role: 'assistant',
-            content: conference.text,
-            intent: 'extrair_cupom',
+            content: response.text,
+            intent: 'processar_comprovante_compra',
         });
 
-        return { text: conference.text };
+        return response;
     }
 
     // â”€â”€â”€ Extras & SaudaÃ§Ãµes â”€â”€â”€
@@ -1373,10 +1304,10 @@ class ChatSession {
                 .map((o: any) => `â€¢ ${o.productName} â€” R$ ${o.price.toFixed(2).replace('.', ',')} ${o.unit}`);
             const extra = toEnqueue.length > 3 ? `\n_...e mais ${toEnqueue.length - 3} produto(s)_` : '';
             return {
-                text: `Encarte recebido! Identifiquei **${toEnqueue.length} produto(s)**` +
+                text: `📸 Recebi seu encarte/oferta! Identifiquei **${toEnqueue.length} produto(s)**` +
                     (marketName ? ` do ${marketName}` : '') + `:\n\n` +
                     summaryLines.join('\n') + extra +
-                    `\n\nâœ… Enviados para revisÃ£o. Assim que aprovados, aparecem nas comparaÃ§Ãµes!`
+                    `\n\nIsso ajuda a manter a base do Economiza Fácil atualizada para todo mundo.\nAntes de entrar nas comparações, passa por análise. ✅`
             };
         } catch (err) {
             console.error('[ChatService] Erro ao enfileirar tabloide:', err);
@@ -1406,11 +1337,11 @@ class ChatSession {
             }]);
             const priceStr = price.toFixed(2).replace('.', ',');
             return {
-                text: `Etiqueta recebida!\n\n` +
-                    `ðŸ·ï¸ ${productName}${tagData.brand ? ` (${tagData.brand})` : ''}\n` +
-                    `ðŸ’° R$ ${priceStr}${tagData.unit ? ` / ${tagData.unit}` : ''}\n` +
-                    (marketName ? `ðŸª ${marketName}\n` : '') +
-                    `\nâœ… Enviado para revisÃ£o. Obrigado por contribuir com a comunidade! ðŸ¤`
+                text: `🏷️ Recebi esse preço!\n\n` +
+                    `• ${productName}${tagData.brand ? ` (${tagData.brand})` : ''}\n` +
+                    `• R$ ${priceStr}${tagData.unit ? ` / ${tagData.unit}` : ''}\n` +
+                    (marketName ? `• ${marketName}\n` : '') +
+                    `\nIsso ajuda a atualizar a base colaborativa de ofertas.\nAntes de publicar, eu mando para análise. Valeu por ajudar a comunidade! 💚`
             };
         } catch (err) {
             console.error('[ChatService] Erro ao enfileirar price_tag:', err);
@@ -1555,10 +1486,10 @@ class ChatSession {
 
         if (isNegative && this.context.pendingPurchase) {
             this.clearPendingPurchaseContext();
-            return { text: 'âŒ Fechado, descartei essa nota. Como posso te ajudar agora?' };
+            return { text: 'Fechado. Não salvei esse cupom no seu histórico. Como posso te ajudar agora?' };
         }
 
-        return { text: 'âš ï¸ Parceiro, eu preciso que vocÃª me responda com **OK** para salvar a nota ou **CANCELAR** para descartar, blz?' };
+        return { text: 'Me responde com OK para salvar esse cupom no seu histórico ou CANCELAR para descartar.' };
     }
 
     private async handlePendingAction(
@@ -1750,41 +1681,23 @@ class ChatSession {
         const receiptData = pipelineResult.success ? pipelineResult.data : null;
 
         if (!receiptData) {
-            return { text: pipelineResult.error || 'NÃ£o consegui extrair os dados. Envie um link de nota fiscal vÃ¡lido, foto do cupom ou placa de preÃ§o da prateleira. ðŸ“¸' };
+            return { text: pipelineResult.error || 'Não consegui extrair os dados. Envie um link de nota fiscal, foto do cupom ou foto de oferta.' };
         }
 
-        if (pipelineResult.source === 'price_tag') {
-            this.context.pendingPurchase = receiptData;
-            this.conversationState.transition('AWAITING_PRICE_TAG_CONFIRMATION', 'confirm_price_tag', receiptData, 'Salvar preÃ§o da prateleira?');
-
-            const priceFormatted = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(receiptData.price);
-            let msg = 'ðŸ“¸ **Modo Olheiro Ativado!**\n\n';
-            msg += 'Li a etiqueta que vocÃª mandou:\n';
-            msg += `â€¢ **Produto:** ${receiptData.product} ${receiptData.brand || ''} ${receiptData.unit || ''}\n`;
-            msg += `â€¢ **PreÃ§o:** ${priceFormatted}\n`;
-            if (receiptData.marketName) msg += `â€¢ **Mercado:** ${receiptData.marketName}\n`;
-            msg += '\nQuer que eu grave isso na base para ajudar a galera? (Responda **OK** ou **Cancelar**)';
-            return { text: msg };
+        if (pipelineResult.source === 'community_price_tag') {
+            return this.enqueuePriceTagToQueue(receiptData);
         }
 
-        const activeList = await this.listManager.loadActiveList();
-        const matchResult = matchReceiptToList(receiptData.items || [], activeList);
-        this.context.pendingPurchase = receiptData;
-        this.context.pendingMatchResult = matchResult;
-        const conference = this.purchaseManager.formatReceiptConference(receiptData, matchResult);
-        this.conversationState.transition('AWAITING_PURCHASE_CONFIRMATION', 'confirm_purchase', receiptData, 'OK para confirmar');
-        return { text: conference.text };
+        if (pipelineResult.source === 'community_tabloid') {
+            return this.enqueueTabloidToQueue(receiptData);
+        }
+
+        return this.handlePersonalReceiptFlow(pipelineResult, receiptData);
     }
 
     private async handlePurchaseConfirmation(): Promise<ChatResponse> {
         if (!this.context.pendingPurchase) {
             return { text: 'NÃ£o tenho nenhuma compra pendente para confirmar agora.' };
-        }
-
-        if (this.context.pendingPurchase.type === 'price_tag') {
-            console.log('[ChatService] PreÃ§o de prateleira salvo na base:', this.context.pendingPurchase);
-            this.clearPendingPurchaseContext();
-            return { text: 'âœ… PreÃ§o gravado com sucesso! Valeu por fortalecer a comunidade! ðŸ‘Š' };
         }
 
         return this.confirmPendingPurchase();
@@ -1796,7 +1709,7 @@ class ChatSession {
         }
 
         this.clearPendingPurchaseContext();
-        return { text: 'âŒ Fechado. AÃ§Ã£o cancelada e dados descartados.' };
+        return { text: 'Fechado. Não salvei esse cupom no seu histórico.' };
     }
 
     private async handlePreferenceIntent(preference: 'economizar' | 'perto' | 'equilibrar' | null): Promise<ChatResponse> {
@@ -2013,6 +1926,23 @@ class ChatSession {
         this.context.pendingPurchase = undefined;
         this.context.pendingMatchResult = undefined;
         this.conversationState.reset();
+    }
+
+    private async handlePersonalReceiptFlow(pipelineResult: PipelineResult, receiptData: any): Promise<ChatResponse> {
+        const activeList = await this.listManager.loadActiveList();
+        const matchResult = matchReceiptToList(receiptData.items || [], activeList);
+
+        if (shouldAutoSaveReceipt(pipelineResult, receiptData)) {
+            this.context.pendingMatchResult = matchResult;
+            this.context.pendingPurchase = receiptData;
+            return this.confirmPendingPurchase();
+        }
+
+        this.context.pendingPurchase = receiptData;
+        this.context.pendingMatchResult = matchResult;
+        const conference = this.purchaseManager.formatReceiptConference(receiptData, matchResult);
+        this.conversationState.transition('AWAITING_PURCHASE_CONFIRMATION', 'confirm_purchase', receiptData, 'OK para confirmar');
+        return { text: conference.text };
     }
 
     private async confirmPendingPurchase(): Promise<ChatResponse> {
