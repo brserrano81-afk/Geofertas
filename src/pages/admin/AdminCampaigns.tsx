@@ -1,104 +1,124 @@
-import { addDoc, collection, getDocs, orderBy, query, serverTimestamp } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 
-import { db } from "../../firebase";
 import {
+  adminMvpService,
+  campaignToInput,
+  createEmptyCampaignInput,
+  dateInputFromIso,
+  normalizeCampaignInput,
+  type CampaignInput,
+  type CampaignRecord,
+  type MarketRecord,
+} from "../../services/admin/AdminMvpService";
+import AdminNav from "./AdminNav";
+import {
+  adminActionsRowStyle,
+  adminBadgeStyle,
   adminButtonStyle,
+  adminDangerButtonStyle,
   adminGridStyle,
   adminInputStyle,
   adminPanelStyle,
+  adminSecondaryButtonStyle,
   adminShellStyle,
+  adminTextAreaStyle,
+  adminTopbarStyle,
 } from "./adminStyles";
-
-type CampaignRecord = {
-  id: string;
-  name: string;
-  networkId?: string;
-  active?: boolean;
-  startsAt?: string;
-  expiresAt?: string;
-};
-
-type CampaignFormState = {
-  name: string;
-  networkId: string;
-  startsAt: string;
-  expiresAt: string;
-};
-
-const initialForm: CampaignFormState = {
-  name: "",
-  networkId: "",
-  startsAt: "",
-  expiresAt: "",
-};
 
 export default function AdminCampaigns() {
   const [campaigns, setCampaigns] = useState<CampaignRecord[]>([]);
-  const [form, setForm] = useState(initialForm);
+  const [markets, setMarkets] = useState<MarketRecord[]>([]);
+  const [form, setForm] = useState<CampaignInput>(createEmptyCampaignInput());
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
 
-  async function loadCampaigns() {
-    const snap = await getDocs(query(collection(db, "campaigns"), orderBy("name")));
-    setCampaigns(
-      snap.docs.map((docSnap) => {
-        const data = docSnap.data() as Record<string, unknown>;
-        return {
-          id: docSnap.id,
-          name: String(data.name || ""),
-          networkId: String(data.networkId || ""),
-          active: data.active !== false,
-          startsAt: String(data.startsAt || ""),
-          expiresAt: String(data.expiresAt || ""),
-        };
-      }),
-    );
+  async function loadData() {
+    const [campaignItems, marketItems] = await Promise.all([
+      adminMvpService.listCampaigns(),
+      adminMvpService.listMarkets(),
+    ]);
+    setCampaigns(campaignItems);
+    setMarkets(marketItems);
   }
 
   useEffect(() => {
-    loadCampaigns().catch((error) => {
-      console.error("[AdminCampaigns] load error", error);
-      setFeedback("Nao foi possivel carregar as campanhas.");
-    });
+    loadData()
+      .catch((error) => {
+        console.error("[AdminCampaigns] load error", error);
+        setFeedback("Nao foi possivel carregar as campanhas.");
+      })
+      .finally(() => setLoading(false));
   }, []);
+
+  const selectedMarket = useMemo(
+    () => markets.find((market) => market.id === form.marketId) || null,
+    [form.marketId, markets],
+  );
+
+  function resetForm() {
+    setForm(createEmptyCampaignInput());
+    setEditingId(null);
+  }
+
+  function startEditing(record: CampaignRecord) {
+    setForm(campaignToInput(record));
+    setEditingId(record.id);
+    setFeedback("");
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setIsSaving(true);
+    setSaving(true);
     setFeedback("");
 
     try {
-      await addDoc(collection(db, "campaigns"), {
-        name: form.name.trim(),
-        networkId: form.networkId.trim() || null,
-        startsAt: form.startsAt ? new Date(form.startsAt).toISOString() : new Date().toISOString(),
-        expiresAt: form.expiresAt ? new Date(form.expiresAt).toISOString() : null,
-        active: true,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      const normalized = normalizeCampaignInput(form, selectedMarket);
+      if (editingId) {
+        await adminMvpService.updateCampaign(editingId, normalized);
+        setFeedback("Campanha atualizada com sucesso.");
+      } else {
+        await adminMvpService.createCampaign(normalized);
+        setFeedback("Campanha cadastrada com sucesso.");
+      }
 
-      setForm(initialForm);
-      setFeedback("Campanha cadastrada com sucesso.");
-      await loadCampaigns();
+      resetForm();
+      await loadData();
     } catch (error) {
       console.error("[AdminCampaigns] save error", error);
-      setFeedback("Erro ao cadastrar campanha.");
+      setFeedback("Erro ao salvar campanha.");
     } finally {
-      setIsSaving(false);
+      setSaving(false);
+    }
+  }
+
+  async function handleToggle(record: CampaignRecord) {
+    try {
+      await adminMvpService.toggleCampaignStatus(record);
+      setFeedback(`Campanha ${record.active ? "inativada" : "ativada"} com sucesso.`);
+      await loadData();
+    } catch (error) {
+      console.error("[AdminCampaigns] toggle error", error);
+      setFeedback("Erro ao atualizar status da campanha.");
     }
   }
 
   return (
     <div style={adminShellStyle}>
       <section style={adminPanelStyle}>
-        <div style={{ display: "grid", gap: 8 }}>
-          <h1 style={{ margin: 0, color: "#17332f" }}>Campanhas</h1>
-          <p style={{ margin: 0, color: "rgba(23,51,47,0.74)", lineHeight: 1.7 }}>
-            Cadastre campanhas promocionais simples para organizar validade e ativacao do MVP.
-          </p>
+        <div style={{ display: "grid", gap: 16 }}>
+          <div style={adminTopbarStyle}>
+            <div style={{ display: "grid", gap: 8 }}>
+              <span style={adminBadgeStyle("green")}>Campanhas</span>
+              <h1 style={{ margin: 0, color: "#17332f" }}>Cadastro de campanhas</h1>
+              <p style={{ margin: 0, color: "rgba(23,51,47,0.74)", lineHeight: 1.7 }}>
+                Organize campanhas por mercado com datas simples de vigencia para operacao do MVP.
+              </p>
+            </div>
+          </div>
+          <AdminNav />
         </div>
       </section>
 
@@ -112,30 +132,62 @@ export default function AdminCampaigns() {
               onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
               required
             />
+            <select
+              style={adminInputStyle}
+              value={form.marketId}
+              onChange={(event) => setForm((current) => ({ ...current, marketId: event.target.value }))}
+              required
+            >
+              <option value="">Selecione o mercado</option>
+              {markets.map((market) => (
+                <option key={market.id} value={market.id}>
+                  {market.nome}
+                </option>
+              ))}
+            </select>
             <input
               style={adminInputStyle}
-              placeholder="Rede / networkId"
-              value={form.networkId}
-              onChange={(event) => setForm((current) => ({ ...current, networkId: event.target.value }))}
+              type="date"
+              value={dateInputFromIso(form.startsAt)}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  startsAt: event.target.value ? `${event.target.value}T12:00:00.000Z` : "",
+                }))
+              }
+              required
             />
             <input
               style={adminInputStyle}
               type="date"
-              value={form.startsAt}
-              onChange={(event) => setForm((current) => ({ ...current, startsAt: event.target.value }))}
-            />
-            <input
-              style={adminInputStyle}
-              type="date"
-              value={form.expiresAt}
-              onChange={(event) => setForm((current) => ({ ...current, expiresAt: event.target.value }))}
+              value={dateInputFromIso(form.endsAt)}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  endsAt: event.target.value ? `${event.target.value}T12:00:00.000Z` : "",
+                }))
+              }
+              required
             />
           </div>
 
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-            <button type="submit" style={adminButtonStyle} disabled={isSaving}>
-              {isSaving ? "Salvando..." : "Cadastrar campanha"}
+          <textarea
+            style={adminTextAreaStyle}
+            placeholder="Descricao da campanha"
+            value={form.description}
+            onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
+            required
+          />
+
+          <div style={adminActionsRowStyle}>
+            <button type="submit" style={adminButtonStyle} disabled={saving}>
+              {saving ? "Salvando..." : editingId ? "Salvar campanha" : "Cadastrar campanha"}
             </button>
+            {editingId ? (
+              <button type="button" style={adminSecondaryButtonStyle} onClick={resetForm}>
+                Cancelar edicao
+              </button>
+            ) : null}
             {feedback ? <span style={{ color: "#0f6d61", fontWeight: 700 }}>{feedback}</span> : null}
           </div>
         </form>
@@ -143,10 +195,10 @@ export default function AdminCampaigns() {
 
       <section style={adminPanelStyle}>
         <div style={{ display: "grid", gap: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+          <div style={adminTopbarStyle}>
             <h2 style={{ margin: 0, color: "#17332f" }}>Lista de campanhas</h2>
-            <span style={{ color: "rgba(23,51,47,0.66)", fontWeight: 700 }}>
-              {campaigns.length} registros
+            <span style={adminBadgeStyle("neutral")}>
+              {loading ? "Carregando..." : `${campaigns.length} campanhas`}
             </span>
           </div>
 
@@ -159,20 +211,47 @@ export default function AdminCampaigns() {
                   borderRadius: 18,
                   background: "white",
                   border: "1px solid rgba(15,53,47,0.08)",
+                  display: "grid",
+                  gap: 12,
                 }}
               >
-                <div style={{ fontWeight: 900, color: "#15322d" }}>{campaign.name}</div>
-                <div style={{ marginTop: 6, color: "rgba(21,50,45,0.72)", lineHeight: 1.6 }}>
-                  {campaign.networkId ? `Rede: ${campaign.networkId}` : "Sem rede informada"}
-                  <br />
-                  Status: {campaign.active ? "Ativa" : "Inativa"}
-                  <br />
-                  Inicio: {campaign.startsAt ? new Date(campaign.startsAt).toLocaleDateString("pt-BR") : "nao informado"}
-                  <br />
-                  Fim: {campaign.expiresAt ? new Date(campaign.expiresAt).toLocaleDateString("pt-BR") : "nao informado"}
+                <div style={adminTopbarStyle}>
+                  <div>
+                    <div style={{ fontWeight: 900, color: "#15322d" }}>{campaign.name}</div>
+                    <div style={{ marginTop: 6, color: "rgba(21,50,45,0.72)", lineHeight: 1.7 }}>
+                      {campaign.marketName || "Sem mercado vinculado"}
+                      <br />
+                      {campaign.description}
+                    </div>
+                  </div>
+                  <span style={adminBadgeStyle(campaign.active ? "green" : "red")}>
+                    {campaign.active ? "Ativa" : "Inativa"}
+                  </span>
+                </div>
+
+                <div style={{ color: "rgba(21,50,45,0.66)", lineHeight: 1.7 }}>
+                  Inicio: {campaign.startsAt ? new Date(campaign.startsAt).toLocaleDateString("pt-BR") : "sem data"} ·
+                  Fim: {campaign.endsAt ? new Date(campaign.endsAt).toLocaleDateString("pt-BR") : "sem data"}
+                </div>
+
+                <div style={adminActionsRowStyle}>
+                  <button type="button" style={adminSecondaryButtonStyle} onClick={() => startEditing(campaign)}>
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    style={campaign.active ? adminDangerButtonStyle : adminButtonStyle}
+                    onClick={() => handleToggle(campaign)}
+                  >
+                    {campaign.active ? "Inativar" : "Ativar"}
+                  </button>
                 </div>
               </article>
             ))}
+
+            {!campaigns.length && !loading ? (
+              <div style={{ color: "rgba(23,51,47,0.68)" }}>Nenhuma campanha cadastrada ainda.</div>
+            ) : null}
           </div>
         </div>
       </section>

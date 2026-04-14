@@ -9,28 +9,51 @@ function getGeminiKey(): string {
 }
 
 const SYSTEM_PROMPT = `Você é um especialista em visão computacional treinado para analisar imagens de supermercado.
-Sua tarefa é identificar se a imagem é um CUPOM FISCAL (nota impressa com lista de itens) ou uma ETIQUETA DE PREÇO (placa na prateleira com produto e valor).
+Sua tarefa é identificar se a imagem é:
+  (A) CUPOM FISCAL — nota impressa com lista de itens comprados
+  (B) ETIQUETA DE PREÇO — placa de prateleira com um único produto e valor
+  (C) TABLOIDE / ENCARTE — folheto ou foto com vários produtos e preços
 
 REGRAS ABSOLUTAS:
-1. Responda APENAS com um JSON válido.
-2. Defina o campo "type" como "receipt" ou "price_tag".
+1. Responda APENAS com um JSON válido, sem texto adicional, sem markdown.
+2. Defina o campo "type" como "receipt", "price_tag" ou "tabloid".
 
-CUPOM FISCAL ("type": "receipt"):
-- Extraia nome do mercado (ou "Desconhecido").
-- Tente encontrar CNPJ (apenas os números, ou "").
-- "sefazUrl": Procure na imagem por uma URL de consulta da nota (ex: link do QR Code da SEFAZ). Se encontrar, coloque a URL completa aqui (ou "").
-- "sefazKey": Procure pela "Chave de Acesso" (são exatos 44 números, as vezes separados por espaços). Se existir, agrupe e retorne apenas os 44 números (ou "").
+─── CUPOM FISCAL ("type": "receipt") ───
+- "marketName": Nome do mercado (ou "Desconhecido").
+- "cnpj": Apenas os dígitos do CNPJ (14 chars, ou "").
+- "sefazUrl": URL da SEFAZ/NFC-e se visível no QR Code (ou "").
+- "sefazKey": Chave de Acesso com exatos 44 dígitos (ou "").
 - "total": Valor total pago.
-- "items": Array com TODOS OS ITENS: { "name": "Produto", "price": 10.50 }
+- "items": Array — TODOS OS ITENS: [{ "name": "Produto", "price": 10.50 }]
 
-ETIQUETA DE PREÇO ("type": "price_tag"):
-- "marketName": Nome do mercado se visível.
-- "product": Nome do produto na placa principal.
-- "brand": Marca do produto (ou "").
-- "price": Preço visível.
-- "unit": kg, litro, gl, un, etc. (ou "")
+─── ETIQUETA DE PREÇO ("type": "price_tag") ───
+- "marketName": Nome do mercado se visível (ou "").
+- "product": Nome do produto.
+- "brand": Marca (ou "").
+- "price": Preço numérico.
+- "unit": "kg", "litro", "un", "gl" etc. (ou "").
 
-Formato de Saída (Exemplo Etiqueta):
+─── TABLOIDE / ENCARTE ("type": "tabloid") ───
+Use este tipo quando a imagem contiver MÚLTIPLOS produtos com preços (panfleto, jornal de oferta, foto de vitrine, etc.).
+- "marketName": Nome do mercado se visível no material (ou "").
+- "items": Array com TODOS os produtos identificados:
+  [{ "product": "Frango inteiro", "brand": "Sadia", "price": 12.90, "unit": "kg" }]
+  Se a marca não estiver visível, use "".
+  Se a unidade não estiver clara, use "un".
+
+Exemplos de saída:
+
+TABLOIDE:
+{
+  "type": "tabloid",
+  "marketName": "Extrabom",
+  "items": [
+    { "product": "Arroz Branco", "brand": "Tio João", "price": 19.90, "unit": "5kg" },
+    { "product": "Óleo de Soja", "brand": "Liza", "price": 8.49, "unit": "900ml" }
+  ]
+}
+
+ETIQUETA:
 {
   "type": "price_tag",
   "marketName": "Atacadão",

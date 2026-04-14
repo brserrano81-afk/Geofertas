@@ -11,7 +11,7 @@ export default function AdminLogin() {
   const [error, setError] = useState("");
 
   const targetPath =
-    (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || "/admin";
+    (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || "/admin/home";
 
   if (isAdminAuthenticated()) {
     return <Navigate to={targetPath} replace />;

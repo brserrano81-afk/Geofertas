@@ -1,8 +1,8 @@
-// ─────────────────────────────────────────────
-// ChatService — Orquestrador Puro
-// Recebe NlpResult → delega para engine correto
-// → retorna ChatResponse.
-// ─────────────────────────────────────────────
+﻿// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ChatService â€” Orquestrador Puro
+// Recebe NlpResult â†’ delega para engine correto
+// â†’ retorna ChatResponse.
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 import { diagnosticService } from './DiagnosticService.ts';
 import { aiService, type Intent } from './AiService';
@@ -23,6 +23,7 @@ import { type TransportMode, calculateAllTransportCosts } from '../app/utils/geo
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import type { MarketComparisonEntry, ShoppingComparisonResult } from '../types/shopping';
+import { offerQueueService } from './admin/OfferQueueService';
 
 export interface ChatResponse {
     text: string;
@@ -68,13 +69,13 @@ const GARBAGE_WORDS = new Set([
     'ver lista', 'mostrar lista', 'minha lista', 'adicionar', 'eu', 'usar',
     'ok', 'sim', 'bora', 'pode', 'quero', 'finalizar', 'pronto', 'fechar',
     'lista', 'ver', 'mostrar', 'obrigado', 'valeu', 'oi', 'ola', 'tchau',
-    'nao', 'não', 'cancelar', 'voltar', 'ajuda', 'help',
-    'bom dia', 'boa tarde', 'boa noite', 'e ai', 'e aí', 'olá',
+    'nao', 'nÃ£o', 'cancelar', 'voltar', 'ajuda', 'help',
+    'bom dia', 'boa tarde', 'boa noite', 'e ai', 'e aÃ­', 'olÃ¡',
 ]);
 
 const COURTESY_WORDS = new Set([
-    'oi', 'ola', 'olá', 'bom dia', 'boa tarde', 'boa noite', 'obrigado',
-    'obrigada', 'valeu', 'e ai', 'e aí', 'show', 'blz', 'beleza',
+    'oi', 'ola', 'olÃ¡', 'bom dia', 'boa tarde', 'boa noite', 'obrigado',
+    'obrigada', 'valeu', 'e ai', 'e aÃ­', 'show', 'blz', 'beleza',
 ]);
 
 /** Remove duplicatas (case-insensitive) e filtra garbage words */
@@ -127,7 +128,7 @@ function detectOptimizationPreference(message: string): 'economizar' | 'perto' |
 function formatPreferenceLabel(preference?: 'economizar' | 'perto' | 'equilibrar'): string {
     if (preference === 'economizar') return 'Economizar';
     if (preference === 'perto') return 'Mercado mais perto';
-    return 'Equilibrar preço e distância';
+    return 'Equilibrar preÃ§o e distÃ¢ncia';
 }
 
 function capitalize(value: string): string {
@@ -175,7 +176,7 @@ class ChatSession {
         const { profile, recentInteractions } = await userProfileService.bootstrapUser(this.context.userId);
         this.context.shoppingList = await this.listManager.loadActiveList();
 
-        // Carregar preferências persistentes
+        // Carregar preferÃªncias persistentes
         const prefs = await userPreferencesService.getPreferences(this.context.userId);
         if (profile.name) this.context.userName = profile.name;
         if (prefs.name) this.context.userName = prefs.name;
@@ -228,7 +229,7 @@ class ChatSession {
         const conversationState = this.conversationState;
         conversationState.incrementTurn();
 
-        // ─── 0. GPS: TRATAMENTO DE COORDENADAS DIRETAS ───
+        // â”€â”€â”€ 0. GPS: TRATAMENTO DE COORDENADAS DIRETAS â”€â”€â”€
         if (message.startsWith('COORDENADAS:') || message.startsWith('[GPS_LOCATION_UPDATE]')) {
             const cleanStr = message.replace('COORDENADAS:', '').replace('[GPS_LOCATION_UPDATE]', '').trim();
             const parts = cleanStr.split(',');
@@ -241,7 +242,7 @@ class ChatSession {
             }
         }
 
-        // ─── 0.8. HOTFIX AMNESIA: EARLY RETURN PARA CONFIRMAÇÃO DE COMPRA ───
+        // â”€â”€â”€ 0.8. HOTFIX AMNESIA: EARLY RETURN PARA CONFIRMAÃ‡ÃƒO DE COMPRA â”€â”€â”€
         const pendingPurchaseConfirmation = await this.handlePendingPurchaseConfirmation(message);
         if (pendingPurchaseConfirmation) {
             return pendingPurchaseConfirmation;
@@ -249,7 +250,7 @@ class ChatSession {
         if (conversationState.current === 'AWAITING_PURCHASE_CONFIRMATION') {
             const lowMsg = message.toLowerCase().trim();
             const confirmWords = ['ok', 'sim', 'confirmo', 'salva', 'pode salvar', 'yes', 'confirmar', 'isso'];
-            const negativeWords = ['cancelar', 'não', 'nao', 'cancela', 'errado', 'descarta'];
+            const negativeWords = ['cancelar', 'nÃ£o', 'nao', 'cancela', 'errado', 'descarta'];
 
             const isConfirm = confirmWords.some(w => lowMsg === w || lowMsg.startsWith(`${w} `));
             const isNegative = negativeWords.some(w => lowMsg === w || lowMsg.startsWith(`${w} `));
@@ -276,77 +277,77 @@ class ChatSession {
                 this.context.pendingPurchase = undefined;
                 this.context.pendingMatchResult = undefined;
                 conversationState.reset();
-                return { text: "❌ Fechado, descartei essa nota. Como posso te ajudar agora?" };
+                return { text: "âŒ Fechado, descartei essa nota. Como posso te ajudar agora?" };
             }
 
-            // Se ele digitar algo nada a ver no meio da confirmação:
-            return { text: "⚠️ Parceiro, eu preciso que você me responda com **OK** para salvar a nota ou **CANCELAR** para descartar, blz?" };
+            // Se ele digitar algo nada a ver no meio da confirmaÃ§Ã£o:
+            return { text: "âš ï¸ Parceiro, eu preciso que vocÃª me responda com **OK** para salvar a nota ou **CANCELAR** para descartar, blz?" };
         }
 
-        // ─── 0.1 FAST GREETING INTERCEPT ───
+        // â”€â”€â”€ 0.1 FAST GREETING INTERCEPT â”€â”€â”€
         const veryShort = message.trim().toLowerCase();
-        if (veryShort === '.' || veryShort === '?' || veryShort === '!' || veryShort === 'kole' || veryShort === 'koé') {
+        if (veryShort === '.' || veryShort === '?' || veryShort === '!' || veryShort === 'kole' || veryShort === 'koÃ©') {
             console.log(`[ChatService] Fast-intercepting greeting: "${veryShort}"`);
             return this.handleSaudacao();
         }
 
-        // ─── 0.2 ONBOARDING ANSWER (Sabe como funciona?) ───
+        // â”€â”€â”€ 0.2 ONBOARDING ANSWER (Sabe como funciona?) â”€â”€â”€
         if (conversationState.current === 'AWAITING_ONBOARDING_ANSWER') {
             const lowOnb = message.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
             const isNo = ['nao', 'n', 'nop', 'naum', 'no', 'fala logo', 'que nada', 'negativo', 'nem', 'ixe', 'conta ai', 'explica', 'como'].some(w => lowOnb === w || lowOnb.startsWith(`${w} `));
-            const isYes = ['sim', 'yes', 'ok', 'sei', 'ja sei', 'claro', 'conheço', 'conheco', 's', 'sei sim', 'bora', 'ja'].some(w => lowOnb === w || lowOnb.startsWith(`${w} `));
+            const isYes = ['sim', 'yes', 'ok', 'sei', 'ja sei', 'claro', 'conheÃ§o', 'conheco', 's', 'sei sim', 'bora', 'ja'].some(w => lowOnb === w || lowOnb.startsWith(`${w} `));
 
             conversationState.reset();
 
             if (isNo) {
-                return { text: "Show! Aqui é simples:\n\n💬 Você me manda o nome do produto e eu te mostro o **preço mais barato** entre os mercados da sua região.\n\n🛒 Pode montar sua **lista de compras** comigo e eu comparo os preços pra você economizar de verdade.\n\n📸 Tirou foto do cupom fiscal? Me manda que eu registro os preços reais e ainda te mostro se teve **compra por impulso**!\n\nBora lá, me fala o que você precisa! 🏷️" };
+                return { text: "Show! Aqui Ã© simples:\n\nðŸ’¬ VocÃª me manda o nome do produto e eu te mostro o **preÃ§o mais barato** entre os mercados da sua regiÃ£o.\n\nðŸ›’ Pode montar sua **lista de compras** comigo e eu comparo os preÃ§os pra vocÃª economizar de verdade.\n\nðŸ“¸ Tirou foto do cupom fiscal? Me manda que eu registro os preÃ§os reais e ainda te mostro se teve **compra por impulso**!\n\nBora lÃ¡, me fala o que vocÃª precisa! ðŸ·ï¸" };
             }
 
             if (isYes) {
-                return { text: "Boa! Quem já sabe usar sai na frente! 💪\n\nEm que posso te ajudar hoje?\n• Preço mais barato de algum produto?\n• Montar uma lista de compras?\n• Mercado mais próximo de você?\n\nManda aí! 🛒" };
+                return { text: "Boa! Quem jÃ¡ sabe usar sai na frente! ðŸ’ª\n\nEm que posso te ajudar hoje?\nâ€¢ PreÃ§o mais barato de algum produto?\nâ€¢ Montar uma lista de compras?\nâ€¢ Mercado mais prÃ³ximo de vocÃª?\n\nManda aÃ­! ðŸ›’" };
             }
 
-            // Se ele já mandou um produto direto, trata como busca
+            // Se ele jÃ¡ mandou um produto direto, trata como busca
             // Cai no fluxo normal abaixo
         }
 
-        // ─── 0.3 TRANSPORT INTERCEPT (FINALIZANDO LISTA) ───
+        // â”€â”€â”€ 0.3 TRANSPORT INTERCEPT (FINALIZANDO LISTA) â”€â”€â”€
         if (conversationState.current === 'AWAITING_TRANSPORT_MODE_FOR_LIST') {
             const low = message.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
             if (low.includes('carro') || low.includes('uber') || low.includes('moto')) this.context.transportMode = 'car';
-            else if (low.includes('onibus') || low.includes('ônibus') || low.includes('bus')) this.context.transportMode = 'bus';
-            else if (low.includes('pe') || low.includes('pé') || low.includes('andando')) this.context.transportMode = 'foot';
+            else if (low.includes('onibus') || low.includes('Ã´nibus') || low.includes('bus')) this.context.transportMode = 'bus';
+            else if (low.includes('pe') || low.includes('pÃ©') || low.includes('andando')) this.context.transportMode = 'foot';
             else if (low.includes('bike') || low.includes('bicicleta')) this.context.transportMode = 'bike';
             else {
-                return { text: "Não entendi bem como você vai. Responde aí: 🚗 Carro, 🚌 Ônibus, 🚶 A pé ou 🚲 Bike?" };
+                return { text: "NÃ£o entendi bem como vocÃª vai. Responde aÃ­: ðŸš— Carro, ðŸšŒ Ã”nibus, ðŸš¶ A pÃ© ou ðŸš² Bike?" };
             }
 
             conversationState.reset();
             return this.handleCalcularTotalLista();
         }
 
-        // Calcula interpretação no início
+        // Calcula interpretaÃ§Ã£o no inÃ­cio
         const interpretation = await aiService.interpret(message, this.context);
         const explicitPreference = detectOptimizationPreference(message);
         const normalizedMessage = normalizeText(message);
         const asksForProfile = /\b(o que (voce|vc) sabe sobre mim|o que lembra de mim|me fala meu historico|me fale meu historico)\b/.test(normalizedMessage);
 
-        // ─── 0.5. ONBOARDING (PRIMEIRA MENSAGEM) ───
+        // â”€â”€â”€ 0.5. ONBOARDING (PRIMEIRA MENSAGEM) â”€â”€â”€
         if (!this.context.userName && conversationState.current === 'IDLE') {
             const tempIntent = interpretation.intent;
 
-            // HOTFIX 1: Se a primeira mensagem já for um comando de busca/lista, não trava no onboarding.
+            // HOTFIX 1: Se a primeira mensagem jÃ¡ for um comando de busca/lista, nÃ£o trava no onboarding.
             if (['consultar_preco_produto', 'consultar_preco_multiplos_produtos', 'criar_lista', 'montar_lista', 'comparar_menor_preco'].includes(tempIntent) || (interpretation.products && interpretation.products.length > 0)) {
                 this.context.userName = 'Amigo';
                 userPreferencesService.savePreferences(this.context.userId, { name: 'Amigo' });
                 // Deixa o fluxo continuar normalmente...
             } else {
                 conversationState.transition('AWAITING_NAME', 'save_user_name', null, 'Como quer que eu te chame?');
-                return { text: "Fala meu parceiro! 👋 Eu sou o Economiza Fácil, tô aqui pra fazer seu dinheiro render no mercado. Como posso te chamar?" };
+                return { text: "Fala meu parceiro! ðŸ‘‹ Eu sou o Economiza FÃ¡cil, tÃ´ aqui pra fazer seu dinheiro render no mercado. Como posso te chamar?" };
             }
         }
 
-        // ─── 1. RESOLVER ESTADO PENDENTE (antes do NLP) ───
+        // â”€â”€â”€ 1. RESOLVER ESTADO PENDENTE (antes do NLP) â”€â”€â”€
         const pending = conversationState.resolveIfPending(message);
         const shouldBypassNameCapture =
             pending?.action === 'save_user_name' &&
@@ -375,13 +376,13 @@ class ChatSession {
             conversationState.reset();
         }
 
-        // ─── 1.5. GATILHO DE SAÍDA DO LOOP (CRIANDO_LISTA -> FINALIZAR) E BLOQUEIOS GLOBAIS ───
+        // â”€â”€â”€ 1.5. GATILHO DE SAÃDA DO LOOP (CRIANDO_LISTA -> FINALIZAR) E BLOQUEIOS GLOBAIS â”€â”€â”€
         if (conversationState.current === 'CRIANDO_LISTA' || conversationState.current === 'AWAITING_ADD_TO_LIST') {
             const lowMsgRaw = message.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
             const finishWords = ['finalizar', 'finaliza', 'fechar lista', 'fechar a lista', 'so isso', 'e so isso', 'tudo', 'cabou', 'acabou', 'encerra', 'pode finalizar'];
             const isFinish = finishWords.some(w => lowMsgRaw === w || lowMsgRaw.includes(` ${w}`) || lowMsgRaw.startsWith(`${w} `));
 
-            // HOTFIX: "ver lista" / "mostrar lista" → mostrar a lista sem adicionar como item
+            // HOTFIX: "ver lista" / "mostrar lista" â†’ mostrar a lista sem adicionar como item
             const viewListWords = ['ver lista', 'mostrar lista', 'minha lista', 'ver a lista', 'mostra a lista', 'mostra lista', 'exibir lista'];
             const isViewList = viewListWords.some(w => lowMsgRaw === w || lowMsgRaw.startsWith(`${w}`));
             if (isViewList) {
@@ -390,19 +391,19 @@ class ChatSession {
                 if (curList.items.length > 0) {
                     return { text: `${curList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
                 }
-                return { text: "Sua lista está vazia. Me diga os produtos que quer adicionar!" };
+                return { text: "Sua lista estÃ¡ vazia. Me diga os produtos que quer adicionar!" };
             }
 
             // HOTFIX 2: Finalizar deve ser exclusivo de CRIANDO_LISTA
             if (isFinish) {
-                console.log(`[ChatService] Gatilho de saída ativado: ${message}`);
-                conversationState.transition('AWAITING_TRANSPORT_MODE_FOR_LIST', 'choose_transport_for_list', null, 'Como você vai pro mercado?');
-                return { text: "Massa, lista fechada! 🛒\nPra eu te dar a rota com o preço **REAL** (somando passagem ou gasolina), me diga: como você vai pro mercado?\n🚗 Carro\n🚌 Ônibus\n🚶 A pé\n🚲 Bike" };
+                console.log(`[ChatService] Gatilho de saÃ­da ativado: ${message}`);
+                conversationState.transition('AWAITING_TRANSPORT_MODE_FOR_LIST', 'choose_transport_for_list', null, 'Como vocÃª vai pro mercado?');
+                return { text: "Massa, lista fechada! ðŸ›’\nPra eu te dar a rota com o preÃ§o **REAL** (somando passagem ou gasolina), me diga: como vocÃª vai pro mercado?\nðŸš— Carro\nðŸšŒ Ã”nibus\nðŸš¶ A pÃ©\nðŸš² Bike" };
             }
 
-            // HOTFIX 4: Bloqueio de Intenções Globais de Mobilidade durante o loop
+            // HOTFIX 4: Bloqueio de IntenÃ§Ãµes Globais de Mobilidade durante o loop
             if (lowMsgRaw.includes('km/l') || lowMsgRaw.includes('km ') || lowMsgRaw.includes('carro faz') || lowMsgRaw.match(/\d+\s*(km\/l|km por litro)/)) {
-                return { text: "Opa, já guardo essa info do seu transporte! Mas antes, quer adicionar mais itens ou podemos **FINALIZAR** sua lista de produtos?" };
+                return { text: "Opa, jÃ¡ guardo essa info do seu transporte! Mas antes, quer adicionar mais itens ou podemos **FINALIZAR** sua lista de produtos?" };
             }
         }
 
@@ -416,19 +417,19 @@ class ChatSession {
             : pending ? (pending.action as Intent) : fallbackIntent;
         this.context.lastIntent = intent;
 
-        // VERIFICAÇÃO DE ERRO NA API DA OPENAI:
+        // VERIFICAÃ‡ÃƒO DE ERRO NA API DA OPENAI:
         if (interpretation.nlpResult?.entities[0]?.value === 'API_ERROR') {
             console.error(`[ChatService] NLP Error Bubble-up: API Falhou silenciosamente.`);
-            return { text: "Estou com uma instabilidade no meu cérebro de IA agora, tente de novo em um segundo." };
+            return { text: "Estou com uma instabilidade no meu cÃ©rebro de IA agora, tente de novo em um segundo." };
         }
 
-        // ANTI-AMNÉSIA: Se o estado não é IDLE e o NLP falhou em achar algo forte,
-        // força a repetição do estado pendente ou trata como resposta ao estado.
+        // ANTI-AMNÃ‰SIA: Se o estado nÃ£o Ã© IDLE e o NLP falhou em achar algo forte,
+        // forÃ§a a repetiÃ§Ã£o do estado pendente ou trata como resposta ao estado.
         // E ESPECIAL: Se o LLM disse CANCEL_OR_EXIT (convertido para desconhecido mas validado em AiService)
         if (intent === 'desconhecido' && interpretation.nlpResult?.intent === 'CANCEL_OR_EXIT') {
             console.log(`[ChatService] Cancel or Exit detected. Clearing State.`);
             conversationState.reset();
-            return { text: "Tudo bem! Se precisar de algo mais, é só chamar. 👋" };
+            return { text: "Tudo bem! Se precisar de algo mais, Ã© sÃ³ chamar. ðŸ‘‹" };
         }
 
         if (conversationState.current !== 'IDLE' && (intent === 'saudacao' || intent === 'desconhecido')) {
@@ -438,7 +439,7 @@ class ChatSession {
 
         console.log(`[ChatService] Intent: ${intent} | Batch: ${interpretation.isBatch} | Confidence: ${interpretation.confidence}`);
 
-        // ─── 2. HANDLER PARA AÇÕES DO STATE MACHINE ───
+        // â”€â”€â”€ 2. HANDLER PARA AÃ‡Ã•ES DO STATE MACHINE â”€â”€â”€
         // Quando resolveIfPending retorna, o action pode ser diferente dos intents do NLP
         if (pending && !shouldBypassNameCapture) {
             const pendingResponse = await this.handlePendingAction(pending, message, interpretation);
@@ -453,15 +454,15 @@ class ChatSession {
                     await userPreferencesService.savePreferences(this.context.userId, { name: userName });
                     await userProfileService.updateUserName(this.context.userId, userName);
                     conversationState.transition('AWAITING_ONBOARDING_ANSWER', 'onboarding_answer', null, 'Sabe como funciona?');
-                    return { text: `Fala ${userName}! 👋 Bora economizar? Pode perguntar preço de qualquer produto de supermercado ou mandar a lista do mês que te ajudo a economizar!\n\nSabe como funciona?` };
+                    return { text: `Fala ${userName}! ðŸ‘‹ Bora economizar? Pode perguntar preÃ§o de qualquer produto de supermercado ou mandar a lista do mÃªs que te ajudo a economizar!\n\nSabe como funciona?` };
                 }
                 case 'list_recovery': {
-                    // Usuário decidiu: manter lista existente ou criar nova
+                    // UsuÃ¡rio decidiu: manter lista existente ou criar nova
                     const lowRecover = pending.originalMessage.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
                     const isNew = ['nova', 'criar', 'criar nova', 'nova lista', 'lista nova', 'nova', 'nao', 'n', 'limpa', 'apaga', 'deleta'].some(w => lowRecover === w || lowRecover.startsWith(`${w} `));
 
                     if (isNew) {
-                        // Deletar lista não-finalizada e começar do zero
+                        // Deletar lista nÃ£o-finalizada e comeÃ§ar do zero
                         await this.listManager.deleteActiveList();
                         this.context.shoppingList = [];
 
@@ -472,14 +473,14 @@ class ChatSession {
                             await this.listManager.persistList(this.context.shoppingList);
                             const createdList = await this.listManager.recoverActiveListItemsOnly();
                             conversationState.transition('CRIANDO_LISTA', 'adicionar_item_lista', null, 'Diga os itens');
-                            return { text: `✅ Lista nova criada! 🛒\n\n${createdList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
+                            return { text: `âœ… Lista nova criada! ðŸ›’\n\n${createdList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
                         }
 
                         conversationState.transition('CRIANDO_LISTA', 'adicionar_item_lista', null, 'Me diga os produtos!');
-                        return { text: "✅ Lista anterior apagada! Me diga os produtos pra nova lista." };
+                        return { text: "âœ… Lista anterior apagada! Me diga os produtos pra nova lista." };
                     }
 
-                    // Manter lista existente → carregar e entrar em CRIANDO_LISTA
+                    // Manter lista existente â†’ carregar e entrar em CRIANDO_LISTA
                     this.context.shoppingList = await this.listManager.loadActiveList();
 
                     // Se tinha produtos pendentes, adicionar junto
@@ -495,10 +496,10 @@ class ChatSession {
 
                     const recoveredList = await this.listManager.recoverActiveListItemsOnly();
                     conversationState.transition('CRIANDO_LISTA', 'adicionar_item_lista', null, 'Diga os itens');
-                    return { text: `👍 Mantive sua lista! 🛒\n\n${recoveredList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
+                    return { text: `ðŸ‘ Mantive sua lista! ðŸ›’\n\n${recoveredList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
                 }
                 case 'add_to_list': {
-                    // Usuário disse "sim" após busca de preço único ou fallback de mercado
+                    // UsuÃ¡rio disse "sim" apÃ³s busca de preÃ§o Ãºnico ou fallback de mercado
                     if (pending.confirmed) {
                         let productsToAdd: string[] = [];
                         const msgClean = pending.originalMessage.toLowerCase()
@@ -513,7 +514,7 @@ class ChatSession {
                             productsToAdd = [pending.data];
                         } else {
                             conversationState.transition('CRIANDO_LISTA', 'adicionar_item_lista', null, 'Diga os itens');
-                            return { text: "Beleza! Me diga quais itens você quer colocar na lista." };
+                            return { text: "Beleza! Me diga quais itens vocÃª quer colocar na lista." };
                         }
 
                         let addedCount = 0;
@@ -527,13 +528,13 @@ class ChatSession {
                         const addedText = addedCount > 1 ? `**variados**` : `**${productsToAdd[0]}**`;
 
                         conversationState.transition('CRIANDO_LISTA', 'adicionar_item_lista', null, 'Diga os itens');
-                        return { text: `✅ ${addedCount > 1 ? 'Itens adicionados' : addedText + ' adicionado'} à sua lista! 🛒\n\nDiga mais um produto ou _"ver lista"_ para conferir.` };
+                        return { text: `âœ… ${addedCount > 1 ? 'Itens adicionados' : addedText + ' adicionado'} Ã  sua lista! ðŸ›’\n\nDiga mais um produto ou _"ver lista"_ para conferir.` };
                     }
-                    return { text: "Beleza, não anotei. O que mais precisa?" };
+                    return { text: "Beleza, nÃ£o anotei. O que mais precisa?" };
                 }
                 case 'add_batch_to_list': {
-                    // Usuário disse "sim" após busca de múltiplos produtos
-                    // HOTFIX: usar allProducts do context para adicionar TODOS, não só os com preço
+                    // UsuÃ¡rio disse "sim" apÃ³s busca de mÃºltiplos produtos
+                    // HOTFIX: usar allProducts do context para adicionar TODOS, nÃ£o sÃ³ os com preÃ§o
                     if (pending.confirmed && pending.data) {
                         const productsToAdd: string[] = this.context.pendingAllProducts || pending.data;
 
@@ -545,10 +546,10 @@ class ChatSession {
                         this.context.pendingAllProducts = undefined;
                         await this.listManager.persistList(this.context.shoppingList);
                         conversationState.transition('CRIANDO_LISTA', 'adicionar_item_lista', null, 'Diga os itens');
-                        return { text: `✅ **${productsToAdd.join(', ')}** adicionados à sua lista! 🛒\n\nDiga mais um produto ou _"ver lista"_ para conferir.` };
+                        return { text: `âœ… **${productsToAdd.join(', ')}** adicionados Ã  sua lista! ðŸ›’\n\nDiga mais um produto ou _"ver lista"_ para conferir.` };
                     }
                     this.context.pendingAllProducts = undefined;
-                    return { text: "Beleza, não anotei. O que mais precisa?" };
+                    return { text: "Beleza, nÃ£o anotei. O que mais precisa?" };
                 }
                 case 'confirm_list': {
                     if (pending.confirmed) {
@@ -559,24 +560,24 @@ class ChatSession {
                 case 'multi_choice': {
                     const savedProducts: string[] = pending.data || [];
                     if (pending.confirmed) {
-                        // Usuário escolheu PREÇO → buscar preço de cada produto
-                        console.log(`[ChatService] Multi-choice: PREÇO para ${savedProducts.length} produtos`);
+                        // UsuÃ¡rio escolheu PREÃ‡O â†’ buscar preÃ§o de cada produto
+                        console.log(`[ChatService] Multi-choice: PREÃ‡O para ${savedProducts.length} produtos`);
                         const batchResult = await offerEngine.lookupBatch(savedProducts);
                         this.context.pendingAllProducts = savedProducts; // Salvar TODOS para add na lista depois
                         if (batchResult.products.length > 0) {
                             conversationState.transition('AWAITING_ADD_TO_LIST', 'add_batch_to_list', batchResult.products, 'Quer anotar na lista?');
-                            return { text: `${batchResult.text}\n\n**Quer que eu anote na sua Lista de Compras? (Sim/Não)**` };
+                            return { text: `${batchResult.text}\n\n**Quer que eu anote na sua Lista de Compras? (Sim/NÃ£o)**` };
                         }
                         return { text: batchResult.text };
                     } else {
-                        // Usuário escolheu LISTA → criar lista de compras
+                        // UsuÃ¡rio escolheu LISTA â†’ criar lista de compras
                         console.log(`[ChatService] Multi-choice: LISTA com ${savedProducts.length} produtos`);
                         await this.listManager.archiveActiveList();
                         this.context.shoppingList = savedProducts.map(name => ({ name }));
                         await this.listManager.persistList(this.context.shoppingList);
                         const createdList = await this.listManager.recoverActiveListItemsOnly();
                         conversationState.transition('AWAITING_LIST_CONFIRMATION', 'confirm_list', this.context.shoppingList, 'Finalizar lista?');
-                        return { text: `Lista com ${savedProducts.length} itens criada com sucesso! 🛒\n\n${createdList.text}Finalizar lista?` };
+                        return { text: `Lista com ${savedProducts.length} itens criada com sucesso! ðŸ›’\n\n${createdList.text}Finalizar lista?` };
                     }
                 }
                 case 'confirm_expense': {
@@ -590,12 +591,12 @@ class ChatSession {
                             date: new Date().toISOString(),
                         });
                         const formattedVal = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amount);
-                        return { text: `✅ Gasto de **${formattedVal}** no **${mktName}** registrado com sucesso!` };
+                        return { text: `âœ… Gasto de **${formattedVal}** no **${mktName}** registrado com sucesso!` };
                     }
                     return { text: "Gasto cancelado. O que mais precisa?" };
                 }
                 case 'CRIANDO_LISTA': {
-                    // Adicionar mais itens durante criação de lista
+                    // Adicionar mais itens durante criaÃ§Ã£o de lista
                     const normalizedMessage = message.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
                     if (COURTESY_WORDS.has(normalizedMessage)) {
                         const updatedList = await this.listManager.recoverActiveListItemsOnly();
@@ -619,37 +620,37 @@ class ChatSession {
                         const updatedList = await this.listManager.recoverActiveListItemsOnly();
 
                         let response = '';
-                        if (addedCount > 0) response += `Adicionei! 🛒\n\n`;
-                        if (duplicates.length > 0) response += `⚠️ **${duplicates.join(', ')}** já ${duplicates.length === 1 ? 'está' : 'estão'} na lista.\n\n`;
+                        if (addedCount > 0) response += `Adicionei! ðŸ›’\n\n`;
+                        if (duplicates.length > 0) response += `âš ï¸ **${duplicates.join(', ')}** jÃ¡ ${duplicates.length === 1 ? 'estÃ¡' : 'estÃ£o'} na lista.\n\n`;
                         response += `${updatedList.text}Quer adicionar mais itens ou **FINALIZAR**?`;
                         return { text: response };
                     }
-                    // Se digitou algo que não é produto, tenta interpretar como produto mesmo
+                    // Se digitou algo que nÃ£o Ã© produto, tenta interpretar como produto mesmo
                     const singleItem = message.trim();
                     if (singleItem.length > 1 && singleItem.length < 50 && !GARBAGE_WORDS.has(singleItem.toLowerCase().trim())) {
                         // Verificar duplicata
                         if (this.context.shoppingList.find(i => i.name.toLowerCase() === singleItem.toLowerCase())) {
                             const updatedList = await this.listManager.recoverActiveListItemsOnly();
-                            return { text: `⚠️ **${singleItem}** já está na sua lista!\n\n${updatedList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
+                            return { text: `âš ï¸ **${singleItem}** jÃ¡ estÃ¡ na sua lista!\n\n${updatedList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
                         }
                         this.context.shoppingList.push({ name: singleItem });
                         await this.listManager.persistList(this.context.shoppingList);
                         const updatedList = await this.listManager.recoverActiveListItemsOnly();
-                        return { text: `Adicionei **${singleItem}**! 🛒\n\n${updatedList.text}Quer adicionar mais ou **FINALIZAR**?` };
+                        return { text: `Adicionei **${singleItem}**! ðŸ›’\n\n${updatedList.text}Quer adicionar mais ou **FINALIZAR**?` };
                     }
-                    return { text: "Não entendi. Me diga o nome do produto ou **FINALIZAR** para fechar a lista." };
+                    return { text: "NÃ£o entendi. Me diga o nome do produto ou **FINALIZAR** para fechar a lista." };
                 }
                 case 'share_list': {
                     if (pending.confirmed === null) {
-                        return { text: "Você prefere ver a rota para o mercado mais barato ou compartilhar a lista no WhatsApp?" };
+                        return { text: "VocÃª prefere ver a rota para o mercado mais barato ou compartilhar a lista no WhatsApp?" };
                     }
                     if (pending.confirmed) {
-                        // Rota para o mercado — com cálculo multimodal de transporte
+                        // Rota para o mercado â€” com cÃ¡lculo multimodal de transporte
                         const topMarketName = pending.data?.topMarketName;
                         const dest = encodeURIComponent((topMarketName || "Supermercado"));
                         const routeLink = `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
 
-                        // Se o usuário tem localização, calcular custos de transporte
+                        // Se o usuÃ¡rio tem localizaÃ§Ã£o, calcular custos de transporte
                         if (this.context.userLocation && topMarketName) {
                             try {
                                 const nearbyMarkets = await geoDecisionEngine.findNearbyMarkets(
@@ -672,16 +673,16 @@ class ChatSession {
 
                                     const listTotal = pending.data?.listTotal || 0;
                                     const transportLines = costs.map(c => {
-                                        const costStr = c.cost > 0 ? `R$ ${c.cost.toFixed(2).replace('.', ',')}` : 'Grátis';
-                                        const realTotal = listTotal > 0 ? ` → Total real: **R$ ${(listTotal + c.cost).toFixed(2).replace('.', ',')}**` : '';
+                                        const costStr = c.cost > 0 ? `R$ ${c.cost.toFixed(2).replace('.', ',')}` : 'GrÃ¡tis';
+                                        const realTotal = listTotal > 0 ? ` â†’ Total real: **R$ ${(listTotal + c.cost).toFixed(2).replace('.', ',')}**` : '';
                                         return `${c.emoji} **${c.label}**: ${costStr} (${c.time})${realTotal}`;
                                     });
 
                                     return {
-                                        text: `📍 **Rota para ${topMarketName}** (${distKm.toFixed(1)} km)\n\n` +
-                                            `🧮 **Custo de deslocamento (ida e volta):**\n${transportLines.join('\n')}\n\n` +
-                                            `🔗 ${routeLink}\n\n` +
-                                            `💡 _Classe C economiza em cada detalhe! Escolha o meio de transporte que mais cabe no seu bolso._ 💪`
+                                        text: `ðŸ“ **Rota para ${topMarketName}** (${distKm.toFixed(1)} km)\n\n` +
+                                            `ðŸ§® **Custo de deslocamento (ida e volta):**\n${transportLines.join('\n')}\n\n` +
+                                            `ðŸ”— ${routeLink}\n\n` +
+                                            `ðŸ’¡ _Classe C economiza em cada detalhe! Escolha o meio de transporte que mais cabe no seu bolso._ ðŸ’ª`
                                     };
                                 }
                             } catch (err) {
@@ -689,42 +690,42 @@ class ChatSession {
                             }
                         }
 
-                        // Fallback sem localização
-                        return { text: `📍 **Rota para o ${topMarketName || 'mercado mais barato'}**\n\n🔗 ${routeLink}\n\n💡 _Compartilhe sua localização para eu calcular o custo de transporte (carro, ônibus, a pé, bike e uber)!_` };
+                        // Fallback sem localizaÃ§Ã£o
+                        return { text: `ðŸ“ **Rota para o ${topMarketName || 'mercado mais barato'}**\n\nðŸ”— ${routeLink}\n\nðŸ’¡ _Compartilhe sua localizaÃ§Ã£o para eu calcular o custo de transporte (carro, Ã´nibus, a pÃ©, bike e uber)!_` };
                     } else {
                         // Compartilhar (WhatsApp)
                         const listItems = pending.data?.list || this.context.shoppingList;
-                        if (listItems.length === 0) return { text: "Sua lista está vazia." };
+                        if (listItems.length === 0) return { text: "Sua lista estÃ¡ vazia." };
                         const share = this.listManager.getShareText(listItems);
-                        return { text: `Aqui está sua lista pronta para compartilhar!\n\n${share}`, shareContent: share };
+                        return { text: `Aqui estÃ¡ sua lista pronta para compartilhar!\n\n${share}`, shareContent: share };
                     }
                 }
                 default:
-                    // Ação não reconhecida do state machine, continuar para o switch de intents
+                    // AÃ§Ã£o nÃ£o reconhecida do state machine, continuar para o switch de intents
                     break;
             }
         }
 
-        // ─── 2.5. FALLBACK INTELIGENTE: Detectar nomes de rede como busca de mercado ───
-        const KNOWN_MARKETS = ['atacadão', 'atacadao', 'extrabom', 'assaí', 'assai', 'carone', 'casagrande', 'rede show', 'redeshow', 'multishow', 'multi show', 'bh supermercados', 'bh', 'supermarket'];
+        // â”€â”€â”€ 2.5. FALLBACK INTELIGENTE: Detectar nomes de rede como busca de mercado â”€â”€â”€
+        const KNOWN_MARKETS = ['atacadÃ£o', 'atacadao', 'extrabom', 'assaÃ­', 'assai', 'carone', 'casagrande', 'rede show', 'redeshow', 'multishow', 'multi show', 'bh supermercados', 'bh', 'supermarket'];
         if (intent === 'consultar_preco_produto' || intent === 'comparar_menor_preco') {
             const searchTerm = (interpretation.product || interpretation.nlpResult.entities[0]?.value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
             if (searchTerm.length >= 2) {
                 const matchedMarket = KNOWN_MARKETS.find(m => searchTerm.includes(m) || m.includes(searchTerm));
                 if (matchedMarket && searchTerm.length <= 20) {
-                    console.log(`[ChatService] Market Fallback: "${searchTerm}" → ofertas_mercado (matched: ${matchedMarket})`);
+                    console.log(`[ChatService] Market Fallback: "${searchTerm}" â†’ ofertas_mercado (matched: ${matchedMarket})`);
                     const purchases = await this.purchaseAnalytics.getFrequentProducts(30);
                     const marketVitrine = await offerEngine.getTopOffersByMarket(searchTerm, purchases);
-                    if (marketVitrine.startsWith("Poxa, não encontrei") || marketVitrine.includes("ativas para o mercado agora")) {
+                    if (marketVitrine.startsWith("Poxa, nÃ£o encontrei") || marketVitrine.includes("ativas para o mercado agora")) {
                         return { text: marketVitrine };
                     }
                     conversationState.transition('AWAITING_ADD_TO_LIST', 'add_to_list', 'variados', 'Quer que eu adicione as melhores ofertas?');
-                    return { text: `${marketVitrine}\n\n**Quer que eu coloque algum desses na sua lista de compras?** 🛒\n(Diga 'Sim' e depois cite os nomes)` };
+                    return { text: `${marketVitrine}\n\n**Quer que eu coloque algum desses na sua lista de compras?** ðŸ›’\n(Diga 'Sim' e depois cite os nomes)` };
                 }
             }
         }
 
-        // ─── 2.6. MULTI-PRODUTO: Perguntar "preço ou lista?" ───
+        // â”€â”€â”€ 2.6. MULTI-PRODUTO: Perguntar "preÃ§o ou lista?" â”€â”€â”€
         const rawMultiProducts = interpretation.products || interpretation.nlpResult.entities.map(e => e.value);
         const multiProducts = cleanProductList(rawMultiProducts);
         const hasMultipleProducts = multiProducts.length >= 2;
@@ -735,38 +736,38 @@ class ChatSession {
             (intent === 'criar_lista' || intent === 'consultar_preco_multiplos_produtos' || intent === 'comparar_menor_preco_multiplos_produtos')) {
             console.log(`[ChatService] Multi-product question: ${multiProducts.length} products, asking user intent`);
             conversationState.transition('AWAITING_MULTI_CHOICE', 'multi_choice', multiProducts, '1 ou 2?');
-            const productList = multiProducts.map(p => `• ${p}`).join('\n');
-            return { text: `Encontrei ${multiProducts.length} produtos:\n${productList}\n\nO que você prefere?\n1️⃣ Ver o **preço** de cada um\n2️⃣ Criar uma **lista de compras**` };
+            const productList = multiProducts.map(p => `â€¢ ${p}`).join('\n');
+            return { text: `Encontrei ${multiProducts.length} produtos:\n${productList}\n\nO que vocÃª prefere?\n1ï¸âƒ£ Ver o **preÃ§o** de cada um\n2ï¸âƒ£ Criar uma **lista de compras**` };
         }
 
         switch (intent as Intent | 'share_target') {
-            // ─── Saudação / Ajuda ───
+            // â”€â”€â”€ SaudaÃ§Ã£o / Ajuda â”€â”€â”€
             case 'saudacao':
                 return this.handleSaudacao();
             case 'ajuda':
-                return { text: "Pode perguntar de tudo: do pão até as comprinhas de farmácia (tipo fralda, camisinha). 🛒\nManda bala no que você precisa:\n• _\"Quanto tá o arroz?\"_\n• _\"Lista: arroz, feijão, frango\"_\n• Mude o mercado: _\"Atacadão\"_ ou _\"Extrabom\"_\n• Envie a foto ou link do Cupom Fiscal!" };
+                return { text: "Pode perguntar de tudo: do pÃ£o atÃ© as comprinhas de farmÃ¡cia (tipo fralda, camisinha). ðŸ›’\nManda bala no que vocÃª precisa:\nâ€¢ _\"Quanto tÃ¡ o arroz?\"_\nâ€¢ _\"Lista: arroz, feijÃ£o, frango\"_\nâ€¢ Mude o mercado: _\"AtacadÃ£o\"_ ou _\"Extrabom\"_\nâ€¢ Envie a foto ou link do Cupom Fiscal!" };
 
-            // ─── Cupom / Compra (via IngestionPipeline + Conferência Lista) ───
+            // â”€â”€â”€ Cupom / Compra (via IngestionPipeline + ConferÃªncia Lista) â”€â”€â”€
             case 'extrair_cupom': {
                 return this.handleReceiptSubmission(message);
                 const pipelineResult = await ingestionPipeline.processUserSubmission(message);
                 const receiptData = pipelineResult.success ? pipelineResult.data : null;
 
                 if (!receiptData) {
-                    return { text: pipelineResult.error || "Não consegui extrair os dados. Envie um link de nota fiscal válido, foto do cupom ou placa de preço da prateleira. 📸" };
+                    return { text: pipelineResult.error || "NÃ£o consegui extrair os dados. Envie um link de nota fiscal vÃ¡lido, foto do cupom ou placa de preÃ§o da prateleira. ðŸ“¸" };
                 }
 
                 // Modo Olheiro (Placa de Prateleira)
                 if (pipelineResult.source === 'price_tag') {
                     this.context.pendingPurchase = receiptData;
-                    conversationState.transition('AWAITING_PRICE_TAG_CONFIRMATION', 'confirm_price_tag', receiptData, 'Salvar preço da prateleira?');
+                    conversationState.transition('AWAITING_PRICE_TAG_CONFIRMATION', 'confirm_price_tag', receiptData, 'Salvar preÃ§o da prateleira?');
                     
                     const priceFormatted = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(receiptData.price);
-                    let msg = `📸 **Modo Olheiro Ativado!**\n\n`;
-                    msg += `Li a etiqueta que você mandou:\n`;
-                    msg += `• **Produto:** ${receiptData.product} ${receiptData.brand || ''} ${receiptData.unit || ''}\n`;
-                    msg += `• **Preço:** ${priceFormatted}\n`;
-                    if (receiptData.marketName) msg += `• **Mercado:** ${receiptData.marketName}\n`;
+                    let msg = `ðŸ“¸ **Modo Olheiro Ativado!**\n\n`;
+                    msg += `Li a etiqueta que vocÃª mandou:\n`;
+                    msg += `â€¢ **Produto:** ${receiptData.product} ${receiptData.brand || ''} ${receiptData.unit || ''}\n`;
+                    msg += `â€¢ **PreÃ§o:** ${priceFormatted}\n`;
+                    if (receiptData.marketName) msg += `â€¢ **Mercado:** ${receiptData.marketName}\n`;
                     msg += `\nQuer que eu grave isso na base para ajudar a galera? (Responda **OK** ou **Cancelar**)`;
                     
                     return { text: msg };
@@ -776,11 +777,11 @@ class ChatSession {
                 const activeList = await this.listManager.loadActiveList();
                 const matchResult = matchReceiptToList(receiptData.items || [], activeList);
 
-                // Armazenar no contexto para uso na confirmação
+                // Armazenar no contexto para uso na confirmaÃ§Ã£o
                 this.context.pendingPurchase = receiptData;
                 this.context.pendingMatchResult = matchResult;
 
-                // Gerar mensagem de conferência
+                // Gerar mensagem de conferÃªncia
                 const conference = this.purchaseManager.formatReceiptConference(receiptData, matchResult);
 
                 conversationState.transition('AWAITING_PURCHASE_CONFIRMATION', 'confirm_purchase', receiptData, 'OK para confirmar');
@@ -791,10 +792,10 @@ class ChatSession {
                 if (this.context.pendingPurchase) {
                     if (this.context.pendingPurchase.type === 'price_tag') {
                         // TODO: Gravar no banco de ofertas de forma global
-                        console.log("[ChatService] Preço de prateleira salvo na base:", this.context.pendingPurchase);
+                        console.log("[ChatService] PreÃ§o de prateleira salvo na base:", this.context.pendingPurchase);
                         this.context.pendingPurchase = undefined;
                         conversationState.reset();
-                        return { text: "✅ Preço gravado com sucesso! Valeu por fortalecer a comunidade! 👊" };
+                        return { text: "âœ… PreÃ§o gravado com sucesso! Valeu por fortalecer a comunidade! ðŸ‘Š" };
                     }
 
                     const pendingMatchResult = this.context.pendingMatchResult;
@@ -813,36 +814,36 @@ class ChatSession {
                     conversationState.reset();
                     return res;
                 }
-                return { text: "Não tenho nenhuma compra pendente para confirmar agora." };
+                return { text: "NÃ£o tenho nenhuma compra pendente para confirmar agora." };
             case 'cancelar_compra':
                 return this.handlePurchaseCancellation();
                 if (this.context.pendingPurchase) {
                     this.context.pendingPurchase = undefined;
                     this.context.pendingMatchResult = undefined;
                     conversationState.reset();
-                    return { text: "❌ Fechado. Ação cancelada e dados descartados." };
+                    return { text: "âŒ Fechado. AÃ§Ã£o cancelada e dados descartados." };
                 }
-                return { text: "Não tenho nenhuma compra pendente para cancelar." };
+                return { text: "NÃ£o tenho nenhuma compra pendente para cancelar." };
             case 'finalizar_compra':
-                return { text: "Para registrar uma compra real, envie uma foto do cupom, QR Code ou do preço na prateleira. 📸" };
+                return { text: "Para registrar uma compra real, envie uma foto do cupom, QR Code ou do preÃ§o na prateleira. ðŸ“¸" };
 
-            // ─── Multi-Produto (TOP 3 por produto + proativo) ───
+            // â”€â”€â”€ Multi-Produto (TOP 3 por produto + proativo) â”€â”€â”€
             case 'consultar_preco_multiplos_produtos':
             case 'comparar_menor_preco_multiplos_produtos': {
                 const products = interpretation.products || interpretation.nlpResult.entities.map(e => e.value);
-                if (products.length === 0) return { text: "Quais produtos você gostaria de consultar?" };
+                if (products.length === 0) return { text: "Quais produtos vocÃª gostaria de consultar?" };
 
                 const batchResult = await offerEngine.lookupBatch(products, this.context.userLocation, this.context.transportMode, this.context.consumption);
                 this.context.pendingAllProducts = products; // Salvar TODOS para add na lista depois
 
                 if (batchResult.products.length > 0) {
                     conversationState.transition('AWAITING_ADD_TO_LIST', 'add_batch_to_list', batchResult.products, 'Quer que eu anote isso na sua Lista de Compras?');
-                    return { text: `${batchResult.text}\n\n**Quer que eu anote isso na sua Lista de Compras? (Sim/Não)**` };
+                    return { text: `${batchResult.text}\n\n**Quer que eu anote isso na sua Lista de Compras? (Sim/NÃ£o)**` };
                 }
                 return { text: batchResult.text };
             }
 
-            // ─── Geolocalização ───
+            // â”€â”€â”€ GeolocalizaÃ§Ã£o â”€â”€â”€
             case 'compartilhar_localizacao':
                 return this.handleLocation();
             case 'find_nearby_markets':
@@ -855,7 +856,7 @@ class ChatSession {
                 return this.handlePreferenceIntent(explicitPreference);
                 const preference = explicitPreference;
                 if (!preference) {
-                    return { text: "Me diga como você prefere que eu priorize as sugestões:\n• **economizar**\n• **mercado mais perto**\n• **equilibrar os dois**" };
+                    return { text: "Me diga como vocÃª prefere que eu priorize as sugestÃµes:\nâ€¢ **economizar**\nâ€¢ **mercado mais perto**\nâ€¢ **equilibrar os dois**" };
                 }
 
                 const normalizedPreference = preference as 'economizar' | 'perto' | 'equilibrar';
@@ -866,9 +867,9 @@ class ChatSession {
                 await this.refreshRichContext(true);
 
                 const messages = {
-                    economizar: '✅ Anotado! Vou priorizar as opções mais baratas primeiro, mesmo que sejam um pouco mais longe.',
-                    perto: '✅ Fechado! Vou priorizar os mercados mais perto de você primeiro.',
-                    equilibrar: '✅ Combinado! Vou equilibrar preço e distância para te mostrar a melhor escolha.',
+                    economizar: 'âœ… Anotado! Vou priorizar as opÃ§Ãµes mais baratas primeiro, mesmo que sejam um pouco mais longe.',
+                    perto: 'âœ… Fechado! Vou priorizar os mercados mais perto de vocÃª primeiro.',
+                    equilibrar: 'âœ… Combinado! Vou equilibrar preÃ§o e distÃ¢ncia para te mostrar a melhor escolha.',
                 };
 
                 return { text: `${messages[normalizedPreference]}\n\nPode mudar quando quiser.` };
@@ -876,69 +877,69 @@ class ChatSession {
             case 'ver_perfil_usuario':
                 return this.handleShowUserProfile();
 
-            // ─── Ofertas Específicas de um Mercado ───
+            // â”€â”€â”€ Ofertas EspecÃ­ficas de um Mercado â”€â”€â”€
             case 'ofertas_mercado':
             case 'get_market_offers': {
                 return this.handleMarketOffersIntent(interpretation.nlpResult.entities[0]?.value);
                 const marketName = interpretation.nlpResult.entities[0]?.value;
-                if (!marketName) return { text: "De qual mercado você quer ver as ofertas?" };
-                // Carregar histórico de compras para cruzar
+                if (!marketName) return { text: "De qual mercado vocÃª quer ver as ofertas?" };
+                // Carregar histÃ³rico de compras para cruzar
                 const mktPurchases = await this.purchaseAnalytics.getFrequentProducts(30);
                 const marketVitrine = await offerEngine.getTopOffersByMarket(marketName, mktPurchases);
-                if (marketVitrine.startsWith("Poxa, não encontrei")) {
+                if (marketVitrine.startsWith("Poxa, nÃ£o encontrei")) {
                     return { text: marketVitrine };
                 }
                 conversationState.transition('AWAITING_ADD_TO_LIST', 'add_to_list', 'variados', 'Quer que eu adicione as melhores ofertas?');
-                return { text: `${marketVitrine}\n\n**Quer que eu coloque algum desses na sua lista de compras?** 🛒\n(Diga 'Sim' e depois cite os nomes)` };
+                return { text: `${marketVitrine}\n\n**Quer que eu coloque algum desses na sua lista de compras?** ðŸ›’\n(Diga 'Sim' e depois cite os nomes)` };
             }
 
-            // ─── Ofertas da Semana ───
+            // â”€â”€â”€ Ofertas da Semana â”€â”€â”€
             case 'ofertas_da_semana': {
                 const vitrine = await offerEngine.getWeeklyVitrine();
                 return { text: vitrine };
             }
 
-            // ─── Ofertas por Categoria ───
+            // â”€â”€â”€ Ofertas por Categoria â”€â”€â”€
             case 'buscar_categoria': {
                 return this.handleCategoryOffersIntent(interpretation.nlpResult.entities[0]?.value);
                 const categoryName = interpretation.nlpResult.entities[0]?.value;
-                if (!categoryName) return { text: "Qual departamento ou categoria você quer buscar? (ex: Carnes, Limpeza, Cervejas)" };
+                if (!categoryName) return { text: "Qual departamento ou categoria vocÃª quer buscar? (ex: Carnes, Limpeza, Cervejas)" };
                 const catVitrine = await offerEngine.getCategoryVitrine(categoryName);
                 if (catVitrine.startsWith("Poxa") || catVitrine.startsWith("As ofertas")) {
                     return { text: catVitrine };
                 }
                 conversationState.transition('AWAITING_ADD_TO_LIST', 'add_to_list', 'variados', 'Quer que eu adicione algum item?');
-                return { text: `${catVitrine}\n\n**Gostou de algo? Quer que eu adicione à sua lista de compras?** 🛒\n(Diga 'Sim' e depois cite os nomes)` };
+                return { text: `${catVitrine}\n\n**Gostou de algo? Quer que eu adicione Ã  sua lista de compras?** ðŸ›’\n(Diga 'Sim' e depois cite os nomes)` };
             }
 
-            // ─── Histórico de Preços (Global) ───
+            // â”€â”€â”€ HistÃ³rico de PreÃ§os (Global) â”€â”€â”€
             case 'consultar_historico_global': {
                 return this.handlePriceHistoryIntent(interpretation.product || interpretation.nlpResult.entities[0]?.value, message);
                 const product = interpretation.product || interpretation.nlpResult.entities[0]?.value;
-                if (!product) return { text: "Qual produto você quer ver o histórico de preço?" };
+                if (!product) return { text: "Qual produto vocÃª quer ver o histÃ³rico de preÃ§o?" };
                 const targetDate = this.extractDateFromMessage(message);
                 const historicalText = await offerEngine.getHistoricalPrices(product, targetDate || undefined);
                 return { text: historicalText };
             }
 
-            // ─── Atualização de Registro Financeiro Pessoal ───
+            // â”€â”€â”€ AtualizaÃ§Ã£o de Registro Financeiro Pessoal â”€â”€â”€
             case 'registrar_gasto': {
                 return this.handleExpenseRegistrationIntent(interpretation.nlpResult.entities[0]?.amount, interpretation.nlpResult.entities[0]?.value);
                 const amount = interpretation.nlpResult.entities[0]?.amount;
                 const marketNameGasto = interpretation.nlpResult.entities[0]?.value;
 
                 if (amount === undefined || !marketNameGasto || marketNameGasto === 'desconhecido') {
-                    return { text: "Para registrar um gasto financeiro, preciso do valor exato e do nome da loja. Exemplo: _'Gastei 150 reais no Atacadão'_." };
+                    return { text: "Para registrar um gasto financeiro, preciso do valor exato e do nome da loja. Exemplo: _'Gastei 150 reais no AtacadÃ£o'_." };
                 }
 
                 const payload = { amount, marketName: marketNameGasto };
                 const formattedValue = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amount as number);
 
                 conversationState.transition('AWAITING_EXPENSE_CONFIRMATION', 'confirm_expense', payload, 'Confirmar gasto?');
-                return { text: `📝 Entendi. Você gastou **${formattedValue}** no mercado **${marketNameGasto.toUpperCase()}**?\n\n(Diga *Sim* para confirmar ou *Não* para cancelar)` };
+                return { text: `ðŸ“ Entendi. VocÃª gastou **${formattedValue}** no mercado **${marketNameGasto.toUpperCase()}**?\n\n(Diga *Sim* para confirmar ou *NÃ£o* para cancelar)` };
             }
 
-            // ─── Análise de Gastos Pessoal ───
+            // â”€â”€â”€ AnÃ¡lise de Gastos Pessoal â”€â”€â”€
             case 'analise_gastos_pessoal': {
                 return this.handleExpenseAnalysisIntent(interpretation.product || interpretation.nlpResult.entities[0]?.value, message);
                 const analyticsTerm = interpretation.product || interpretation.nlpResult.entities[0]?.value;
@@ -953,7 +954,7 @@ class ChatSession {
                 }
             }
 
-            // ─── Histórico de Compras do Usuário ───
+            // â”€â”€â”€ HistÃ³rico de Compras do UsuÃ¡rio â”€â”€â”€
             case 'gerenciar_lista':
             case 'mostrar_lista': {
                 return this.handleShowListIntent();
@@ -962,13 +963,13 @@ class ChatSession {
                     conversationState.transition('AWAITING_LIST_CONFIRMATION', 'confirm_list', this.context.shoppingList, 'Finalizar lista?');
                     return { text: `${curList.text}Finalizar lista?` };
                 }
-                return { text: "Sua lista está vazia no momento. Diga algo como _'lista: arroz, feijão'_ para começar!" };
+                return { text: "Sua lista estÃ¡ vazia no momento. Diga algo como _'lista: arroz, feijÃ£o'_ para comeÃ§ar!" };
             }
 
             case 'limpar_lista':
                 await this.listManager.archiveActiveList();
                 this.context.shoppingList = [];
-                return { text: "Lista limpa com sucesso! Quando quiser começar uma nova, é só me falar os itens." };
+                return { text: "Lista limpa com sucesso! Quando quiser comeÃ§ar uma nova, Ã© sÃ³ me falar os itens." };
 
             case 'ver_ultima_lista':
                 return this.listManager.getLastList();
@@ -996,26 +997,26 @@ class ChatSession {
                 return { text: `${this.purchaseAnalytics.formatConsumptionPattern(pattern, daysPattern)}\n\n${predictiveText}` };
             }
 
-            // ─── Lista ───
+            // â”€â”€â”€ Lista â”€â”€â”€
             case 'montar_lista':
             case 'criar_lista': {
                 return this.handleCreateListIntent(interpretation);
                 const rawItems = interpretation.products || interpretation.nlpResult.entities.map(e => e.value);
                 const items = cleanProductList(rawItems);
 
-                // Verificar se já existe uma lista ativa não-finalizada
+                // Verificar se jÃ¡ existe uma lista ativa nÃ£o-finalizada
                 const existingList = await this.listManager.loadActiveList();
                 if (existingList.length > 0) {
-                    console.log(`[ChatService] Lista ativa encontrada com ${existingList.length} itens. Perguntando ao usuário.`);
+                    console.log(`[ChatService] Lista ativa encontrada com ${existingList.length} itens. Perguntando ao usuÃ¡rio.`);
                     conversationState.transition('AWAITING_LIST_RECOVERY', 'list_recovery', { products: items }, 'Manter ou criar nova?');
                     const preview = existingList.slice(0, 5).map(i => i.name).join(', ');
                     const moreText = existingList.length > 5 ? ` e mais ${existingList.length - 5}` : '';
-                    return { text: `📋 Você já tem uma lista com **${existingList.length} itens** (${preview}${moreText}).\n\nQuer **manter** essa lista e continuar adicionando ou **criar uma nova** do zero?` };
+                    return { text: `ðŸ“‹ VocÃª jÃ¡ tem uma lista com **${existingList.length} itens** (${preview}${moreText}).\n\nQuer **manter** essa lista e continuar adicionando ou **criar uma nova** do zero?` };
                 }
 
                 if (items.length === 0) {
-                    conversationState.transition('CRIANDO_LISTA', 'adicionar_item_lista', null, 'Me dê os produtos que eu crio uma lista pra você bem rápida e econômica!');
-                    return { text: "Me dê os produtos que eu crio uma lista pra você bem rápida e econômica!" };
+                    conversationState.transition('CRIANDO_LISTA', 'adicionar_item_lista', null, 'Me dÃª os produtos que eu crio uma lista pra vocÃª bem rÃ¡pida e econÃ´mica!');
+                    return { text: "Me dÃª os produtos que eu crio uma lista pra vocÃª bem rÃ¡pida e econÃ´mica!" };
                 }
 
                 // Criar nova lista
@@ -1029,7 +1030,7 @@ class ChatSession {
 
                 const createdList = await this.listManager.recoverActiveListItemsOnly();
                 conversationState.transition('CRIANDO_LISTA', 'adicionar_item_lista', null, 'Diga os itens');
-                return { text: `Lista com ${items.length} itens criada! 🛒\n\n${createdList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
+                return { text: `Lista com ${items.length} itens criada! ðŸ›’\n\n${createdList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
             }
             case 'adicionar_item_lista': {
                 return this.handleAddItemsIntent(interpretation);
@@ -1040,7 +1041,7 @@ class ChatSession {
                     : addEntities.map(e => e.value).filter((value): value is string => Boolean(value));
                 const rawAddItems: string[] = interpretedProducts.length > 0 ? interpretedProducts : fallbackAddItems;
                 const addItems = cleanProductList(rawAddItems);
-                if (addItems.length === 0) return { text: "Quais itens você quer adicionar?" };
+                if (addItems.length === 0) return { text: "Quais itens vocÃª quer adicionar?" };
                 addItems.forEach((name, idx) => {
                     if (!this.context.shoppingList.find(i => i.name === name)) {
                         this.context.shoppingList.push({
@@ -1053,7 +1054,7 @@ class ChatSession {
                 await this.listManager.persistList(this.context.shoppingList);
                 const addResult = await this.listManager.recoverActiveListItemsOnly();
                 conversationState.transition('AWAITING_LIST_CONFIRMATION', 'confirm_list', this.context.shoppingList, 'Finalizar lista?');
-                return { text: `Adicionei à sua lista.\n\n${addResult.text}Finalizar lista?` };
+                return { text: `Adicionei Ã  sua lista.\n\n${addResult.text}Finalizar lista?` };
             }
             case 'remover_item_lista': {
                 return this.handleRemoveItemsIntent(interpretation);
@@ -1062,7 +1063,7 @@ class ChatSession {
                     ? [interpretation.product as string]
                     : interpretation.nlpResult.entities.map(e => e.value).filter((value): value is string => Boolean(value));
                 const removeItems: string[] = interpretedRemoveProducts.length > 0 ? interpretedRemoveProducts : fallbackRemoveItems;
-                if (removeItems.length === 0) return { text: "Quais itens você quer tirar da lista?" };
+                if (removeItems.length === 0) return { text: "Quais itens vocÃª quer tirar da lista?" };
                 this.context.shoppingList = this.context.shoppingList.filter(
                     item => !removeItems.some(r => item.name.toLowerCase().includes(r.toLowerCase()))
                 );
@@ -1076,7 +1077,7 @@ class ChatSession {
                 return this.handleCalcularTotalLista();
             }
             case 'compartilhar_lista':
-                if (this.context.shoppingList.length === 0) return { text: "Sua lista está vazia." };
+                if (this.context.shoppingList.length === 0) return { text: "Sua lista estÃ¡ vazia." };
                 {
                     const targetPhone = extractPhoneNumber(message);
                     if (targetPhone) {
@@ -1084,39 +1085,39 @@ class ChatSession {
                     }
                     const share = this.listManager.getShareText(this.context.shoppingList);
                     conversationState.transition('AWAITING_SHARE_TARGET', 'share_target', { list: this.context.shoppingList }, 'Qual numero devo enviar?');
-                    return { text: `Aqui está sua lista pronta para compartilhar:\n\n${share}\n\nSe quiser, eu também posso enviar direto para outro número. Me manda o telefone com DDD.`, shareContent: share };
+                    return { text: `Aqui estÃ¡ sua lista pronta para compartilhar:\n\n${share}\n\nSe quiser, eu tambÃ©m posso enviar direto para outro nÃºmero. Me manda o telefone com DDD.`, shareContent: share };
                 }
             case 'share_target': {
                 const targetPhone = extractPhoneNumber(message);
                 const listItems = this.context.shoppingList;
                 if (!targetPhone) {
-                    return { text: "Preciso de um número válido com DDD para enviar sua lista. Exemplo: **27999887766**." };
+                    return { text: "Preciso de um nÃºmero vÃ¡lido com DDD para enviar sua lista. Exemplo: **27999887766**." };
                 }
                 if (listItems.length === 0) {
-                    return { text: "Sua lista está vazia agora. Me diga os itens e eu preparo outra." };
+                    return { text: "Sua lista estÃ¡ vazia agora. Me diga os itens e eu preparo outra." };
                 }
                 return this.shareListToPhone(targetPhone, listItems);
             }
 
-            // ─── Preço Único (PROATIVO: oferece adicionar na lista) ───
+            // â”€â”€â”€ PreÃ§o Ãšnico (PROATIVO: oferece adicionar na lista) â”€â”€â”€
             case 'consultar_preco_produto':
             case 'comparar_menor_preco': {
                 return this.handleSinglePriceIntent(interpretation.product || interpretation.nlpResult.entities[0]?.value);
                 const term = interpretation.product || interpretation.nlpResult.entities[0]?.value;
-                if (!term) return { text: "Quais produtos você quer saber o preço?" };
+                if (!term) return { text: "Quais produtos vocÃª quer saber o preÃ§o?" };
                 this.context.lastProduct = term;
                 const priceText = await offerEngine.lookupSingle(term, this.context.userLocation, this.context.transportMode, this.context.consumption);
 
-                if (priceText.startsWith("Não encontrei ofertas")) {
-                    return { text: `Poxa, ainda não encontrei ofertas vigentes para **${term}** hoje.` };
+                if (priceText.startsWith("NÃ£o encontrei ofertas")) {
+                    return { text: `Poxa, ainda nÃ£o encontrei ofertas vigentes para **${term}** hoje.` };
                 }
 
                 conversationState.transition('AWAITING_ADD_TO_LIST', 'add_to_list', term, 'Quer que eu anote isso na sua Lista de Compras?');
-                return { text: `${priceText}\n\n**Quer que eu anote isso na sua Lista de Compras? (Sim/Não)**` };
+                return { text: `${priceText}\n\n**Quer que eu anote isso na sua Lista de Compras? (Sim/NÃ£o)**` };
             }
 
             default:
-                return { text: "Como posso ajudar com suas compras hoje? Posso consultar preços, montar sua lista ou ver seu histórico." };
+                return { text: "Como posso ajudar com suas compras hoje? Posso consultar preÃ§os, montar sua lista ou ver seu histÃ³rico." };
         }
     }
 
@@ -1138,17 +1139,22 @@ class ChatSession {
         const receiptData = pipelineResult.data;
 
         if (!pipelineResult.success || !pipelineResult.data) {
-            return { text: pipelineResult.error || "Não consegui extrair os dados da imagem. Envie uma foto mais nítida do cupom ou QR Code." };
+            return { text: pipelineResult.error || "NÃ£o consegui extrair os dados da imagem. Envie uma foto mais nÃ­tida do cupom ou QR Code." };
         }
 
-        if (pipelineResult.source === 'price_tag') {
-            const response = await this.savePriceTag(pipelineResult.data);
+        // TABLOIDE: multiplos produtos -> fila de revisao
+        if (pipelineResult.source === 'tabloid') {
+            const response = await this.enqueueTabloidToQueue(pipelineResult.data);
             conversationState.addMessage(this.context.userId, 'assistant', response.text);
-            await userProfileService.recordInteraction(this.context.userId, {
-                role: 'assistant',
-                content: response.text,
-                intent: 'extrair_cupom',
-            });
+            await userProfileService.recordInteraction(this.context.userId, { role: 'assistant', content: response.text, intent: 'extrair_cupom' });
+            return response;
+        }
+
+        // ETIQUETA DE PRECO: produto unico -> fila de revisao
+        if (pipelineResult.source === 'price_tag') {
+            const response = await this.enqueuePriceTagToQueue(pipelineResult.data);
+            conversationState.addMessage(this.context.userId, 'assistant', response.text);
+            await userProfileService.recordInteraction(this.context.userId, { role: 'assistant', content: response.text, intent: 'extrair_cupom' });
             return response;
         }
 
@@ -1170,7 +1176,7 @@ class ChatSession {
         return { text: conference.text };
     }
 
-    // ─── Extras & Saudações ───
+    // â”€â”€â”€ Extras & SaudaÃ§Ãµes â”€â”€â”€
 
     private handleSaudacao(): ChatResponse {
         const conversationState = this.conversationState;
@@ -1178,14 +1184,14 @@ class ChatSession {
             ? ` ${this.context.userName}` : '';
         if (!this.context.userName) {
             conversationState.transition('AWAITING_NAME', 'save_user_name', null, 'Como quer que eu te chame?');
-            return { text: "Fala meu parceiro! 👋 Eu sou o Economiza Fácil, tô aqui pra fazer seu dinheiro render no mercado. Como posso te chamar?" };
+            return { text: "Fala meu parceiro! ðŸ‘‹ Eu sou o Economiza FÃ¡cil, tÃ´ aqui pra fazer seu dinheiro render no mercado. Como posso te chamar?" };
         }
-        return { text: `Fala${name}! 👋\nPode mandar o nome de um produto, pedir uma oferta ou montar sua lista.` };
+        return { text: `Fala${name}! ðŸ‘‹\nPode mandar o nome de um produto, pedir uma oferta ou montar sua lista.` };
     }
 
     private handleLocation(): ChatResponse {
         return {
-            text: "📍 Para calcular as rotas e o custo real, me diga em qual bairro e cidade você está (ex: Jardim Camburi, Vitória)."
+            text: "ðŸ“ Para calcular as rotas e o custo real, me diga em qual bairro e cidade vocÃª estÃ¡ (ex: Jardim Camburi, VitÃ³ria)."
         };
     }
 
@@ -1193,10 +1199,10 @@ class ChatSession {
         const conversationState = this.conversationState;
         if (msg.includes('carro')) {
             this.context.transportMode = 'car';
-            conversationState.transition('AWAITING_CONSUMPTION', 'set_consumption', null, 'Qual o consumo médio (km/l)?');
-            return { text: "Entendido! Você vai de **🚗 carro**. Qual o consumo médio (km/l)? _(padrão: 10 km/l)_" };
+            conversationState.transition('AWAITING_CONSUMPTION', 'set_consumption', null, 'Qual o consumo mÃ©dio (km/l)?');
+            return { text: "Entendido! VocÃª vai de **ðŸš— carro**. Qual o consumo mÃ©dio (km/l)? _(padrÃ£o: 10 km/l)_" };
         }
-        if (msg.includes('onibus') || msg.includes('ônibus') || msg.includes('bus')) {
+        if (msg.includes('onibus') || msg.includes('Ã´nibus') || msg.includes('bus')) {
             this.context.transportMode = 'bus';
             const priceMatch = msg.match(/\d+([.,]\d+)?/);
             if (priceMatch) {
@@ -1205,11 +1211,11 @@ class ChatSession {
                 userPreferencesService.savePreferences(this.context.userId, { busTicket: val });
             }
             conversationState.reset();
-            return { text: `🚌 Você vai de **ônibus**! Considerei o valor da passagem como **R$ ${this.context.busTicket || 4.50}**.\nSe o valor for diferente, me diga: _'passagem custante X'_ ou mude para 🚗 carro.` };
+            return { text: `ðŸšŒ VocÃª vai de **Ã´nibus**! Considerei o valor da passagem como **R$ ${this.context.busTicket || 4.50}**.\nSe o valor for diferente, me diga: _'passagem custante X'_ ou mude para ðŸš— carro.` };
         }
         this.context.transportMode = 'foot';
         conversationState.reset();
-        return { text: "Ótimo! Você vai **🚶 a pé**. Custo de deslocamento: **R$ 0,00**. Vou considerar apenas mercados bem próximos." };
+        return { text: "Ã“timo! VocÃª vai **ðŸš¶ a pÃ©**. Custo de deslocamento: **R$ 0,00**. Vou considerar apenas mercados bem prÃ³ximos." };
     }
 
     private handleConsumption(msg: string): ChatResponse {
@@ -1218,19 +1224,19 @@ class ChatSession {
             const val = parseFloat(match[0].replace(',', '.'));
             this.context.consumption = val;
             userPreferencesService.savePreferences(this.context.userId, { consumption: val });
-            return { text: `Entendido! Gravei o consumo de **${val} km/l** nas suas preferências. Recomendações agora serão mais precisas! 🚗💨` };
+            return { text: `Entendido! Gravei o consumo de **${val} km/l** nas suas preferÃªncias. RecomendaÃ§Ãµes agora serÃ£o mais precisas! ðŸš—ðŸ’¨` };
         }
-        return { text: "Não consegui identificar o valor. Pode digitar apenas o número do consumo (ex: 12.5)?" };
+        return { text: "NÃ£o consegui identificar o valor. Pode digitar apenas o nÃºmero do consumo (ex: 12.5)?" };
     }
 
     private handleCoords(lat: number, lng: number): ChatResponse {
         this.context.userLocation = { lat, lng, address: `${lat.toFixed(4)}, ${lng.toFixed(4)}` };
-        return { text: `📍 Localização GPS recebida! Agora posso calcular distâncias reais aos mercados.\n\nVocê vai de **carro**, **ônibus** ou **a pé**?` };
+        return { text: `ðŸ“ LocalizaÃ§Ã£o GPS recebida! Agora posso calcular distÃ¢ncias reais aos mercados.\n\nVocÃª vai de **carro**, **Ã´nibus** ou **a pÃ©**?` };
     }
 
     private async handleFindNearbyMarkets(): Promise<ChatResponse> {
         if (!this.context.userLocation) {
-            this.context.userLocation = { lat: -20.2975, lng: -40.3015, address: "Vitória, ES" }; // Mock sem fricção para a classe C
+            this.context.userLocation = { lat: -20.2975, lng: -40.3015, address: "VitÃ³ria, ES" }; // Mock sem fricÃ§Ã£o para a classe C
         }
         const markets = await geoDecisionEngine.findNearbyMarkets(
             this.context.userLocation.lat,
@@ -1242,7 +1248,7 @@ class ChatSession {
     private async handleCalcularTotalLista(): Promise<ChatResponse> {
         const conversationState = this.conversationState;
         if (this.context.shoppingList.length === 0) {
-            return { text: "Sua lista está vazia." };
+            return { text: "Sua lista estÃ¡ vazia." };
         }
 
         const comparison = await shoppingComparisonService.compareItems(this.context.shoppingList);
@@ -1256,22 +1262,22 @@ class ChatSession {
 
         const topMarketName = comparison.bestMarket?.marketName || comparison.ranking[0]?.marketName || 'Mercado';
 
-        // Sugestão inteligente baseada na categoria dominante da lista
+        // SugestÃ£o inteligente baseada na categoria dominante da lista
         const suggestion = await offerEngine.getSmartSuggestion(this.context.shoppingList);
         const suggestionText = suggestion ? suggestion.text : '';
 
         conversationState.transition('AWAITING_SHARE_CONFIRMATION', 'share_list', { list: this.context.shoppingList, topMarketName }, 'Quer compartilhar essa lista?');
-        return { text: `${comparativeText}${suggestionText}\n\n**Quer a lista com o mercado mais barato e próximo a você ou já quer compartilhar essa lista via WhatsApp?**\n1️⃣ Mercado mais barato (Rota)\n2️⃣ Compartilhar no WhatsApp` };
+        return { text: `${comparativeText}${suggestionText}\n\n**Quer a lista com o mercado mais barato e prÃ³ximo a vocÃª ou jÃ¡ quer compartilhar essa lista via WhatsApp?**\n1ï¸âƒ£ Mercado mais barato (Rota)\n2ï¸âƒ£ Compartilhar no WhatsApp` };
     }
 
     private formatShoppingComparisonForWhatsApp(comparison: ShoppingComparisonResult): string {
         if (comparison.items.length === 0) {
-            return "Sua lista está vazia.";
+            return "Sua lista estÃ¡ vazia.";
         }
 
         if (comparison.ranking.length === 0) {
-            const itemLines = comparison.items.map((item) => `• ${item.name}`).join('\n');
-            return `🛒 Sua lista tem ${comparison.items.length} itens, mas ainda não encontrei ofertas suficientes para comparar.\n\nItens da lista:\n${itemLines}`;
+            const itemLines = comparison.items.map((item) => `â€¢ ${item.name}`).join('\n');
+            return `ðŸ›’ Sua lista tem ${comparison.items.length} itens, mas ainda nÃ£o encontrei ofertas suficientes para comparar.\n\nItens da lista:\n${itemLines}`;
         }
 
         const bestMarket = comparison.bestMarket || comparison.ranking[0];
@@ -1282,52 +1288,98 @@ class ChatSession {
             .join('\n');
 
         const missingText = bestMarket.missingItems.length > 0
-            ? `\n\n⚠️ Ainda não achei estes itens nesse mercado:\n${bestMarket.missingItems.map((item) => `• ${item.name}`).join('\n')}`
+            ? `\n\nâš ï¸ Ainda nÃ£o achei estes itens nesse mercado:\n${bestMarket.missingItems.map((item) => `â€¢ ${item.name}`).join('\n')}`
             : '';
 
         const title = hasPartialCoverage
-            ? '🛒 Encontrei a melhor opção parcial para sua lista'
-            : '🛒 Encontrei o melhor mercado para sua lista';
+            ? 'ðŸ›’ Encontrei a melhor opÃ§Ã£o parcial para sua lista'
+            : 'ðŸ›’ Encontrei o melhor mercado para sua lista';
 
-        return `${title}\n\n🏪 Melhor mercado: **${bestMarket.marketName}**\n💰 Total estimado: ${this.formatCurrency(bestMarket.total)}\n📦 Cobertura: ${bestMarket.coverage}/${comparison.items.length} itens\n\n📊 Ranking resumido:\n${rankingLines}${missingText}`;
+        return `${title}\n\nðŸª Melhor mercado: **${bestMarket.marketName}**\nðŸ’° Total estimado: ${this.formatCurrency(bestMarket.total)}\nðŸ“¦ Cobertura: ${bestMarket.coverage}/${comparison.items.length} itens\n\nðŸ“Š Ranking resumido:\n${rankingLines}${missingText}`;
     }
 
     private formatMarketRankingLine(entry: MarketComparisonEntry, index: number, totalItems: number): string {
-        const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉';
+        const medal = index === 0 ? 'ðŸ¥‡' : index === 1 ? 'ðŸ¥ˆ' : 'ðŸ¥‰';
         const missingCount = entry.missingItems.length;
         const missingSuffix = missingCount > 0 ? ` | faltam ${missingCount}` : ' | cobertura total';
-        return `${medal} ${entry.marketName} — ${this.formatCurrency(entry.total)} | cobertura ${entry.coverage}/${totalItems}${missingSuffix}`;
+        return `${medal} ${entry.marketName} â€” ${this.formatCurrency(entry.total)} | cobertura ${entry.coverage}/${totalItems}${missingSuffix}`;
     }
 
     private formatCurrency(value: number): string {
         return `R$ ${value.toFixed(2).replace('.', ',')}`;
     }
 
-    private async savePriceTag(tagData: any): Promise<ChatResponse> {
-        const marketName = tagData.marketName || 'Mercado Desconhecido';
-
+    /** Enfileira tabloide (vÃ¡rios produtos de encarte) para aprovaÃ§Ã£o do admin */
+    private async enqueueTabloidToQueue(tabData: any): Promise<ChatResponse> {
+        const marketName = String(tabData.marketName || '').trim();
+        const items: any[] = Array.isArray(tabData.items) ? tabData.items : [];
+        if (items.length === 0) {
+            return { text: 'Recebi a imagem, mas nao consegui ler os produtos. Tente uma foto mais nitida do encarte.' };
+        }
         try {
-            const { addDoc, collection } = await import('firebase/firestore');
-            const { db } = await import('../firebase');
-
-            await addDoc(collection(db, 'offers'), {
-                name: tagData.product,
-                productName: tagData.product,
-                brand: tagData.brand || '',
-                price: tagData.price,
-                marketName,
-                source: 'community_vision',
-                reportedBy: this.context.userId,
-                createdAt: new Date().toISOString(),
-                expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-            });
-
+            const toEnqueue = items
+                .filter((i: any) => i.product && Number(i.price) > 0)
+                .map((i: any) => ({
+                    productName: String(i.product || '').trim(),
+                    marketName: marketName || String(i.marketName || '').trim(),
+                    price: Number(i.price),
+                    unit: String(i.unit || 'un').trim(),
+                    brand: String(i.brand || '').trim(),
+                    category: '',
+                    imageSource: 'tabloid' as const,
+                    submittedBy: this.context.userId,
+                    rawExtracted: i,
+                }));
+            if (toEnqueue.length === 0) {
+                return { text: 'Li a imagem, mas os produtos nao tinham preco legivel. Tente uma foto mais proxima.' };
+            }
+            await offerQueueService.enqueue(toEnqueue);
+            const summaryLines = toEnqueue.slice(0, 3)
+                .map((o: any) => `â€¢ ${o.productName} â€” R$ ${o.price.toFixed(2).replace('.', ',')} ${o.unit}`);
+            const extra = toEnqueue.length > 3 ? `\n_...e mais ${toEnqueue.length - 3} produto(s)_` : '';
             return {
-                text: `ðŸ“¸ **Foto de Prateleira Reconhecida!**\n\nIdentifiquei:\nðŸ·ï¸ ${tagData.product} ${tagData.brand ? `(${tagData.brand})` : ''}\nðŸ’° R$ ${tagData.price.toFixed(2).replace('.', ',')}\nðŸª ${marketName}\n\nObrigado por contribuir com a comunidade! Essa oferta jÃ¡ estÃ¡ no nosso banco de dados. ðŸ¤`
+                text: `Encarte recebido! Identifiquei **${toEnqueue.length} produto(s)**` +
+                    (marketName ? ` do ${marketName}` : '') + `:\n\n` +
+                    summaryLines.join('\n') + extra +
+                    `\n\nâœ… Enviados para revisÃ£o. Assim que aprovados, aparecem nas comparaÃ§Ãµes!`
             };
         } catch (err) {
-            console.error('[ChatService] Erro ao salvar price_tag:', err);
-            return { text: 'âŒ Consegui ler a etiqueta, mas deu erro ao salvar no banco. Tente novamente mais tarde.' };
+            console.error('[ChatService] Erro ao enfileirar tabloide:', err);
+            return { text: 'Recebi a imagem, mas houve um erro ao processar. Tente novamente.' };
+        }
+    }
+
+    /** Enfileira uma etiqueta de preÃ§o (produto Ãºnico) para aprovaÃ§Ã£o do admin */
+    private async enqueuePriceTagToQueue(tagData: any): Promise<ChatResponse> {
+        const marketName = String(tagData.marketName || '').trim();
+        const productName = String(tagData.product || '').trim();
+        const price = Number(tagData.price || 0);
+        if (!productName || price <= 0) {
+            return { text: 'Vi a etiqueta, mas nao consegui ler o produto ou preco. Tente uma foto mais proxima.' };
+        }
+        try {
+            await offerQueueService.enqueue([{
+                productName,
+                marketName,
+                price,
+                unit: String(tagData.unit || 'un').trim(),
+                brand: String(tagData.brand || '').trim(),
+                category: '',
+                imageSource: 'price_tag' as const,
+                submittedBy: this.context.userId,
+                rawExtracted: tagData,
+            }]);
+            const priceStr = price.toFixed(2).replace('.', ',');
+            return {
+                text: `Etiqueta recebida!\n\n` +
+                    `ðŸ·ï¸ ${productName}${tagData.brand ? ` (${tagData.brand})` : ''}\n` +
+                    `ðŸ’° R$ ${priceStr}${tagData.unit ? ` / ${tagData.unit}` : ''}\n` +
+                    (marketName ? `ðŸª ${marketName}\n` : '') +
+                    `\nâœ… Enviado para revisÃ£o. Obrigado por contribuir com a comunidade! ðŸ¤`
+            };
+        } catch (err) {
+            console.error('[ChatService] Erro ao enfileirar price_tag:', err);
+            return { text: 'Consegui ler a etiqueta, mas deu erro ao enviar. Tente novamente.' };
         }
     }
 
@@ -1356,24 +1408,24 @@ class ChatSession {
             : 'ainda aprendendo';
         const transport = prefs.transportMode || this.context.transportMode || 'carro';
         const consumption = prefs.consumption || this.context.consumption || 10;
-        const neighborhood = prefs.neighborhood || 'não informado';
+        const neighborhood = prefs.neighborhood || 'nÃ£o informado';
         const preference = formatPreferenceLabel(prefs.optimizationPreference || this.context.optimizationPreference);
         const interactions = Number(profile.interactionCount || 0);
         const productLines = frequentProducts === 'ainda aprendendo'
-            ? '• ainda aprendendo'
-            : `• ${frequentProducts.replace(/, /g, '\n• ')}`;
+            ? 'â€¢ ainda aprendendo'
+            : `â€¢ ${frequentProducts.replace(/, /g, '\nâ€¢ ')}`;
 
         return {
             text:
-                `👤 **O que eu sei sobre você:**\n\n` +
-                `📍 Bairro: ${capitalize(neighborhood)}\n` +
-                `🏪 Mercado favorito: ${favoriteMarket}\n` +
-                `🚗 Transporte: ${capitalize(String(transport))} (${consumption} km/l)\n` +
-                `💚 Preferência: ${preference}\n\n` +
-                `🛒 Produtos mais comprados:\n${productLines}\n\n` +
-                `💰 Gasto médio mensal: R$ ${richContext.averageMonthlySpend.toFixed(2).replace('.', ',')}\n` +
-                `📦 Interações registradas: ${interactions}\n\n` +
-                `Quer corrigir alguma informação?`,
+                `ðŸ‘¤ **O que eu sei sobre vocÃª:**\n\n` +
+                `ðŸ“ Bairro: ${capitalize(neighborhood)}\n` +
+                `ðŸª Mercado favorito: ${favoriteMarket}\n` +
+                `ðŸš— Transporte: ${capitalize(String(transport))} (${consumption} km/l)\n` +
+                `ðŸ’š PreferÃªncia: ${preference}\n\n` +
+                `ðŸ›’ Produtos mais comprados:\n${productLines}\n\n` +
+                `ðŸ’° Gasto mÃ©dio mensal: R$ ${richContext.averageMonthlySpend.toFixed(2).replace('.', ',')}\n` +
+                `ðŸ“¦ InteraÃ§Ãµes registradas: ${interactions}\n\n` +
+                `Quer corrigir alguma informaÃ§Ã£o?`,
         };
     }
 
@@ -1393,7 +1445,7 @@ class ChatSession {
         });
 
         return {
-            text: `✅ Lista enviada pra ${targetPhone}!\n\nA outra pessoa vai receber sua lista de compras no WhatsApp.`,
+            text: `âœ… Lista enviada pra ${targetPhone}!\n\nA outra pessoa vai receber sua lista de compras no WhatsApp.`,
             shareContent: shareText,
         };
     }
@@ -1401,7 +1453,7 @@ class ChatSession {
     private extractDateFromMessage(msg: string): string | null {
         const MONTHS: Record<string, string> = {
             'janeiro': '01', 'jan': '01', 'fevereiro': '02', 'fev': '02',
-            'marco': '03', 'março': '03', 'mar': '03', 'abril': '04', 'abr': '04',
+            'marco': '03', 'marÃ§o': '03', 'mar': '03', 'abril': '04', 'abr': '04',
             'maio': '05', 'mai': '05', 'junho': '06', 'jun': '06',
             'julho': '07', 'jul': '07', 'agosto': '08', 'ago': '08',
             'setembro': '09', 'set': '09', 'outubro': '10', 'out': '10',
@@ -1456,7 +1508,7 @@ class ChatSession {
 
         const lowMsg = normalizeText(message);
         const confirmWords = ['ok', 'sim', 'confirmo', 'salva', 'pode salvar', 'yes', 'confirmar', 'isso'];
-        const negativeWords = ['cancelar', 'não', 'nao', 'cancela', 'errado', 'descarta'];
+        const negativeWords = ['cancelar', 'nÃ£o', 'nao', 'cancela', 'errado', 'descarta'];
 
         const isConfirm = confirmWords.some((word) => lowMsg === normalizeText(word) || lowMsg.startsWith(`${normalizeText(word)} `));
         const isNegative = negativeWords.some((word) => lowMsg === normalizeText(word) || lowMsg.startsWith(`${normalizeText(word)} `));
@@ -1468,10 +1520,10 @@ class ChatSession {
 
         if (isNegative && this.context.pendingPurchase) {
             this.clearPendingPurchaseContext();
-            return { text: '❌ Fechado, descartei essa nota. Como posso te ajudar agora?' };
+            return { text: 'âŒ Fechado, descartei essa nota. Como posso te ajudar agora?' };
         }
 
-        return { text: '⚠️ Parceiro, eu preciso que você me responda com **OK** para salvar a nota ou **CANCELAR** para descartar, blz?' };
+        return { text: 'âš ï¸ Parceiro, eu preciso que vocÃª me responda com **OK** para salvar a nota ou **CANCELAR** para descartar, blz?' };
     }
 
     private async handlePendingAction(
@@ -1509,7 +1561,7 @@ class ChatSession {
         await userPreferencesService.savePreferences(this.context.userId, { name: userName });
         await userProfileService.updateUserName(this.context.userId, userName);
         this.conversationState.transition('AWAITING_ONBOARDING_ANSWER', 'onboarding_answer', null, 'Sabe como funciona?');
-        return { text: `Fala ${userName}! 👋 Bora economizar? Pode perguntar preço de qualquer produto de supermercado ou mandar a lista do mês que te ajudo a economizar!\n\nSabe como funciona?` };
+        return { text: `Fala ${userName}! ðŸ‘‹ Bora economizar? Pode perguntar preÃ§o de qualquer produto de supermercado ou mandar a lista do mÃªs que te ajudo a economizar!\n\nSabe como funciona?` };
     }
 
     private async handlePendingListRecovery(pending: PendingResolution): Promise<ChatResponse> {
@@ -1526,11 +1578,11 @@ class ChatSession {
                 await this.listManager.persistList(this.context.shoppingList);
                 const createdList = await this.listManager.recoverActiveListItemsOnly();
                 this.moveToListCreation('Diga os itens');
-                return { text: `✅ Lista nova criada! 🛒\n\n${createdList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
+                return { text: `âœ… Lista nova criada! ðŸ›’\n\n${createdList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
             }
 
             this.moveToListCreation('Me diga os produtos!');
-            return { text: '✅ Lista anterior apagada! Me diga os produtos pra nova lista.' };
+            return { text: 'âœ… Lista anterior apagada! Me diga os produtos pra nova lista.' };
         }
 
         this.context.shoppingList = await this.listManager.loadActiveList();
@@ -1546,31 +1598,31 @@ class ChatSession {
 
         const recoveredList = await this.listManager.recoverActiveListItemsOnly();
         this.moveToListCreation('Diga os itens');
-        return { text: `👍 Mantive sua lista! 🛒\n\n${recoveredList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
+        return { text: `ðŸ‘ Mantive sua lista! ðŸ›’\n\n${recoveredList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
     }
 
     private async handlePendingAddToList(pending: PendingResolution): Promise<ChatResponse> {
         if (!pending.confirmed) {
-            return { text: 'Beleza, não anotei. O que mais precisa?' };
+            return { text: 'Beleza, nÃ£o anotei. O que mais precisa?' };
         }
 
         const productsToAdd = this.extractPendingProductsToAdd(pending);
         if (productsToAdd.length === 0) {
             this.moveToListCreation('Diga os itens');
-            return { text: 'Beleza! Me diga quais itens você quer colocar na lista.' };
+            return { text: 'Beleza! Me diga quais itens vocÃª quer colocar na lista.' };
         }
 
         const { addedCount } = this.addProductsToShoppingList(productsToAdd);
         await this.listManager.persistList(this.context.shoppingList);
         this.moveToListCreation('Diga os itens');
         const addedText = addedCount > 1 ? '**variados**' : `**${productsToAdd[0]}**`;
-        return { text: `✅ ${addedCount > 1 ? 'Itens adicionados' : `${addedText} adicionado`} à sua lista! 🛒\n\nDiga mais um produto ou _"ver lista"_ para conferir.` };
+        return { text: `âœ… ${addedCount > 1 ? 'Itens adicionados' : `${addedText} adicionado`} Ã  sua lista! ðŸ›’\n\nDiga mais um produto ou _"ver lista"_ para conferir.` };
     }
 
     private async handlePendingAddBatchToList(pending: PendingResolution): Promise<ChatResponse> {
         if (!pending.confirmed || !pending.data) {
             this.context.pendingAllProducts = undefined;
-            return { text: 'Beleza, não anotei. O que mais precisa?' };
+            return { text: 'Beleza, nÃ£o anotei. O que mais precisa?' };
         }
 
         const productsToAdd: string[] = this.context.pendingAllProducts || pending.data;
@@ -1578,18 +1630,18 @@ class ChatSession {
         this.context.pendingAllProducts = undefined;
         await this.listManager.persistList(this.context.shoppingList);
         this.moveToListCreation('Diga os itens');
-        return { text: `✅ **${productsToAdd.join(', ')}** adicionados à sua lista! 🛒\n\nDiga mais um produto ou _"ver lista"_ para conferir.` };
+        return { text: `âœ… **${productsToAdd.join(', ')}** adicionados Ã  sua lista! ðŸ›’\n\nDiga mais um produto ou _"ver lista"_ para conferir.` };
     }
 
     private async handlePendingMultiChoice(pending: PendingResolution): Promise<ChatResponse> {
         const savedProducts: string[] = pending.data || [];
         if (pending.confirmed) {
-            console.log(`[ChatService] Multi-choice: PREÇO para ${savedProducts.length} produtos`);
+            console.log(`[ChatService] Multi-choice: PREÃ‡O para ${savedProducts.length} produtos`);
             const batchResult = await offerEngine.lookupBatch(savedProducts);
             this.context.pendingAllProducts = savedProducts;
             if (batchResult.products.length > 0) {
                 this.conversationState.transition('AWAITING_ADD_TO_LIST', 'add_batch_to_list', batchResult.products, 'Quer anotar na lista?');
-                return { text: `${batchResult.text}\n\n**Quer que eu anote na sua Lista de Compras? (Sim/Não)**` };
+                return { text: `${batchResult.text}\n\n**Quer que eu anote na sua Lista de Compras? (Sim/NÃ£o)**` };
             }
             return { text: batchResult.text };
         }
@@ -1600,7 +1652,7 @@ class ChatSession {
         await this.listManager.persistList(this.context.shoppingList);
         const createdList = await this.listManager.recoverActiveListItemsOnly();
         this.conversationState.transition('AWAITING_LIST_CONFIRMATION', 'confirm_list', this.context.shoppingList, 'Finalizar lista?');
-        return { text: `Lista com ${savedProducts.length} itens criada com sucesso! 🛒\n\n${createdList.text}Finalizar lista?` };
+        return { text: `Lista com ${savedProducts.length} itens criada com sucesso! ðŸ›’\n\n${createdList.text}Finalizar lista?` };
     }
 
     private async handlePendingExpenseConfirmation(pending: PendingResolution): Promise<ChatResponse> {
@@ -1616,7 +1668,7 @@ class ChatSession {
             date: new Date().toISOString(),
         });
         const formattedValue = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amount);
-        return { text: `✅ Gasto de **${formattedValue}** no **${marketName}** registrado com sucesso!` };
+        return { text: `âœ… Gasto de **${formattedValue}** no **${marketName}** registrado com sucesso!` };
     }
 
     private async handlePendingListBuilding(
@@ -1637,8 +1689,8 @@ class ChatSession {
             const updatedList = await this.listManager.recoverActiveListItemsOnly();
 
             let response = '';
-            if (addedCount > 0) response += 'Adicionei! 🛒\n\n';
-            if (duplicates.length > 0) response += `⚠️ **${duplicates.join(', ')}** já ${duplicates.length === 1 ? 'está' : 'estão'} na lista.\n\n`;
+            if (addedCount > 0) response += 'Adicionei! ðŸ›’\n\n';
+            if (duplicates.length > 0) response += `âš ï¸ **${duplicates.join(', ')}** jÃ¡ ${duplicates.length === 1 ? 'estÃ¡' : 'estÃ£o'} na lista.\n\n`;
             response += `${updatedList.text}Quer adicionar mais itens ou **FINALIZAR**?`;
             return { text: response };
         }
@@ -1647,15 +1699,15 @@ class ChatSession {
         if (singleItem.length > 1 && singleItem.length < 50 && !GARBAGE_WORDS.has(normalizeText(singleItem))) {
             if (this.hasItemInShoppingList(singleItem)) {
                 const updatedList = await this.listManager.recoverActiveListItemsOnly();
-                return { text: `⚠️ **${singleItem}** já está na sua lista!\n\n${updatedList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
+                return { text: `âš ï¸ **${singleItem}** jÃ¡ estÃ¡ na sua lista!\n\n${updatedList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
             }
             this.context.shoppingList.push({ name: singleItem });
             await this.listManager.persistList(this.context.shoppingList);
             const updatedList = await this.listManager.recoverActiveListItemsOnly();
-            return { text: `Adicionei **${singleItem}**! 🛒\n\n${updatedList.text}Quer adicionar mais ou **FINALIZAR**?` };
+            return { text: `Adicionei **${singleItem}**! ðŸ›’\n\n${updatedList.text}Quer adicionar mais ou **FINALIZAR**?` };
         }
 
-        return { text: 'Não entendi. Me diga o nome do produto ou **FINALIZAR** para fechar a lista.' };
+        return { text: 'NÃ£o entendi. Me diga o nome do produto ou **FINALIZAR** para fechar a lista.' };
     }
 
     private async handleReceiptSubmission(input: string): Promise<ChatResponse> {
@@ -1663,19 +1715,19 @@ class ChatSession {
         const receiptData = pipelineResult.success ? pipelineResult.data : null;
 
         if (!receiptData) {
-            return { text: pipelineResult.error || 'Não consegui extrair os dados. Envie um link de nota fiscal válido, foto do cupom ou placa de preço da prateleira. 📸' };
+            return { text: pipelineResult.error || 'NÃ£o consegui extrair os dados. Envie um link de nota fiscal vÃ¡lido, foto do cupom ou placa de preÃ§o da prateleira. ðŸ“¸' };
         }
 
         if (pipelineResult.source === 'price_tag') {
             this.context.pendingPurchase = receiptData;
-            this.conversationState.transition('AWAITING_PRICE_TAG_CONFIRMATION', 'confirm_price_tag', receiptData, 'Salvar preço da prateleira?');
+            this.conversationState.transition('AWAITING_PRICE_TAG_CONFIRMATION', 'confirm_price_tag', receiptData, 'Salvar preÃ§o da prateleira?');
 
             const priceFormatted = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(receiptData.price);
-            let msg = '📸 **Modo Olheiro Ativado!**\n\n';
-            msg += 'Li a etiqueta que você mandou:\n';
-            msg += `• **Produto:** ${receiptData.product} ${receiptData.brand || ''} ${receiptData.unit || ''}\n`;
-            msg += `• **Preço:** ${priceFormatted}\n`;
-            if (receiptData.marketName) msg += `• **Mercado:** ${receiptData.marketName}\n`;
+            let msg = 'ðŸ“¸ **Modo Olheiro Ativado!**\n\n';
+            msg += 'Li a etiqueta que vocÃª mandou:\n';
+            msg += `â€¢ **Produto:** ${receiptData.product} ${receiptData.brand || ''} ${receiptData.unit || ''}\n`;
+            msg += `â€¢ **PreÃ§o:** ${priceFormatted}\n`;
+            if (receiptData.marketName) msg += `â€¢ **Mercado:** ${receiptData.marketName}\n`;
             msg += '\nQuer que eu grave isso na base para ajudar a galera? (Responda **OK** ou **Cancelar**)';
             return { text: msg };
         }
@@ -1691,13 +1743,13 @@ class ChatSession {
 
     private async handlePurchaseConfirmation(): Promise<ChatResponse> {
         if (!this.context.pendingPurchase) {
-            return { text: 'Não tenho nenhuma compra pendente para confirmar agora.' };
+            return { text: 'NÃ£o tenho nenhuma compra pendente para confirmar agora.' };
         }
 
         if (this.context.pendingPurchase.type === 'price_tag') {
-            console.log('[ChatService] Preço de prateleira salvo na base:', this.context.pendingPurchase);
+            console.log('[ChatService] PreÃ§o de prateleira salvo na base:', this.context.pendingPurchase);
             this.clearPendingPurchaseContext();
-            return { text: '✅ Preço gravado com sucesso! Valeu por fortalecer a comunidade! 👊' };
+            return { text: 'âœ… PreÃ§o gravado com sucesso! Valeu por fortalecer a comunidade! ðŸ‘Š' };
         }
 
         return this.confirmPendingPurchase();
@@ -1705,16 +1757,16 @@ class ChatSession {
 
     private handlePurchaseCancellation(): ChatResponse {
         if (!this.context.pendingPurchase) {
-            return { text: 'Não tenho nenhuma compra pendente para cancelar.' };
+            return { text: 'NÃ£o tenho nenhuma compra pendente para cancelar.' };
         }
 
         this.clearPendingPurchaseContext();
-        return { text: '❌ Fechado. Ação cancelada e dados descartados.' };
+        return { text: 'âŒ Fechado. AÃ§Ã£o cancelada e dados descartados.' };
     }
 
     private async handlePreferenceIntent(preference: 'economizar' | 'perto' | 'equilibrar' | null): Promise<ChatResponse> {
         if (!preference) {
-            return { text: 'Me diga como você prefere que eu priorize as sugestões:\n• **economizar**\n• **mercado mais perto**\n• **equilibrar os dois**' };
+            return { text: 'Me diga como vocÃª prefere que eu priorize as sugestÃµes:\nâ€¢ **economizar**\nâ€¢ **mercado mais perto**\nâ€¢ **equilibrar os dois**' };
         }
 
         this.context.optimizationPreference = preference;
@@ -1722,37 +1774,37 @@ class ChatSession {
         await this.refreshRichContext(true);
 
         const messages = {
-            economizar: '✅ Anotado! Vou priorizar as opções mais baratas primeiro, mesmo que sejam um pouco mais longe.',
-            perto: '✅ Fechado! Vou priorizar os mercados mais perto de você primeiro.',
-            equilibrar: '✅ Combinado! Vou equilibrar preço e distância para te mostrar a melhor escolha.',
+            economizar: 'âœ… Anotado! Vou priorizar as opÃ§Ãµes mais baratas primeiro, mesmo que sejam um pouco mais longe.',
+            perto: 'âœ… Fechado! Vou priorizar os mercados mais perto de vocÃª primeiro.',
+            equilibrar: 'âœ… Combinado! Vou equilibrar preÃ§o e distÃ¢ncia para te mostrar a melhor escolha.',
         };
 
         return { text: `${messages[preference]}\n\nPode mudar quando quiser.` };
     }
 
     private async handleMarketOffersIntent(marketName?: string): Promise<ChatResponse> {
-        if (!marketName) return { text: 'De qual mercado você quer ver as ofertas?' };
+        if (!marketName) return { text: 'De qual mercado vocÃª quer ver as ofertas?' };
         const purchaseHistory = await this.purchaseAnalytics.getFrequentProducts(30);
         const marketVitrine = await offerEngine.getTopOffersByMarket(marketName, purchaseHistory);
-        if (marketVitrine.startsWith('Poxa, não encontrei')) {
+        if (marketVitrine.startsWith('Poxa, nÃ£o encontrei')) {
             return { text: marketVitrine };
         }
         this.conversationState.transition('AWAITING_ADD_TO_LIST', 'add_to_list', 'variados', 'Quer que eu adicione as melhores ofertas?');
-        return { text: `${marketVitrine}\n\n**Quer que eu coloque algum desses na sua lista de compras?** 🛒\n(Diga 'Sim' e depois cite os nomes)` };
+        return { text: `${marketVitrine}\n\n**Quer que eu coloque algum desses na sua lista de compras?** ðŸ›’\n(Diga 'Sim' e depois cite os nomes)` };
     }
 
     private async handleCategoryOffersIntent(categoryName?: string): Promise<ChatResponse> {
-        if (!categoryName) return { text: 'Qual departamento ou categoria você quer buscar? (ex: Carnes, Limpeza, Cervejas)' };
+        if (!categoryName) return { text: 'Qual departamento ou categoria vocÃª quer buscar? (ex: Carnes, Limpeza, Cervejas)' };
         const categoryVitrine = await offerEngine.getCategoryVitrine(categoryName);
         if (categoryVitrine.startsWith('Poxa') || categoryVitrine.startsWith('As ofertas')) {
             return { text: categoryVitrine };
         }
         this.conversationState.transition('AWAITING_ADD_TO_LIST', 'add_to_list', 'variados', 'Quer que eu adicione algum item?');
-        return { text: `${categoryVitrine}\n\n**Gostou de algo? Quer que eu adicione à sua lista de compras?** 🛒\n(Diga 'Sim' e depois cite os nomes)` };
+        return { text: `${categoryVitrine}\n\n**Gostou de algo? Quer que eu adicione Ã  sua lista de compras?** ðŸ›’\n(Diga 'Sim' e depois cite os nomes)` };
     }
 
     private async handlePriceHistoryIntent(product: string | undefined, message: string): Promise<ChatResponse> {
-        if (!product) return { text: 'Qual produto você quer ver o histórico de preço?' };
+        if (!product) return { text: 'Qual produto vocÃª quer ver o histÃ³rico de preÃ§o?' };
         const targetDate = this.extractDateFromMessage(message);
         const historicalText = await offerEngine.getHistoricalPrices(product, targetDate || undefined);
         return { text: historicalText };
@@ -1760,13 +1812,13 @@ class ChatSession {
 
     private async handleExpenseRegistrationIntent(amount?: number, marketName?: string): Promise<ChatResponse> {
         if (amount === undefined || !marketName || marketName === 'desconhecido') {
-            return { text: "Para registrar um gasto financeiro, preciso do valor exato e do nome da loja. Exemplo: _'Gastei 150 reais no Atacadão'_." };
+            return { text: "Para registrar um gasto financeiro, preciso do valor exato e do nome da loja. Exemplo: _'Gastei 150 reais no AtacadÃ£o'_." };
         }
 
         const payload = { amount, marketName };
         const formattedValue = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amount);
         this.conversationState.transition('AWAITING_EXPENSE_CONFIRMATION', 'confirm_expense', payload, 'Confirmar gasto?');
-        return { text: `📝 Entendi. Você gastou **${formattedValue}** no mercado **${marketName.toUpperCase()}**?\n\n(Diga *Sim* para confirmar ou *Não* para cancelar)` };
+        return { text: `ðŸ“ Entendi. VocÃª gastou **${formattedValue}** no mercado **${marketName.toUpperCase()}**?\n\n(Diga *Sim* para confirmar ou *NÃ£o* para cancelar)` };
     }
 
     private async handleExpenseAnalysisIntent(analyticsTerm: string | undefined, message: string): Promise<ChatResponse> {
@@ -1786,7 +1838,7 @@ class ChatSession {
             this.conversationState.transition('AWAITING_LIST_CONFIRMATION', 'confirm_list', this.context.shoppingList, 'Finalizar lista?');
             return { text: `${currentList.text}Finalizar lista?` };
         }
-        return { text: "Sua lista está vazia no momento. Diga algo como _'lista: arroz, feijão'_ para começar!" };
+        return { text: "Sua lista estÃ¡ vazia no momento. Diga algo como _'lista: arroz, feijÃ£o'_ para comeÃ§ar!" };
     }
 
     private async handleRecentHistoryIntent(days: number): Promise<ChatResponse> {
@@ -1802,16 +1854,16 @@ class ChatSession {
         const existingList = await this.listManager.loadActiveList();
 
         if (existingList.length > 0) {
-            console.log(`[ChatService] Lista ativa encontrada com ${existingList.length} itens. Perguntando ao usuário.`);
+            console.log(`[ChatService] Lista ativa encontrada com ${existingList.length} itens. Perguntando ao usuÃ¡rio.`);
             this.conversationState.transition('AWAITING_LIST_RECOVERY', 'list_recovery', { products: items }, 'Manter ou criar nova?');
             const preview = existingList.slice(0, 5).map((item) => item.name).join(', ');
             const moreText = existingList.length > 5 ? ` e mais ${existingList.length - 5}` : '';
-            return { text: `📋 Você já tem uma lista com **${existingList.length} itens** (${preview}${moreText}).\n\nQuer **manter** essa lista e continuar adicionando ou **criar uma nova** do zero?` };
+            return { text: `ðŸ“‹ VocÃª jÃ¡ tem uma lista com **${existingList.length} itens** (${preview}${moreText}).\n\nQuer **manter** essa lista e continuar adicionando ou **criar uma nova** do zero?` };
         }
 
         if (items.length === 0) {
-            this.moveToListCreation('Me dê os produtos que eu crio uma lista pra você bem rápida e econômica!');
-            return { text: 'Me dê os produtos que eu crio uma lista pra você bem rápida e econômica!' };
+            this.moveToListCreation('Me dÃª os produtos que eu crio uma lista pra vocÃª bem rÃ¡pida e econÃ´mica!');
+            return { text: 'Me dÃª os produtos que eu crio uma lista pra vocÃª bem rÃ¡pida e econÃ´mica!' };
         }
 
         const entities = interpretation.nlpResult.entities;
@@ -1824,7 +1876,7 @@ class ChatSession {
 
         const createdList = await this.listManager.recoverActiveListItemsOnly();
         this.moveToListCreation('Diga os itens');
-        return { text: `Lista com ${items.length} itens criada! 🛒\n\n${createdList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
+        return { text: `Lista com ${items.length} itens criada! ðŸ›’\n\n${createdList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
     }
 
     private async handleAddItemsIntent(interpretation: Awaited<ReturnType<typeof aiService.interpret>>): Promise<ChatResponse> {
@@ -1835,7 +1887,7 @@ class ChatSession {
                 ? [interpretation.product]
                 : entities.map((entity) => entity.value);
         const addItems = cleanProductList(rawItems);
-        if (addItems.length === 0) return { text: 'Quais itens você quer adicionar?' };
+        if (addItems.length === 0) return { text: 'Quais itens vocÃª quer adicionar?' };
 
         addItems.forEach((name, index) => {
             if (!this.context.shoppingList.find((item) => item.name === name)) {
@@ -1850,7 +1902,7 @@ class ChatSession {
         await this.listManager.persistList(this.context.shoppingList);
         const addResult = await this.listManager.recoverActiveListItemsOnly();
         this.conversationState.transition('AWAITING_LIST_CONFIRMATION', 'confirm_list', this.context.shoppingList, 'Finalizar lista?');
-        return { text: `Adicionei à sua lista.\n\n${addResult.text}Finalizar lista?` };
+        return { text: `Adicionei Ã  sua lista.\n\n${addResult.text}Finalizar lista?` };
     }
 
     private async handleRemoveItemsIntent(interpretation: Awaited<ReturnType<typeof aiService.interpret>>): Promise<ChatResponse> {
@@ -1859,7 +1911,7 @@ class ChatSession {
             : interpretation.product
                 ? [interpretation.product]
                 : interpretation.nlpResult.entities.map((entity) => entity.value);
-        if (removeItems.length === 0) return { text: 'Quais itens você quer tirar da lista?' };
+        if (removeItems.length === 0) return { text: 'Quais itens vocÃª quer tirar da lista?' };
 
         this.context.shoppingList = this.context.shoppingList.filter((item) =>
             !removeItems.some((removeItem) => normalizeTextListEntry(item.name).includes(normalizeTextListEntry(removeItem))),
@@ -1871,16 +1923,16 @@ class ChatSession {
     }
 
     private async handleSinglePriceIntent(term?: string): Promise<ChatResponse> {
-        if (!term) return { text: 'Quais produtos você quer saber o preço?' };
+        if (!term) return { text: 'Quais produtos vocÃª quer saber o preÃ§o?' };
         this.context.lastProduct = term;
         const priceText = await offerEngine.lookupSingle(term, this.context.userLocation, this.context.transportMode, this.context.consumption);
 
-        if (priceText.startsWith('NÃ£o encontrei ofertas') || priceText.startsWith('Não encontrei ofertas')) {
-            return { text: `Poxa, ainda não encontrei ofertas vigentes para **${term}** hoje.` };
+        if (priceText.startsWith('NÃƒÂ£o encontrei ofertas') || priceText.startsWith('NÃ£o encontrei ofertas')) {
+            return { text: `Poxa, ainda nÃ£o encontrei ofertas vigentes para **${term}** hoje.` };
         }
 
         this.conversationState.transition('AWAITING_ADD_TO_LIST', 'add_to_list', term, 'Quer que eu anote isso na sua Lista de Compras?');
-        return { text: `${priceText}\n\n**Quer que eu anote isso na sua Lista de Compras? (Sim/Não)**` };
+        return { text: `${priceText}\n\n**Quer que eu anote isso na sua Lista de Compras? (Sim/NÃ£o)**` };
     }
 
     private moveToListCreation(prompt: string) {

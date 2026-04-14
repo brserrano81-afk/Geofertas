@@ -9,7 +9,7 @@ interface PipelineResult {
     success: boolean;
     data?: any;
     error?: string;
-    source?: 'sefaz' | 'vision' | 'qr' | 'price_tag';
+    source?: 'sefaz' | 'vision' | 'qr' | 'price_tag' | 'tabloid';
 }
 
 function readRuntimeEnv(name: string): string {
@@ -101,9 +101,15 @@ class IngestionPipeline {
                 console.log(`[IngestionPipeline] Proxy falhou (Captcha Web?). Usando OCR/Vision fallback.`);
             }
 
-            // 3. Verifica Price Tag avulsa
+            // 3. Verifica Price Tag avulsa (produto ˙nico)
             if (result && result.type === 'price_tag') {
                 return { success: true, data: result, source: 'price_tag' };
+            }
+
+            // 4. Tabloide / Encarte ó m˙ltiplos produtos, vai para fila de revis„o
+            if (result && result.type === 'tabloid' && Array.isArray(result.items) && result.items.length > 0) {
+                console.log('[IngestionPipeline] Tabloide: ' + result.items.length + ' produto(s). Roteando para fila.');
+                return { success: true, data: result, source: 'tabloid' };
             }
             
             // 4. Fallback de Ouro: Usa os pr√≥prios itens que a IA Gemini j√° extraiu da imagem!

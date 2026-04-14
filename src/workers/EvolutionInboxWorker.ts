@@ -1,4 +1,4 @@
-import dotenv from 'dotenv';
+﻿import dotenv from 'dotenv';
 import {
     addDoc,
     collection,
@@ -14,6 +14,7 @@ import {
 
 import { db } from '../firebase';
 import { chatService } from '../services/ChatService';
+import { isMasterAdmin, masterAdminService } from '../services/MasterAdminService';
 
 dotenv.config();
 
@@ -411,7 +412,15 @@ async function buildResponse(message: InboxMessage): Promise<string> {
 
     const text = String(message.text || '').trim();
     if (!text) {
-        return 'Recebi sua mensagem, mas ainda não consegui interpretar esse formato. Pode mandar em texto ou imagem?';
+        return 'Recebi sua mensagem, mas ainda nao consegui interpretar esse formato. Pode mandar em texto ou imagem?';
+    }
+
+    // MASTER ADMIN INTERCEPTION
+    if (isMasterAdmin(message.remoteJid)) {
+        const adminResult = await masterAdminService.processCommand(text, message.remoteJid);
+        if (adminResult.handled) {
+            return adminResult.text;
+        }
     }
 
     const response = await chatService.processMessage(text, message.userId);
