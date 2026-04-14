@@ -31,6 +31,9 @@ export interface ChatResponse {
     requestLocation?: boolean; // Se true, o front dispara o GPS
 }
 
+const INTENT_CONFIDENCE_THRESHOLD = 0.45;
+const CHAT_FALLBACK_TEXT = 'Como posso ajudar com suas compras hoje? Posso consultar preços, montar sua lista ou ver seu histórico.';
+
 interface ListItem {
     name: string;
     quantity?: number;
@@ -139,6 +142,22 @@ function capitalize(value: string): string {
 
 function normalizeTextListEntry(value: string): string {
     return String(value || '').toLowerCase().trim();
+}
+
+function isIntentResolved(intent: Intent | 'share_target', confidence: number, hasProducts: boolean): boolean {
+    if (intent === 'share_target') {
+        return true;
+    }
+
+    if (intent === 'saudacao' || intent === 'ajuda') {
+        return true;
+    }
+
+    if (hasProducts) {
+        return true;
+    }
+
+    return intent !== 'desconhecido' && confidence >= INTENT_CONFIDENCE_THRESHOLD;
 }
 
 class ChatSession {
@@ -416,6 +435,7 @@ class ChatSession {
             ? fallbackIntent
             : pending ? (pending.action as Intent) : fallbackIntent;
         this.context.lastIntent = intent;
+        const hasProducts = Boolean(interpretation.product) || Boolean(interpretation.products?.length);
 
         // VERIFICAÃ‡ÃƒO DE ERRO NA API DA OPENAI:
         if (interpretation.nlpResult?.entities[0]?.value === 'API_ERROR') {
@@ -438,6 +458,9 @@ class ChatSession {
         }
 
         console.log(`[ChatService] Intent: ${intent} | Batch: ${interpretation.isBatch} | Confidence: ${interpretation.confidence}`);
+        if (isIntentResolved(intent, interpretation.confidence, hasProducts)) {
+            console.log(`[INTENT_RESOLVED] user=${this.context.userId} intent=${intent} confidence=${interpretation.confidence.toFixed(2)}`);
+        }
 
         // â”€â”€â”€ 2. HANDLER PARA AÃ‡Ã•ES DO STATE MACHINE â”€â”€â”€
         // Quando resolveIfPending retorna, o action pode ser diferente dos intents do NLP
@@ -1117,7 +1140,10 @@ class ChatSession {
             }
 
             default:
-                return { text: "Como posso ajudar com suas compras hoje? Posso consultar preÃ§os, montar sua lista ou ver seu histÃ³rico." };
+                console.warn(
+                    `[FALLBACK_TRIGGERED] user=${this.context.userId} intent=${intent} confidence=${interpretation.confidence.toFixed(2)} hasProducts=${hasProducts}`,
+                );
+                return { text: CHAT_FALLBACK_TEXT };
         }
     }
 

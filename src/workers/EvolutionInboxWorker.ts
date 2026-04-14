@@ -53,6 +53,13 @@ interface OutboxMessage {
     sentAtIso?: string | null;
 }
 
+interface ResponseBuildResult {
+    text: string | null;
+    shouldSend: boolean;
+    usedFallback: boolean;
+    reason: string;
+}
+
 const POLL_INTERVAL_MS = Number(process.env.EVOLUTION_WORKER_POLL_MS || 4000);
 const RUN_ONCE = process.argv.includes('--once');
 const VERBOSE = process.argv.includes('--verbose');
@@ -467,28 +474,73 @@ async function sendTextViaEvolution(remoteJid: string, text: string) {
     );
 }
 
-async function buildResponse(message: InboxMessage): Promise<string> {
+async function buildResponse(message: InboxMessage): Promise<ResponseBuildResult> {
     if (message.messageType === 'imageMessage' && message.mediaBase64) {
         const buffer = Buffer.from(message.mediaBase64, 'base64');
         const response = await chatService.processImage(new Uint8Array(buffer), message.userId);
-        return response.text;
+        console.log(`[INTENT_RESOLVED] user=${message.userId} channel=whatsapp source=imageMessage`);
+        return {
+            text: response.text,
+            shouldSend: true,
+            usedFallback: false,
+            reason: 'image_processed',
+        };
+    }
+
+    if (message.messageType === 'imageMessage' && !message.mediaBase64) {
+        console.warn(`[FALLBACK_TRIGGERED] user=${message.userId} reason=invalid_media imageMessage_without_mediaBase64`);
+        return {
+            text: 'Recebi sua imagem, mas ela chegou incompleta pra mim. Pode mandar de novo, de preferência mais nítida?',
+            shouldSend: true,
+            usedFallback: true,
+            reason: 'invalid_media',
+        };
     }
 
     const text = String(message.text || '').trim();
     if (!text) {
-        return 'Recebi sua mensagem, mas ainda nao consegui interpretar esse formato. Pode mandar em texto ou imagem?';
+        console.log(
+            `[FALLBACK_SKIPPED] user=${message.userId} reason=empty_message messageType=${message.messageType || 'unknown'}`,
+        );
+        return {
+            text: null,
+            shouldSend: false,
+            usedFallback: false,
+            reason: 'empty_message',
+        };
     }
 
     // MASTER ADMIN INTERCEPTION
     if (isMasterAdmin(message.remoteJid)) {
         const adminResult = await masterAdminService.processCommand(text, message.remoteJid);
         if (adminResult.handled) {
-            return adminResult.text;
+            console.log(`[INTENT_RESOLVED] user=${message.userId} channel=whatsapp source=master_admin`);
+            return {
+                text: adminResult.text,
+                shouldSend: true,
+                usedFallback: false,
+                reason: 'master_admin',
+            };
         }
     }
 
     const response = await chatService.processMessage(text, message.userId);
-    return response.text;
+    if (!String(response.text || '').trim()) {
+        console.warn(`[FALLBACK_TRIGGERED] user=${message.userId} reason=empty_chat_response`);
+        return {
+            text: 'Recebi sua mensagem, mas ainda nao consegui montar uma resposta. Pode tentar escrever de outro jeito?',
+            shouldSend: true,
+            usedFallback: true,
+            reason: 'empty_chat_response',
+        };
+    }
+
+    return {
+        text: response.text,
+        shouldSend: true,
+        usedFallback: false,
+        reason: 'chat_response',
+    };
 }
 
 async function claimInboxItem(id: string): Promise<InboxMessage | null> {
@@ -585,7 +637,38 @@ async function processInboxItem(item: { id: string; data: InboxMessage }) {
 
     try {
         await sendPresenceViaEvolution(data.remoteJid);
-        const responseText = await buildResponse(data);
+        const responseBuild = await buildResponse(data);
+        if (!responseBuild.shouldSend || !responseBuild.text) {
+            await markInboxStatus(id, 'done', {
+                correlationId,
+                sourceMessageId,
+                responsePreview: null,
+                processedAt: serverTimestamp(),
+                processedAtIso: nowIso(),
+                processingDurationMs: Date.now() - processingStartedAtMs,
+                leaseOwner: null,
+                leaseExpiresAtIso: null,
+                skippedSendReason: responseBuild.reason,
+            });
+
+            await persistPipelineAudit({
+                correlationId,
+                stage: 'outbox_delivery',
+                status: 'skipped',
+                inboxId: id,
+                remoteJid: data.remoteJid,
+                userId: data.userId,
+                sourceMessageId,
+                reason: responseBuild.reason,
+            });
+
+            console.log(
+                `[FALLBACK_SKIPPED] [${correlationId}] Inbox ${id} sem resposta enviavel (${responseBuild.reason}).`,
+            );
+            return;
+        }
+
+        const responseText = responseBuild.text;
         try {
             const sendResult = await sendTextViaEvolution(data.remoteJid, responseText);
             const outboxId = await persistOutboxMessage(id, {
@@ -627,6 +710,7 @@ async function processInboxItem(item: { id: string; data: InboxMessage }) {
                 userId: data.userId,
                 sourceMessageId,
                 durationMs: inboxToOutboxMs,
+                metadata: responseBuild.usedFallback ? { responseType: 'fallback', reason: responseBuild.reason } : { responseType: 'resolved' },
             });
 
             console.log(`[EvolutionInboxWorker] [${correlationId}] Inbox ${id} processada para ${data.remoteJid} (${sendResult.status}).`);
