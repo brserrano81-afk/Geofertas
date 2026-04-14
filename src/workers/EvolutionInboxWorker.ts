@@ -92,34 +92,64 @@ function sanitizePhoneNumber(remoteJid: string): string {
     return digits;
 }
 
-function getEvolutionSendUrl(): string | null {
-    if (process.env.EVOLUTION_SEND_TEXT_URL) {
-        return process.env.EVOLUTION_SEND_TEXT_URL;
+function buildAbsoluteEvolutionUrl(pathOrUrl: string | undefined, fallbackPath: string): string | null {
+    const baseUrl = process.env.EVOLUTION_API_BASE_URL?.trim();
+    const candidate = pathOrUrl?.trim();
+
+    if (candidate) {
+        try {
+            return new URL(candidate).toString();
+        } catch {
+            if (!baseUrl) {
+                return null;
+            }
+
+            return new URL(candidate.replace(/^\//, ''), `${baseUrl.replace(/\/+$/, '')}/`).toString();
+        }
     }
 
-    const baseUrl = process.env.EVOLUTION_API_BASE_URL;
+    if (!baseUrl) {
+        return null;
+    }
+
+    return new URL(fallbackPath.replace(/^\//, ''), `${baseUrl.replace(/\/+$/, '')}/`).toString();
+}
+
+function getEvolutionInstance(): string | null {
     const instance =
         process.env.EVOLUTION_SEND_INSTANCE ||
         process.env.EVOLUTION_INSTANCE ||
         process.env.EVOLUTION_INSTANCE_ID;
-    if (!baseUrl || !instance) {
+
+    if (!instance) {
         return null;
     }
 
-    return `${baseUrl.replace(/\/$/, '')}/message/sendText/${instance}`;
+    return instance.trim();
+}
+
+function getEvolutionSendUrl(): string | null {
+    const instance = getEvolutionInstance();
+    if (!instance) {
+        return null;
+    }
+
+    return buildAbsoluteEvolutionUrl(
+        process.env.EVOLUTION_SEND_TEXT_URL,
+        `message/sendText/${instance}`,
+    );
 }
 
 function getEvolutionPresenceUrl(): string | null {
-    const baseUrl = process.env.EVOLUTION_API_BASE_URL;
-    const instance =
-        process.env.EVOLUTION_SEND_INSTANCE ||
-        process.env.EVOLUTION_INSTANCE ||
-        process.env.EVOLUTION_INSTANCE_ID;
-    if (!baseUrl || !instance) {
+    const instance = getEvolutionInstance();
+    if (!instance) {
         return null;
     }
 
-    return `${baseUrl.replace(/\/$/, '')}/chat/sendPresence/${instance}`;
+    return buildAbsoluteEvolutionUrl(
+        process.env.EVOLUTION_PRESENCE_URL,
+        `chat/sendPresence/${instance}`,
+    );
 }
 
 async function loadPendingMessages(): Promise<Array<{ id: string; data: InboxMessage }>> {
