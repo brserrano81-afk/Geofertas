@@ -8,6 +8,11 @@ export interface UserPreferences {
     busTicket?: number;
     optimizationPreference?: 'economizar' | 'perto' | 'equilibrar';
     neighborhood?: string;
+    userLocation?: {
+        lat: number;
+        lng: number;
+        address?: string;
+    };
 }
 
 class UserPreferencesService {
@@ -29,6 +34,7 @@ class UserPreferencesService {
                 busTicket: Number(data.busTicket || nestedPreferences.busTicket || 0) || undefined,
                 optimizationPreference: (data.optimizationPreference || nestedPreferences.optimizationPreference || undefined) as UserPreferences['optimizationPreference'],
                 neighborhood: String(data.neighborhood || nestedPreferences.neighborhood || '').trim() || undefined,
+                userLocation: this.parseUserLocation(data.userLocation || nestedPreferences.userLocation),
             };
         } catch (err) {
             console.error('[UserPreferencesService] Error loading preferences:', err);
@@ -52,6 +58,25 @@ class UserPreferencesService {
             preferences: payload,
             updatedAt: serverTimestamp(),
         }, { merge: true });
+    }
+
+    private parseUserLocation(value: unknown): UserPreferences['userLocation'] {
+        if (!value || typeof value !== 'object') {
+            return undefined;
+        }
+
+        const raw = value as Record<string, unknown>;
+        const lat = Number(raw.lat);
+        const lng = Number(raw.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            return undefined;
+        }
+
+        return {
+            lat,
+            lng,
+            address: String(raw.address || '').trim() || undefined,
+        };
     }
 }
 

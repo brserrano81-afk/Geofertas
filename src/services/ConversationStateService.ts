@@ -12,6 +12,7 @@ export interface PendingResolution {
 
 export type ConversationStatus =
     | 'IDLE'
+    | 'AWAITING_INITIAL_LOCATION'
     | 'AWAITING_NAME'
     | 'AWAITING_ADD_TO_LIST'
     | 'AWAITING_LIST_ITEMS'

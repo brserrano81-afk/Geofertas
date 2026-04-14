@@ -53,6 +53,7 @@ interface ChatContext {
     lastProduct?: string;
     userId: string;
     userName?: string;
+    isFirstContact?: boolean;
     pendingPurchase?: any;
     pendingMatchResult?: MatchResult;
     pendingAllProducts?: string[];
@@ -160,6 +161,14 @@ function isIntentResolved(intent: Intent | 'share_target', confidence: number, h
     return intent !== 'desconhecido' && confidence >= INTENT_CONFIDENCE_THRESHOLD;
 }
 
+function isActionableIntent(intent: Intent, hasProducts: boolean): boolean {
+    if (hasProducts) {
+        return true;
+    }
+
+    return !['saudacao', 'ajuda', 'desconhecido'].includes(intent);
+}
+
 class ChatSession {
     private static diagnosticsChecked = false;
 
@@ -177,6 +186,7 @@ class ChatSession {
             userId,
             transportMode: 'car',
             consumption: 10,
+            isFirstContact: true,
         };
 
         this.listManager = new ListManager(userId);
@@ -202,6 +212,8 @@ class ChatSession {
         if (prefs.consumption) this.context.consumption = prefs.consumption;
         if (prefs.busTicket) this.context.busTicket = prefs.busTicket;
         if (prefs.optimizationPreference) this.context.optimizationPreference = prefs.optimizationPreference;
+        if (prefs.userLocation) this.context.userLocation = prefs.userLocation;
+        this.context.isFirstContact = recentInteractions.length === 0;
         recentInteractions.forEach((interaction) => {
             this.conversationState.addMessage(this.context.userId, interaction.role, interaction.content);
         });
@@ -247,6 +259,7 @@ class ChatSession {
     private async _generateRawResponse(message: string): Promise<ChatResponse> {
         const conversationState = this.conversationState;
         conversationState.incrementTurn();
+        const normalizedMessage = normalizeText(message);
 
         // â”€â”€â”€ 0. GPS: TRATAMENTO DE COORDENADAS DIRETAS â”€â”€â”€
         if (message.startsWith('COORDENADAS:') || message.startsWith('[GPS_LOCATION_UPDATE]')) {
@@ -348,51 +361,37 @@ class ChatSession {
         // Calcula interpretaÃ§Ã£o no inÃ­cio
         const interpretation = await aiService.interpret(message, this.context);
         const explicitPreference = detectOptimizationPreference(message);
-        const normalizedMessage = normalizeText(message);
         const asksForProfile = /\b(o que (voce|vc) sabe sobre mim|o que lembra de mim|me fala meu historico|me fale meu historico)\b/.test(normalizedMessage);
+        const hasProducts = Boolean(interpretation.product) || Boolean(interpretation.products?.length);
+        const actionableIntent = isActionableIntent(interpretation.intent, hasProducts);
 
-        // â”€â”€â”€ 0.5. ONBOARDING (PRIMEIRA MENSAGEM) â”€â”€â”€
-        if (!this.context.userName && conversationState.current === 'IDLE') {
-            const tempIntent = interpretation.intent;
+        if (this.context.isFirstContact && actionableIntent) {
+            this.context.isFirstContact = false;
+        }
 
-            // HOTFIX 1: Se a primeira mensagem jÃ¡ for um comando de busca/lista, nÃ£o trava no onboarding.
-            if (['consultar_preco_produto', 'consultar_preco_multiplos_produtos', 'criar_lista', 'montar_lista', 'comparar_menor_preco'].includes(tempIntent) || (interpretation.products && interpretation.products.length > 0)) {
-                this.context.userName = 'Amigo';
-                userPreferencesService.savePreferences(this.context.userId, { name: 'Amigo' });
-                // Deixa o fluxo continuar normalmente...
-            } else {
-                conversationState.transition('AWAITING_NAME', 'save_user_name', null, 'Como quer que eu te chame?');
-                return { text: "Fala meu parceiro! ðŸ‘‹ Eu sou o Economiza FÃ¡cil, tÃ´ aqui pra fazer seu dinheiro render no mercado. Como posso te chamar?" };
-            }
+        // â”€â”€â”€ 0.5. PRIMEIRO CONTATO: PEDIR LOCALIZACAO SEM TRAVAR â”€â”€â”€
+        if (this.context.isFirstContact && conversationState.current === 'IDLE' && !actionableIntent) {
+            this.context.isFirstContact = false;
+            conversationState.transition('AWAITING_INITIAL_LOCATION', 'initial_location', null, 'Me manda sua localização para eu buscar mercados perto de você.');
+            return this.handleSaudacao();
         }
 
         // â”€â”€â”€ 1. RESOLVER ESTADO PENDENTE (antes do NLP) â”€â”€â”€
         const pending = conversationState.resolveIfPending(message);
-        const shouldBypassNameCapture =
-            pending?.action === 'save_user_name' &&
-            (
-                [
-                    'consultar_preco_produto',
-                    'consultar_preco_multiplos_produtos',
-                    'comparar_menor_preco',
-                    'criar_lista',
-                    'montar_lista',
-                    'ofertas_mercado',
-                    'ofertas_da_semana',
-                    'buscar_categoria',
-                    'calcular_total_lista',
-                    'melhor_mercado_para_lista',
-                    'find_nearby_markets',
-                ].includes(interpretation.intent) ||
-                Boolean(interpretation.product) ||
-                Boolean(interpretation.products?.length)
-            );
 
-        if (shouldBypassNameCapture) {
-            this.context.userName = this.context.userName || 'Amigo';
-            await userPreferencesService.savePreferences(this.context.userId, { name: this.context.userName });
-            await userProfileService.updateUserName(this.context.userId, this.context.userName);
-            conversationState.reset();
+        if (conversationState.current === 'AWAITING_INITIAL_LOCATION') {
+            if (actionableIntent) {
+                console.log(`[FIRST_CONTACT_LOCATION_SKIPPED] user=${this.context.userId} reason=actionable_message`);
+                conversationState.reset();
+            }
+
+            if (/\b(nao|não|depois|agora nao|agora não|sem localizacao|sem localização)\b/.test(normalizedMessage)) {
+                console.log(`[FIRST_CONTACT_LOCATION_SKIPPED] user=${this.context.userId} reason=user_declined`);
+                conversationState.reset();
+                return {
+                    text: 'Sem problema 👍\n\nVocê também pode me mandar o nome de um produto, sua lista ou uma foto de oferta que eu já começo a te ajudar.',
+                };
+            }
         }
 
         // â”€â”€â”€ 1.5. GATILHO DE SAÃDA DO LOOP (CRIANDO_LISTA -> FINALIZAR) E BLOQUEIOS GLOBAIS â”€â”€â”€
@@ -431,11 +430,8 @@ class ChatSession {
             : asksForProfile
                 ? 'ver_perfil_usuario'
                 : interpretation.intent;
-        const intent: Intent | 'share_target' = shouldBypassNameCapture
-            ? fallbackIntent
-            : pending ? (pending.action as Intent) : fallbackIntent;
+        const intent: Intent | 'share_target' = pending ? (pending.action as Intent) : fallbackIntent;
         this.context.lastIntent = intent;
-        const hasProducts = Boolean(interpretation.product) || Boolean(interpretation.products?.length);
 
         // VERIFICAÃ‡ÃƒO DE ERRO NA API DA OPENAI:
         if (interpretation.nlpResult?.entities[0]?.value === 'API_ERROR') {
@@ -464,7 +460,7 @@ class ChatSession {
 
         // â”€â”€â”€ 2. HANDLER PARA AÃ‡Ã•ES DO STATE MACHINE â”€â”€â”€
         // Quando resolveIfPending retorna, o action pode ser diferente dos intents do NLP
-        if (pending && !shouldBypassNameCapture) {
+        if (pending) {
             const pendingResponse = await this.handlePendingAction(pending, message, interpretation);
             if (pendingResponse) {
                 return pendingResponse;
@@ -1152,6 +1148,7 @@ class ChatSession {
         await this.refreshRichContext();
         const conversationState = this.conversationState;
         console.log(`[ChatService] >>> INCOMING IMAGE`);
+        this.context.isFirstContact = false;
         conversationState.incrementTurn();
         this.context.lastIntent = 'extrair_cupom';
         conversationState.addMessage(this.context.userId, 'user', '[IMAGEM]');
@@ -1205,19 +1202,20 @@ class ChatSession {
     // â”€â”€â”€ Extras & SaudaÃ§Ãµes â”€â”€â”€
 
     private handleSaudacao(): ChatResponse {
-        const conversationState = this.conversationState;
-        const name = this.context.userName && this.context.userName !== 'Amigo'
-            ? ` ${this.context.userName}` : '';
-        if (!this.context.userName) {
-            conversationState.transition('AWAITING_NAME', 'save_user_name', null, 'Como quer que eu te chame?');
-            return { text: 'Oi! Eu sou o Economiza Fácil 💚\n\nVocê só manda mensagem e eu te ajudo a economizar no mercado.\n\nComo você quer que eu te chame?' };
-        }
-        return { text: `Oi${name}! 💚\n\nPode mandar o nome de um produto, pedir ofertas de um mercado ou montar sua lista.\n\nSe quiser, começa com: preço do café` };
+        return {
+            text:
+                'Olá! Eu sou o Economiza Fácil 💚\n\n' +
+                'Eu te ajudo a descobrir onde sua compra sai mais barata pelo WhatsApp.\n\n' +
+                'Pra começar do jeito certo, me manda sua localização 📍\n' +
+                'Assim eu já busco os mercados mais próximos e as melhores ofertas pra você.',
+            requestLocation: true,
+        };
     }
 
     private handleLocation(): ChatResponse {
         return {
-            text: "ðŸ“ Para calcular as rotas e o custo real, me diga em qual bairro e cidade vocÃª estÃ¡ (ex: Jardim Camburi, VitÃ³ria)."
+            text: 'Me manda sua localização 📍\n\nAssim eu busco os mercados mais próximos e as melhores ofertas perto de você.',
+            requestLocation: true,
         };
     }
 
@@ -1257,7 +1255,12 @@ class ChatSession {
 
     private handleCoords(lat: number, lng: number): ChatResponse {
         this.context.userLocation = { lat, lng, address: `${lat.toFixed(4)}, ${lng.toFixed(4)}` };
-        return { text: `ðŸ“ LocalizaÃ§Ã£o GPS recebida! Agora posso calcular distÃ¢ncias reais aos mercados.\n\nVocÃª vai de **carro**, **Ã´nibus** ou **a pÃ©**?` };
+        this.context.isFirstContact = false;
+        void userPreferencesService.savePreferences(this.context.userId, {
+            userLocation: this.context.userLocation,
+        });
+        this.conversationState.reset();
+        return { text: '📍 Localização recebida!\n\nAgora já consigo buscar os mercados mais próximos e as melhores ofertas pra você.\n\nPode mandar um produto, sua lista ou pedir ofertas de um mercado.' };
     }
 
     private async handleFindNearbyMarkets(): Promise<ChatResponse> {
