@@ -44,6 +44,10 @@ function titleCase(str: string): string {
         .join(' ');
 }
 
+function formatCurrency(value: number): string {
+    return `R$ ${Number(value || 0).toFixed(2).replace('.', ',')}`;
+}
+
 function fuzzyMatch(needle: string, haystack: string): boolean {
     const n = normalize(needle);
     const h = normalize(haystack);
@@ -263,22 +267,23 @@ class OfferEngine {
                 bestPerBrand.sort((a, b) => a.offer.price - b.offer.price);
 
                 const topBrands = bestPerBrand.slice(0, 6);
-                for (const [, item] of topBrands.entries()) {
+                for (const [index, item] of topBrands.entries()) {
                     const best = item.offer;
                     if (userLocation) {
                         await this.enrichWithDistance([best], userLocation, transportMode || 'car', consumption || 10);
                     }
 
-                    const priceStr = `R$ ${best.price.toFixed(2).replace('.', ',')}`;
-
-                    if (best.realCost && best.distance) {
-                        brandLines.push(`🏷️ **${item.label}**: ${priceStr} no ${best.marketName} (Total Real: R$ ${best.realCost.toFixed(2).replace('.', ',')})`);
-                    } else {
-                        brandLines.push(`🏷️ **${item.label}**: ${priceStr} no ${best.marketName}`);
-                    }
+                    const icon = index === 0 ? '🟢' : index === 1 ? '🟡' : '🔴';
+                    brandLines.push(`${icon} ${formatCurrency(best.price)} - ${item.label} (${best.marketName})`);
                 }
 
-                return `🔎 **Encontrei várias marcas para ${productName.toUpperCase()}**\nEscolha a que fizer mais sentido para você:\n\n${brandLines.join('\n')}`;
+                const cheapest = topBrands[0];
+                const priciest = topBrands[topBrands.length - 1];
+                const savings = cheapest && priciest
+                    ? Math.max(0, priciest.offer.price - cheapest.offer.price)
+                    : 0;
+
+                return `☕ ${productName.toUpperCase()} — comparação de marcas\n\n${brandLines.join('\n')}\n\n💡 Trocando para ${cheapest?.label || 'a opção mais barata'}:\nR$ ${savings.toFixed(2).replace('.', ',')} por unidade\n\nQuer que eu troque na sua lista? 🛒`;
             }
 
             const distinctBrands = new Set<string>();
@@ -370,23 +375,20 @@ class OfferEngine {
 
             const top3 = uniqueMatches.slice(0, 3);
 
-            const lines = top3.map((r, i) => {
-                const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
-                const priceStr = `R$ ${r.price.toFixed(2).replace('.', ',')}`;
-                if (r.distance && r.transportCost !== undefined && r.realCost) {
-                    const distStr = `${r.distance.toFixed(1)} km`;
-                    const transportStr = `+ R$ ${r.transportCost.toFixed(2).replace('.', ',')} deslocamento`;
-                    const realStr = `R$ ${r.realCost.toFixed(2).replace('.', ',')}`;
-                    return `${medal} **${r.marketName}** (${distStr})\n   Preço: ${priceStr} | ${transportStr}\n   💰 **Custo Real: ${realStr}**`;
-                }
-                return `${medal} **${r.marketName}**: ${priceStr}`;
+            const lineIcons = ['🟢', '🟡', '🔴'];
+            const lines = top3.map((result, index) => {
+                const icon = lineIcons[index] || '•';
+                const label = result.brandName?.trim()
+                    ? `${titleCase(result.brandName)} (${result.marketName})`
+                    : result.marketName;
+                return `${icon} ${formatCurrency(result.price)} - ${label}`;
             });
 
-            const header = userLocation
-                ? `🔍 **${productName.toUpperCase()}** (ranking por custo real 💰)`
-                : `🔍 **${productName.toUpperCase()}**`;
+            const economy = top3.length > 1
+                ? Math.max(0, top3[top3.length - 1].price - top3[0].price)
+                : 0;
 
-            return `${header}\n\n${lines.join('\n\n')}`;
+            return `${this.formatProductHeader(productName)}\n\n${lines.join('\n')}\n\n💰 Você economiza: ${formatCurrency(economy)}\n\nQuer saber se vale ir de carro? 🚗`;
         } catch (err) {
             console.error('[OfferEngine] Firestore error:', err);
             return `Erro ao buscar ofertas para ${productName}. Tente novamente.`;
@@ -581,7 +583,7 @@ class OfferEngine {
             const hasFrequent = groupedHasFrequent;
             const groupedLegend = hasFrequent ? '\n\n⭐ = produtos que você costuma comprar' : '';
 
-            return `🏪 **Ofertas do ${realMarketName}**\n\n${sections.join('\n\n')}${groupedLegend}`;
+            return `🏪 Ofertas do ${realMarketName.toUpperCase()} — hoje\n\n${sections.join('\n\n')}${groupedLegend}\n\nQuer saber qual fica mais perto de você? 📍`;
 
             if (unique.length === 0) return `Poxa, não encontrei ofertas ativas para o mercado **${realMarketName}** agora.`;
 
@@ -711,15 +713,24 @@ class OfferEngine {
                 }
             });
 
-            if (matches.length === 0) return `Não tenho histórico de preços para **${productName}**.`;
+            if (matches.length === 0) return `Ainda não tenho histórico suficiente para te mostrar quando ${productName} fica mais barato.`;
 
-            const lines = matches.slice(0, 5).map(r =>
-                `• ${r.market}: R$ ${r.price.toFixed(2).replace('.', ',')} (${r.date})`
-            );
-            return `📊 **Histórico: ${productName.toUpperCase()}**\n\n${lines.join('\n')}`;
+            const prices = matches.map((item) => item.price).filter((price) => price > 0);
+            const lowest = Math.min(...prices);
+            const highest = Math.max(...prices);
+            const sample = matches
+                .slice(0, 3)
+                .map((item) => `• ${item.market}: ${formatCurrency(item.price)}`)
+                .join('\n');
+
+            return `📈 Histórico de preço — ${productName.toUpperCase()}\n\nFaixa encontrada:\n✅ Mais barato: ${formatCurrency(lowest)}\n❌ Mais caro: ${formatCurrency(highest)}\n\nÚltimos registros:\n${sample}`;
         } catch (err) {
             return `Erro ao buscar histórico de ${productName}.`;
         }
+    }
+
+    private formatProductHeader(productName: string): string {
+        return `🛒 ${productName.toUpperCase()}`;
     }
 
     // Usado pelo ListManager e pelo ShoppingComparisonService para comparar preços entre mercados.

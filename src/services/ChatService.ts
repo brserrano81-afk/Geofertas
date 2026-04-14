@@ -22,7 +22,7 @@ import { shoppingComparisonService } from './ShoppingComparisonService';
 import { type TransportMode, calculateAllTransportCosts } from '../app/utils/geoUtils';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
-import type { MarketComparisonEntry, ShoppingComparisonResult } from '../types/shopping';
+import type { ShoppingComparisonResult } from '../types/shopping';
 import { offerQueueService } from './admin/OfferQueueService';
 
 export interface ChatResponse {
@@ -32,7 +32,7 @@ export interface ChatResponse {
 }
 
 const INTENT_CONFIDENCE_THRESHOLD = 0.45;
-const CHAT_FALLBACK_TEXT = 'Como posso ajudar com suas compras hoje? Posso consultar preços, montar sua lista ou ver seu histórico.';
+const CHAT_FALLBACK_TEXT = 'Ainda não entendi bem o que você quer fazer. Posso te ajudar com preço de produto, ofertas de mercado, lista de compras ou seus gastos.';
 
 interface ListItem {
     name: string;
@@ -1210,9 +1210,9 @@ class ChatSession {
             ? ` ${this.context.userName}` : '';
         if (!this.context.userName) {
             conversationState.transition('AWAITING_NAME', 'save_user_name', null, 'Como quer que eu te chame?');
-            return { text: "Fala meu parceiro! ðŸ‘‹ Eu sou o Economiza FÃ¡cil, tÃ´ aqui pra fazer seu dinheiro render no mercado. Como posso te chamar?" };
+            return { text: 'Oi! Eu sou o Economiza Fácil 💚\n\nVocê só manda mensagem e eu te ajudo a economizar no mercado.\n\nComo você quer que eu te chame?' };
         }
-        return { text: `Fala${name}! ðŸ‘‹\nPode mandar o nome de um produto, pedir uma oferta ou montar sua lista.` };
+        return { text: `Oi${name}! 💚\n\nPode mandar o nome de um produto, pedir ofertas de um mercado ou montar sua lista.\n\nSe quiser, começa com: preço do café` };
     }
 
     private handleLocation(): ChatResponse {
@@ -1268,13 +1268,26 @@ class ChatSession {
             this.context.userLocation.lat,
             this.context.userLocation.lng,
         );
-        return { text: geoDecisionEngine.formatNearbyMarketsResponse(markets) };
+        if (!markets.length) {
+            return { text: 'Ainda não achei mercados perto de você. Se quiser, me manda seu bairro para eu procurar melhor.' };
+        }
+
+        const lines = markets.slice(0, 3).map((market, index) =>
+            `${index + 1}️⃣ ${market.marketName} - ${market.distance.toFixed(1).replace('.', ',')}km`,
+        );
+        const closest = markets[0];
+
+        return {
+            text:
+                `🏪 Mercados perto de você\n\n${lines.join('\n')}\n\n` +
+                `${closest.marketName} é o mais perto agora.\n\nQuer saber qual vale mais a pena para suas compras? 🚗`,
+        };
     }
 
     private async handleCalcularTotalLista(): Promise<ChatResponse> {
         const conversationState = this.conversationState;
         if (this.context.shoppingList.length === 0) {
-            return { text: "Sua lista estÃ¡ vazia." };
+            return { text: 'Sua lista está vazia.' };
         }
 
         const comparison = await shoppingComparisonService.compareItems(this.context.shoppingList);
@@ -1293,42 +1306,35 @@ class ChatSession {
         const suggestionText = suggestion ? suggestion.text : '';
 
         conversationState.transition('AWAITING_SHARE_CONFIRMATION', 'share_list', { list: this.context.shoppingList, topMarketName }, 'Quer compartilhar essa lista?');
-        return { text: `${comparativeText}${suggestionText}\n\n**Quer a lista com o mercado mais barato e prÃ³ximo a vocÃª ou jÃ¡ quer compartilhar essa lista via WhatsApp?**\n1ï¸âƒ£ Mercado mais barato (Rota)\n2ï¸âƒ£ Compartilhar no WhatsApp` };
+        return { text: `${comparativeText}${suggestionText}\n\nQuer calcular o transporte também? 🚗` };
     }
 
     private formatShoppingComparisonForWhatsApp(comparison: ShoppingComparisonResult): string {
         if (comparison.items.length === 0) {
-            return "Sua lista estÃ¡ vazia.";
+            return 'Sua lista está vazia.';
         }
 
         if (comparison.ranking.length === 0) {
             const itemLines = comparison.items.map((item) => `â€¢ ${item.name}`).join('\n');
-            return `ðŸ›’ Sua lista tem ${comparison.items.length} itens, mas ainda nÃ£o encontrei ofertas suficientes para comparar.\n\nItens da lista:\n${itemLines}`;
+            return `🛒 Sua lista tem ${comparison.items.length} itens, mas ainda não encontrei ofertas suficientes para comparar.\n\nItens da lista:\n${itemLines}`;
         }
 
         const bestMarket = comparison.bestMarket || comparison.ranking[0];
-        const hasPartialCoverage = bestMarket.coverage < comparison.items.length;
         const rankingLines = comparison.ranking
             .slice(0, 3)
-            .map((entry, index) => this.formatMarketRankingLine(entry, index, comparison.items.length))
+            .map((entry, index) => `${index + 1}️⃣ ${entry.marketName} - ${this.formatCurrency(entry.total)}`)
             .join('\n');
 
         const missingText = bestMarket.missingItems.length > 0
-            ? `\n\nâš ï¸ Ainda nÃ£o achei estes itens nesse mercado:\n${bestMarket.missingItems.map((item) => `â€¢ ${item.name}`).join('\n')}`
+            ? `\n\n⚠️ Ainda não achei estes itens nesse mercado:\n${bestMarket.missingItems.map((item) => `• ${item.name}`).join('\n')}`
             : '';
 
-        const title = hasPartialCoverage
-            ? 'ðŸ›’ Encontrei a melhor opÃ§Ã£o parcial para sua lista'
-            : 'ðŸ›’ Encontrei o melhor mercado para sua lista';
+        const title = `🛒 Melhor mercado pra sua lista (${comparison.items.length} itens)`;
+        const savingVsWorst = comparison.ranking.length > 1
+            ? Math.max(0, comparison.ranking[comparison.ranking.length - 1].total - comparison.ranking[0].total)
+            : 0;
 
-        return `${title}\n\nðŸª Melhor mercado: **${bestMarket.marketName}**\nðŸ’° Total estimado: ${this.formatCurrency(bestMarket.total)}\nðŸ“¦ Cobertura: ${bestMarket.coverage}/${comparison.items.length} itens\n\nðŸ“Š Ranking resumido:\n${rankingLines}${missingText}`;
-    }
-
-    private formatMarketRankingLine(entry: MarketComparisonEntry, index: number, totalItems: number): string {
-        const medal = index === 0 ? 'ðŸ¥‡' : index === 1 ? 'ðŸ¥ˆ' : 'ðŸ¥‰';
-        const missingCount = entry.missingItems.length;
-        const missingSuffix = missingCount > 0 ? ` | faltam ${missingCount}` : ' | cobertura total';
-        return `${medal} ${entry.marketName} â€” ${this.formatCurrency(entry.total)} | cobertura ${entry.coverage}/${totalItems}${missingSuffix}`;
+        return `${title}\n\n${rankingLines}\n\n💰 Indo no ${bestMarket.marketName} você economiza ${this.formatCurrency(savingVsWorst)}${missingText}`;
     }
 
     private formatCurrency(value: number): string {
@@ -1443,14 +1449,14 @@ class ChatSession {
 
         return {
             text:
-                `ðŸ‘¤ **O que eu sei sobre vocÃª:**\n\n` +
-                `ðŸ“ Bairro: ${capitalize(neighborhood)}\n` +
-                `ðŸª Mercado favorito: ${favoriteMarket}\n` +
-                `ðŸš— Transporte: ${capitalize(String(transport))} (${consumption} km/l)\n` +
-                `ðŸ’š PreferÃªncia: ${preference}\n\n` +
-                `ðŸ›’ Produtos mais comprados:\n${productLines}\n\n` +
-                `ðŸ’° Gasto mÃ©dio mensal: R$ ${richContext.averageMonthlySpend.toFixed(2).replace('.', ',')}\n` +
-                `ðŸ“¦ InteraÃ§Ãµes registradas: ${interactions}\n\n` +
+                `👤 O que eu sei sobre você:\n\n` +
+                `📍 Bairro: ${capitalize(neighborhood)}\n` +
+                `🏪 Mercado favorito: ${favoriteMarket}\n` +
+                `🚗 Transporte: ${capitalize(String(transport))} (${consumption} km/l)\n` +
+                `💚 Preferência: ${preference}\n\n` +
+                `🛒 Produtos mais comprados:\n${productLines}\n\n` +
+                `💰 Gasto médio mensal: R$ ${richContext.averageMonthlySpend.toFixed(2).replace('.', ',')}\n` +
+                `📦 Interações registradas: ${interactions}\n\n` +
                 `Quer corrigir alguma informaÃ§Ã£o?`,
         };
     }
@@ -1471,7 +1477,7 @@ class ChatSession {
         });
 
         return {
-            text: `âœ… Lista enviada pra ${targetPhone}!\n\nA outra pessoa vai receber sua lista de compras no WhatsApp.`,
+            text: `✅ Lista enviada pra ${targetPhone}!\n\nA outra pessoa recebeu sua lista com ${listItems.length} itens. Boas compras! 🛒`,
             shareContent: shareText,
         };
     }
@@ -1792,7 +1798,7 @@ class ChatSession {
 
     private async handlePreferenceIntent(preference: 'economizar' | 'perto' | 'equilibrar' | null): Promise<ChatResponse> {
         if (!preference) {
-            return { text: 'Me diga como vocÃª prefere que eu priorize as sugestÃµes:\nâ€¢ **economizar**\nâ€¢ **mercado mais perto**\nâ€¢ **equilibrar os dois**' };
+            return { text: 'Me diga como você prefere que eu priorize as sugestões:\n• economizar\n• mercado mais perto\n• equilibrar os dois' };
         }
 
         this.context.optimizationPreference = preference;
@@ -1800,12 +1806,12 @@ class ChatSession {
         await this.refreshRichContext(true);
 
         const messages = {
-            economizar: 'âœ… Anotado! Vou priorizar as opÃ§Ãµes mais baratas primeiro, mesmo que sejam um pouco mais longe.',
-            perto: 'âœ… Fechado! Vou priorizar os mercados mais perto de vocÃª primeiro.',
-            equilibrar: 'âœ… Combinado! Vou equilibrar preÃ§o e distÃ¢ncia para te mostrar a melhor escolha.',
+            economizar: '✅ Anotado! Vou sempre te mostrar as opções mais baratas primeiro, mesmo que sejam um pouco mais longe.',
+            perto: '✅ Anotado! Vou priorizar os mercados mais perto de você.',
+            equilibrar: '✅ Anotado! Vou equilibrar preço e distância para te mostrar a melhor escolha.',
         };
 
-        return { text: `${messages[preference]}\n\nPode mudar quando quiser.` };
+        return { text: `${messages[preference]}\n\nPode mudar quando quiser! 😊` };
     }
 
     private async handleMarketOffersIntent(marketName?: string): Promise<ChatResponse> {
@@ -1816,7 +1822,7 @@ class ChatSession {
             return { text: marketVitrine };
         }
         this.conversationState.transition('AWAITING_ADD_TO_LIST', 'add_to_list', 'variados', 'Quer que eu adicione as melhores ofertas?');
-        return { text: `${marketVitrine}\n\n**Quer que eu coloque algum desses na sua lista de compras?** ðŸ›’\n(Diga 'Sim' e depois cite os nomes)` };
+        return { text: `${marketVitrine}\n\nSe quiser, eu também posso colocar algum desses na sua lista. 🛒` };
     }
 
     private async handleCategoryOffersIntent(categoryName?: string): Promise<ChatResponse> {
@@ -1862,9 +1868,9 @@ class ChatSession {
         const currentList = await this.listManager.recoverActiveListItemsOnly();
         if (currentList.items.length > 0) {
             this.conversationState.transition('AWAITING_LIST_CONFIRMATION', 'confirm_list', this.context.shoppingList, 'Finalizar lista?');
-            return { text: `${currentList.text}Finalizar lista?` };
+            return { text: `${currentList.text}Quer saber onde comprar mais barato?\nDigite: onde comprar minha lista` };
         }
-        return { text: "Sua lista estÃ¡ vazia no momento. Diga algo como _'lista: arroz, feijÃ£o'_ para comeÃ§ar!" };
+        return { text: "Sua lista está vazia no momento. Diga algo como 'adiciona arroz, feijão e café' para começar." };
     }
 
     private async handleRecentHistoryIntent(days: number): Promise<ChatResponse> {
@@ -1889,7 +1895,7 @@ class ChatSession {
 
         if (items.length === 0) {
             this.moveToListCreation('Me dÃª os produtos que eu crio uma lista pra vocÃª bem rÃ¡pida e econÃ´mica!');
-            return { text: 'Me dÃª os produtos que eu crio uma lista pra vocÃª bem rÃ¡pida e econÃ´mica!' };
+            return { text: 'Me fala os produtos que eu monto sua lista rapidinho. 🛒' };
         }
 
         const entities = interpretation.nlpResult.entities;
@@ -1900,9 +1906,8 @@ class ChatSession {
         }));
         await this.listManager.persistList(this.context.shoppingList);
 
-        const createdList = await this.listManager.recoverActiveListItemsOnly();
         this.moveToListCreation('Diga os itens');
-        return { text: `Lista com ${items.length} itens criada! ðŸ›’\n\n${createdList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
+        return { text: `✅ Adicionado à sua lista:\n${items.map((item) => `• ${item}`).join('\n')}\n\nDigite minha lista pra ver tudo! 🛒` };
     }
 
     private async handleAddItemsIntent(interpretation: Awaited<ReturnType<typeof aiService.interpret>>): Promise<ChatResponse> {
@@ -1926,9 +1931,7 @@ class ChatSession {
         });
 
         await this.listManager.persistList(this.context.shoppingList);
-        const addResult = await this.listManager.recoverActiveListItemsOnly();
-        this.conversationState.transition('AWAITING_LIST_CONFIRMATION', 'confirm_list', this.context.shoppingList, 'Finalizar lista?');
-        return { text: `Adicionei Ã  sua lista.\n\n${addResult.text}Finalizar lista?` };
+        return { text: `✅ Adicionado à sua lista:\n${addItems.map((item) => `• ${item}`).join('\n')}\n\nDigite minha lista pra ver tudo! 🛒` };
     }
 
     private async handleRemoveItemsIntent(interpretation: Awaited<ReturnType<typeof aiService.interpret>>): Promise<ChatResponse> {
@@ -1945,7 +1948,7 @@ class ChatSession {
         await this.listManager.persistList(this.context.shoppingList);
         const removedResult = await this.listManager.recoverActiveListItemsOnly();
         this.conversationState.transition('AWAITING_LIST_CONFIRMATION', 'confirm_list', this.context.shoppingList, 'Finalizar lista?');
-        return { text: `Pronto, removi. Sua lista atualizada:\n\n${removedResult.text}Finalizar lista?` };
+        return { text: `✅ Removi da sua lista.\n\n${removedResult.text}Quer ajustar mais alguma coisa?` };
     }
 
     private async handleSinglePriceIntent(term?: string): Promise<ChatResponse> {
@@ -1958,7 +1961,7 @@ class ChatSession {
         }
 
         this.conversationState.transition('AWAITING_ADD_TO_LIST', 'add_to_list', term, 'Quer que eu anote isso na sua Lista de Compras?');
-        return { text: `${priceText}\n\n**Quer que eu anote isso na sua Lista de Compras? (Sim/NÃ£o)**` };
+        return { text: `${priceText}\n\nQuer que eu coloque isso na sua lista? 🛒` };
     }
 
     private moveToListCreation(prompt: string) {

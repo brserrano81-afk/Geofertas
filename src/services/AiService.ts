@@ -1,6 +1,4 @@
-// ─────────────────────────────────────────────
-// AiService — Interpretação via OpenAI GPT-4o-mini
-// ─────────────────────────────────────────────
+// AiService - Interpretacao via Gemini
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
@@ -47,17 +45,21 @@ export interface Interpretation {
     nlpResult: NlpResult;
 }
 
-const SYSTEM_PROMPT = `Você é o classificador de intenções do Economiza Fácil — uma IA de supermercado para Classe C e D no WhatsApp.
+const SYSTEM_PROMPT = `Voce e o classificador de intencoes do Economiza Facil, um assistente de economia no WhatsApp.
 
-REGRAS ABSOLUTAS DE IDENTIDADE:
-1. Linguagem DIRETA e sem frescura. Se perguntarem "quanto tá o pão?", classifique como busca de produto.
-2. SEM FILTROS DE ELITE: qualquer produto é válido — alimentos, higiene, utilidades, camisinha, fralda, ração. Trate tudo com naturalidade.
-3. Entenda GÍRIAS brasileiras: "tá quanto", "manda ver", "e aí", "bora", "show", "de boa", "pode crê".
-4. ZERO FRICÇÃO: NUNCA peça CPF, login ou dado pessoal. Identificação é pelo número do celular.
-5. Se a mensagem parece busca de qualquer produto, classifique como SEARCH_PRODUCT.
-6. Se a mensagem é algo que você não entende, tente interpretar como busca de produto antes de dar UNKNOWN.
+REGRAS ABSOLUTAS:
+1. Se a pessoa pedir preco, oferta, comparacao, lista, mercado, gasto, historico ou cupom, classifique na intencao util mais proxima.
+2. Se a mensagem parece busca de produto, use SEARCH_PRODUCT.
+3. Entenda erros, abreviacoes e girias como "kto ta o cafe", "oferta do extra", "add leite", "vale ir de carro".
+4. Nunca peca cadastro, CPF, login ou senha.
+5. "onde comprar minha lista" e "qual mercado e mais barato pra minha lista" -> CALCULATE_LIST.
+6. "me ajuda a planejar o mes", "planejar compras", "o que preciso comprar esse mes" -> VIEW_CONSUMPTION_PATTERN.
+7. "o que voce sabe sobre mim", "o que lembra de mim", "me fala meu historico" -> SHOW_PROFILE.
+8. "tem coisa mais barata que o nescafe", "marca propria do arroz vale a pena", "qual oleo e mais em conta" -> SEARCH_PRODUCT.
+9. Palavra isolada que pareca produto -> SEARCH_PRODUCT.
+10. Evite UNKNOWN se houver leitura razoavel como produto, mercado, lista ou perfil.
 
-Responda APENAS com JSON válido, nunca texto fora do JSON. Formato:
+Responda APENAS com JSON valido:
 {
   "intent": "SEARCH_PRODUCT|CREATE_LIST|ADD_TO_LIST|REMOVE_FROM_LIST|SHOW_LIST|CLEAR_LIST|SHARE_LIST|CALCULATE_LIST|EXTRACT_RECEIPT|CONFIRM_PURCHASE|CANCEL_PURCHASE|GREETING|HELP|SET_LOCATION|SET_TRANSPORT|SET_CONSUMPTION|SET_PREFERENCE|SHOW_PROFILE|MARKET_OFFERS|WEEKLY_OFFERS|CATEGORY_SEARCH|PRICE_HISTORY|REGISTER_EXPENSE|EXPENSE_ANALYSIS|VIEW_PURCHASE_HISTORY|VIEW_RECENT_EXPENSES|VIEW_LAST_PURCHASE|VIEW_CONSUMPTION_PATTERN|FIND_NEARBY_MARKETS|CANCEL_OR_EXIT|UNKNOWN",
   "entities": [{"value": "nome_do_produto", "quantity": 1, "unit": "kg"}],
@@ -65,18 +67,17 @@ Responda APENAS com JSON válido, nunca texto fora do JSON. Formato:
   "confidence": 0.95
 }
 
-Regras de classificação:
-- Link http/sefaz/nfce → EXTRACT_RECEIPT
-- "lista com" ou itens com vírgula → CREATE_LIST
-- Saudação simples, gírias (kole, koé, iae), ou pontuação isolada (., ?, !) → GREETING
-- Busca de produto (qualquer item) → SEARCH_PRODUCT
-- Múltiplos produtos → isBatch: true
-- "mercados perto" / "mercado próximo" → FIND_NEARBY_MARKETS
-- "ofertas do [mercado]" → MARKET_OFFERS
-- "hortifrúti" / "carnes" / categoria → CATEGORY_SEARCH
+Regras de classificacao:
+- Link http/sefaz/nfce -> EXTRACT_RECEIPT
+- "lista com" ou itens com virgula -> CREATE_LIST
+- Saudacao simples, girias ou pontuacao isolada -> GREETING
+- Busca de produto -> SEARCH_PRODUCT
+- Multiplos produtos -> isBatch: true
+- "mercados perto" / "mercado proximo" -> FIND_NEARBY_MARKETS
+- "ofertas do [mercado]" -> MARKET_OFFERS
+- "hortifruti" / "carnes" / categoria -> CATEGORY_SEARCH
 - Gasto financeiro: extraia valor em "amount" e mercado em "value"
-- Período: extraia dias em "days"
-- Palavra isolada provável produto → SEARCH_PRODUCT (não UNKNOWN)`;
+- Periodo: extraia dias em "days"`;
 
 const NLP_TO_INTENT: Record<string, Intent> = {
     'SEARCH_PRODUCT': 'consultar_preco_produto',
@@ -119,7 +120,7 @@ class AiService {
 
         const directGreetings = new Set([
             'oi', 'ola', 'olá', 'opa', 'e ai', 'e aí', 'iae', 'bom dia', 'boa tarde', 'boa noite',
-            '.', '?', '!', 'oii', 'hello', 'menu', 'inicio', 'início',
+            '.', '?', '!', 'oii', 'hello', 'menu', 'inicio', 'início', 'olaa', 'salve',
         ]);
 
         if (directGreetings.has(normalized)) {
@@ -130,7 +131,6 @@ class AiService {
             });
         }
 
-        // Atalho para links (sem precisar chamar a LLM)
         if (message.match(/https?:\/\//i) || message.match(/sefaz/i) || message.match(/nfce/i)) {
             return this.buildResult('extrair_cupom', { intent: 'EXTRACT_RECEIPT', entities: [{ value: message }], confidence: 1.0 });
         }
@@ -138,12 +138,12 @@ class AiService {
         try {
             const apiKey = getGeminiKey();
             if (!apiKey) {
-                console.warn("[AiService] GOOGLE_GEMINI_API_KEY ausente. Usando fallback.");
+                console.warn('[AiService] GOOGLE_GEMINI_API_KEY ausente. Usando fallback.');
                 return this.buildResult('desconhecido', { intent: 'UNKNOWN', entities: [{ value: 'API_ERROR' }], confidence: 0 });
             }
 
             const genAI = new GoogleGenerativeAI(apiKey);
-            const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+            const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
             const contextPrompt = context?.richContextSummary
                 ? `\nCONTEXTO DO USUARIO:\n${context.richContextSummary}\n`
@@ -151,12 +151,10 @@ class AiService {
 
             const result = await model.generateContent([
                 `${SYSTEM_PROMPT}${contextPrompt}`,
-                message
+                message,
             ]);
 
             const responseText = result.response.text();
-
-            // Parse o JSON retornado (removendo possíveis backticks markdown)
             const cleaned = responseText.replace(/```json\s*/g, '').replace(/```/g, '').trim();
             const parsed = JSON.parse(cleaned) as NlpResult & { isBatch?: boolean };
 
@@ -169,7 +167,6 @@ class AiService {
             const intent = NLP_TO_INTENT[nlpResult.intent] || 'desconhecido';
             const isBatch = parsed.isBatch || false;
 
-            // Converter para multi-produto se batch
             let finalIntent = intent;
             if (isBatch && intent === 'consultar_preco_produto') {
                 finalIntent = 'consultar_preco_multiplos_produtos';
@@ -184,8 +181,8 @@ class AiService {
 
     private buildResult(intent: Intent, nlpResult: NlpResult, isBatch: boolean = false): Interpretation {
         const products = nlpResult.entities
-            .map(e => e.value)
-            .filter(v => v && v !== 'API_ERROR');
+            .map((entity) => entity.value)
+            .filter((value) => value && value !== 'API_ERROR');
 
         return {
             intent,
@@ -199,41 +196,40 @@ class AiService {
 
     async generateConversationalResponse(
         systemContext: string,
-        history: { role: 'user' | 'assistant', content: string }[],
+        history: { role: 'user' | 'assistant'; content: string }[],
         userMessage: string,
         userContextSummary?: string,
     ): Promise<string> {
         const apiKey = getGeminiKey();
         if (!apiKey) {
-            console.warn("[AiService] GOOGLE_GEMINI_API_KEY ausente. Usando fallback de texto simples.");
-            return systemContext; 
+            console.warn('[AiService] GOOGLE_GEMINI_API_KEY ausente. Usando fallback de texto simples.');
+            return systemContext;
         }
 
         const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
-        const AI_PROMPT = `Você é o "Economiza Fácil", um assistente virtual focado em entregar a melhor economia para os usuários (foco em supermercados, Classe C e D no Brasil).
-Sua personalidade: Educada, prestativa, clara e fluida. Você conduz uma conversa natural, como um excelente atendente humano.
-COMPREENSÃO: Você entende perfeitamente todas as gírias brasileiras e formas informais de falar, MAS VOCÊ NÃO FALA GÍRIAS. Responda sempre em bom português, de maneira amigável mas respeitosa e profissional.
-OBJETIVO: Ajudar o usuário a economizar tempo e dinheiro, encontrar os supermercados mais baratos, organizar listas de compras e analisar cupons.
-ESTILO DE RESPOSTA: Seja direto sem ser robótico. Mantenha as mensagens enxutas e escaneáveis (perfeitas para a tela de um celular no WhatsApp). Formate listas e preços de forma legível (usando marcadores e destaques em negrito onde apropriado). Evite introduções longas, elogios desnecessários e frases genéricas.
-DADOS E LISTAS: NUNCA resuma as listas de produtos ou resultados fornecidos pelo sistema. Se o sistema te mandar um texto com 5 marcas e 5 preços, mostre todos eles na sua resposta. NUNCA altere os valores numéricos. NUNCA remova a formatação original que o sistema já usou (ex: asteriscos \`**\` ou emojis nas listas).`;
+        const AI_PROMPT = `Você é o "Economiza Fácil", um assistente virtual focado em entregar economia real no WhatsApp.
+Sua personalidade: clara, útil, comercial e natural.
+Você entende gírias e erros de digitação, mas responde em bom português.
+Mantenha as mensagens curtas, escaneáveis e próprias para WhatsApp.
+Nunca altere números do sistema e nunca omita listas de ofertas ou produtos.`;
 
         try {
-            const formattedHistory = history.map(msg => ({
+            const formattedHistory = history.map((msg) => ({
                 role: msg.role === 'assistant' ? 'model' : 'user',
-                parts: [{ text: msg.content }]
+                parts: [{ text: msg.content }],
             }));
 
             const chat = model.startChat({
                 history: [
                     { role: 'user', parts: [{ text: AI_PROMPT }] },
-                    { role: 'model', parts: [{ text: "Compreendido. Estou pronto para ajudar os usuários a economizarem o máximo possível, respondendo de forma educada, fluida e natural, sempre respeitando os dados fornecidos pelo sistema." }] },
-                    ...formattedHistory
+                    { role: 'model', parts: [{ text: 'Compreendido. Vou responder de forma natural, útil e fiel aos dados do sistema.' }] },
+                    ...formattedHistory,
                 ],
             });
 
-            const promptContext = `[CONTEXTO RICO DO USUARIO]:\n${userContextSummary || 'sem contexto adicional'}\n\n[MENSAGEM ORIGINAL GERADA PELO SISTEMA (Use como os dados base para a sua resposta)]: \n\n${systemContext}\n\n====================\n\n[NOVA MENSAGEM DO USUÁRIO]: \n${userMessage}\n\nBaseado na Mensagem Original do Sistema, aja como o Economiza Fácil.\nREGRA DE OURO: Se precisar humanizar, use no máximo 1 frase curta antes OU depois da mensagem do sistema. Priorize resposta objetiva. MANTENHA O TEXTO ORIGINAL DAS OFERTAS/PRODUTOS INTACTO exatamente como fornecido. NÃO TRUNQUE, NÃO RESUMA E NÃO OMITA AS LISTAS DO SISTEMA.`;
+            const promptContext = `[CONTEXTO RICO DO USUARIO]:\n${userContextSummary || 'sem contexto adicional'}\n\n[MENSAGEM ORIGINAL GERADA PELO SISTEMA]:\n${systemContext}\n\n[NOVA MENSAGEM DO USUARIO]:\n${userMessage}\n\nHumanize com leveza, mas preserve os dados e a estrutura útil da resposta.`;
 
             const result = await chat.sendMessage(promptContext);
             return result.response.text();
@@ -246,15 +242,14 @@ DADOS E LISTAS: NUNCA resuma as listas de produtos ou resultados fornecidos pelo
     async transcribeAudio(audioData: Uint8Array, mimeType: string): Promise<string | null> {
         const apiKey = getGeminiKey();
         if (!apiKey) {
-            console.warn("[AiService] GOOGLE_GEMINI_API_KEY ausente. Não é possível transcrever áudio.");
+            console.warn('[AiService] GOOGLE_GEMINI_API_KEY ausente. Não é possível transcrever áudio.');
             return null;
         }
 
         try {
             const genAI = new GoogleGenerativeAI(apiKey);
-            const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+            const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
-            // Convert Uint8Array to base64
             let binary = '';
             for (let i = 0; i < audioData.length; i++) {
                 binary += String.fromCharCode(audioData[i]);
@@ -264,15 +259,15 @@ DADOS E LISTAS: NUNCA resuma as listas de produtos ou resultados fornecidos pelo
             const audioPart = {
                 inlineData: {
                     data: base64,
-                    mimeType: mimeType
-                }
+                    mimeType,
+                },
             };
 
-            const prompt = "Transcreva exatamente o que é dito neste áudio. Se for uma lista de compras ou o nome de um produto, escreva claramente. Não adicione comentários descritivos, apenas o que foi dito.";
+            const prompt = 'Transcreva exatamente o que é dito neste áudio. Se for lista de compras ou produto, escreva claramente. Não adicione comentários.';
 
             const result = await model.generateContent([prompt, audioPart]);
             const text = result.response.text();
-            
+
             return text.trim();
         } catch (err) {
             console.error('[AiService] Erro ao transcrever áudio no Gemini:', err);
