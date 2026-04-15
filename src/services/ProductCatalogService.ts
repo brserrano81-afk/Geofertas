@@ -189,6 +189,41 @@ class ProductCatalogService {
 
         return undefined;
     }
+
+    /**
+     * Enriquece semanticamente um nome de produto:
+     * - Tenta match no catálogo (nome canônico + categoria + id)
+     * - Fallback: inferência de categoria por CATEGORY_ALIASES
+     *
+     * Retorna os campos prontos para salvar em offer_queue.
+     */
+    async enrichProductSemantically(rawName: string): Promise<{
+        normalizedName?: string;
+        catalogProductId?: string;
+        category?: string;
+        semanticScore: number;
+    }> {
+        const match = await this.matchProductName(rawName);
+
+        if (match.product && match.score >= 0.8) {
+            return {
+                normalizedName: match.product.name,
+                catalogProductId: match.product.id,
+                category: match.product.category || undefined,
+                semanticScore: match.score,
+            };
+        }
+
+        // Fallback: só inferir categoria pelo alias, sem nome canônico
+        const normalizedTerm = normalizeCatalogText(rawName);
+        const inferredCategory = this.resolveCategoryAlias(normalizedTerm);
+        return {
+            normalizedName: undefined,
+            catalogProductId: undefined,
+            category: inferredCategory,
+            semanticScore: match.score,
+        };
+    }
 }
 
 export const productCatalogService = new ProductCatalogService();

@@ -9,6 +9,22 @@ function normalize(value: string): string {
         .trim();
 }
 
+function titleCase(value: string): string {
+    return String(value || '')
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+}
+
+function formatCurrency(value: number): string {
+    return `R$ ${Number(value || 0).toFixed(2).replace('.', ',')}`;
+}
+
+function formatMonthLabel(date: Date): string {
+    return date.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+}
+
 class PurchaseAnalyticsService {
     private readonly userId: string;
 
@@ -56,7 +72,7 @@ class PurchaseAnalyticsService {
     }
 
     formatCategoryAnalysis(summary: { total: number; count: number; average: number }, term: string, days: number): string {
-        return `📊 Gastos com **${term}** nos últimos ${days} dias\n\nTotal: **R$ ${summary.total.toFixed(2).replace('.', ',')}**\nItens: **${summary.count}**\nMédia: **R$ ${summary.average.toFixed(2).replace('.', ',')}**`;
+        return `📊 Seus gastos com ${titleCase(term)}\n\nTotal no período: ${formatCurrency(summary.total)}\nCompras registradas: ${summary.count}\nPreço médio: ${formatCurrency(summary.average)}\n\nRecorte analisado: ${days} dias.`;
     }
 
     async getTopSpending(days: number) {
@@ -81,8 +97,8 @@ class PurchaseAnalyticsService {
         if (top.length === 0) {
             return `Ainda não tenho gastos suficientes para analisar os últimos ${days} dias.`;
         }
-        const lines = top.map(([name, total]) => `• ${name} — R$ ${total.toFixed(2).replace('.', ',')}`);
-        return `📊 Maiores gastos nos últimos ${days} dias\n\n${lines.join('\n')}`;
+        const lines = top.map(([name, total]) => `• ${titleCase(name)}: ${formatCurrency(total)}`);
+        return `📊 Produtos em que você mais gastou\n\n${lines.join('\n')}\n\nRecorte analisado: ${days} dias.`;
     }
 
     async getTotalSpentInPeriod(startDate: string, endDate: string) {
@@ -98,7 +114,12 @@ class PurchaseAnalyticsService {
     }
 
     formatPeriodSummary(result: { total: number; count: number }, days: number): string {
-        return `📊 Seus gastos nos últimos ${days} dias\n\nTotal: **R$ ${result.total.toFixed(2).replace('.', ',')}**\nCompras registradas: **${result.count}**`;
+        const referenceDate = new Date();
+        const title = days >= 28 && days <= 31
+            ? `📊 Seus gastos — ${formatMonthLabel(referenceDate)}`
+            : `📊 Seus gastos — últimos ${days} dias`;
+
+        return `${title}\n\nTotal: ${formatCurrency(result.total)}\nCompras no período: ${result.count}\n\nQuer que eu detalhe por categoria ou produto?`;
     }
 
     async getLastPurchase() {
@@ -110,7 +131,7 @@ class PurchaseAnalyticsService {
         if (!purchase) {
             return 'Ainda não encontrei nenhuma compra salva.';
         }
-        return `🧾 Última compra\n\nMercado: **${purchase.marketName || 'Mercado'}**\nTotal: **R$ ${Number(purchase.totalAmount || 0).toFixed(2).replace('.', ',')}**`;
+        return `🧾 Última compra\n\nMercado: ${purchase.marketName || 'Mercado'}\nTotal: ${formatCurrency(Number(purchase.totalAmount || 0))}`;
     }
 
     async getConsumptionPattern(days: number) {
@@ -124,7 +145,7 @@ class PurchaseAnalyticsService {
     }
 
     formatConsumptionPattern(pattern: { purchaseCount: number; averageTicket: number }, days: number): string {
-        return `📈 Seu padrão de consumo (${days} dias)\n\nCompras: **${pattern.purchaseCount}**\nTicket médio: **R$ ${pattern.averageTicket.toFixed(2).replace('.', ',')}**`;
+        return `🧠 Seu ritmo de compras\n\nCompras analisadas: ${pattern.purchaseCount}\nTicket médio: ${formatCurrency(pattern.averageTicket)}\nJanela usada: ${days} dias`;
     }
 
     private async getPurchases(): Promise<any[]> {

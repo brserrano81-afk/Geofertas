@@ -1,6 +1,4 @@
-// ─────────────────────────────────────────────
-// VisionService — Extração de dados de imagens via GPT-4o
-// ─────────────────────────────────────────────
+// VisionService - Extracao de dados de imagens via Gemini
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
@@ -9,35 +7,50 @@ function getGeminiKey(): string {
 }
 
 const SYSTEM_PROMPT = `Você é um especialista em visão computacional treinado para analisar imagens de supermercado.
-Sua tarefa é identificar se a imagem é um CUPOM FISCAL (nota impressa com lista de itens) ou uma ETIQUETA DE PREÇO (placa na prateleira com produto e valor).
+Sua tarefa é identificar se a imagem é:
+  (A) CUPOM FISCAL - nota impressa com lista de itens comprados
+  (B) ETIQUETA DE PREÇO - placa de prateleira com um único produto e valor
+  (C) TABLOIDE / ENCARTE - folheto ou foto com vários produtos e preços
 
 REGRAS ABSOLUTAS:
-1. Responda APENAS com um JSON válido.
-2. Defina o campo "type" como "receipt" ou "price_tag".
+1. Responda APENAS com um JSON válido, sem texto adicional, sem markdown.
+2. Defina o campo "type" como "receipt", "price_tag" ou "tabloid".
+3. Inclua "confidence" entre 0 e 1 para a classificação geral da imagem.
+4. Se for cupom, pense como histórico pessoal do cliente.
+5. Se for etiqueta ou tabloide, pense como contribuição colaborativa para a base de ofertas.
 
-CUPOM FISCAL ("type": "receipt"):
-- Extraia nome do mercado (ou "Desconhecido").
-- Tente encontrar CNPJ (apenas os números, ou "").
-- "sefazUrl": Procure na imagem por uma URL de consulta da nota (ex: link do QR Code da SEFAZ). Se encontrar, coloque a URL completa aqui (ou "").
-- "sefazKey": Procure pela "Chave de Acesso" (são exatos 44 números, as vezes separados por espaços). Se existir, agrupe e retorne apenas os 44 números (ou "").
+CUPOM FISCAL ("type": "receipt")
+- "marketName": Nome do mercado (ou "Desconhecido").
+- "cnpj": Apenas os dígitos do CNPJ (14 chars, ou "").
+- "sefazUrl": URL da SEFAZ/NFC-e se visível no QR Code (ou "").
+- "sefazKey": Chave de Acesso com exatos 44 dígitos (ou "").
 - "total": Valor total pago.
-- "items": Array com TODOS OS ITENS: { "name": "Produto", "price": 10.50 }
+- "items": Array com todos os itens: [{ "name": "Produto", "price": 10.50 }]
 
-ETIQUETA DE PREÇO ("type": "price_tag"):
-- "marketName": Nome do mercado se visível.
-- "product": Nome do produto na placa principal.
-- "brand": Marca do produto (ou "").
-- "price": Preço visível.
-- "unit": kg, litro, gl, un, etc. (ou "")
+ETIQUETA DE PREÇO ("type": "price_tag")
+- "marketName": Nome do mercado se visível (ou "").
+- "product": Nome do produto.
+- "brand": Marca (ou "").
+- "price": Preço numérico.
+- "unit": "kg", "litro", "un", etc. (ou "").
 
-Formato de Saída (Exemplo Etiqueta):
+TABLOIDE / ENCARTE ("type": "tabloid")
+- "marketName": Nome do mercado se visível no material (ou "").
+- "items": Array com todos os produtos identificados:
+  [{ "product": "Frango inteiro", "brand": "Sadia", "price": 12.90, "unit": "kg" }]
+
+Exemplo:
 {
-  "type": "price_tag",
-  "marketName": "Atacadão",
-  "product": "Arroz Branco",
-  "brand": "Tio João",
-  "price": 25.90,
-  "unit": "5kg"
+  "type": "receipt",
+  "confidence": 0.94,
+  "marketName": "Extrabom",
+  "cnpj": "",
+  "sefazUrl": "",
+  "sefazKey": "",
+  "total": 89.4,
+  "items": [
+    { "name": "Arroz", "price": 24.9 }
+  ]
 }`;
 
 class VisionService {
@@ -46,35 +59,35 @@ class VisionService {
 
         const apiKey = getGeminiKey();
         if (!apiKey) {
-            console.error("[VisionService] GOOGLE_GEMINI_API_KEY não configurada.");
+            console.error('[VisionService] GOOGLE_GEMINI_API_KEY não configurada.');
             return null;
         }
 
         try {
             const genAI = new GoogleGenerativeAI(apiKey);
-            const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+            const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
             const base64 = this.uint8ToBase64(imageData);
-            
             const imagePart = {
                 inlineData: {
                     data: base64,
-                    mimeType: "image/jpeg"
-                }
+                    mimeType: 'image/jpeg',
+                },
             };
 
             const result = await model.generateContent([
                 SYSTEM_PROMPT,
-                imagePart
+                imagePart,
             ]);
 
             const responseText = result.response.text();
-            
-            // Clean markdown markdown syntax
             const cleaned = responseText.replace(/```json\s*/g, '').replace(/```/g, '').trim();
             const parsed = JSON.parse(cleaned);
 
-            // Validação do CNPJ apenas para notas fiscais
+            if (typeof parsed.confidence !== 'number') {
+                parsed.confidence = 0.7;
+            }
+
             if (parsed.type === 'receipt' && parsed.cnpj) {
                 const cnpjDigits = parsed.cnpj.replace(/\D/g, '');
                 if (cnpjDigits.length !== 14) {

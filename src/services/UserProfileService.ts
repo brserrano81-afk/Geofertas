@@ -55,10 +55,15 @@ class UserProfileService {
     async recordInteraction(userId: string, interaction: UserInteraction) {
         const userRef = doc(db, 'users', userId);
         const interactionsRef = collection(db, 'users', userId, 'interactions');
-        const preview = interaction.content.slice(0, 160);
+
+        // LGPD — Minimização de dados (art. 6º, III):
+        // Nunca salvamos o texto completo da mensagem — apenas um preview ≤80 chars.
+        // Isso evita captura acidental de dados sensíveis na conversa.
+        const contentPreview = String(interaction.content || '').slice(0, 80);
+
         const interactionPayload = {
             role: interaction.role,
-            content: interaction.content,
+            contentPreview,          // preview ≤80 chars — nunca o texto completo
             ...(interaction.intent ? { intent: interaction.intent } : {}),
             createdAt: serverTimestamp(),
         };
@@ -70,7 +75,7 @@ class UserProfileService {
             channel: userId.endsWith('@c.us') ? 'whatsapp' : 'web',
             lastInteractionAt: serverTimestamp(),
             lastIntent: interaction.intent || null,
-            lastMessagePreview: preview,
+            lastMessagePreview: contentPreview,
             interactionCount: await this.getNextInteractionCount(userId),
         }, { merge: true });
     }
@@ -91,7 +96,16 @@ class UserProfileService {
             const snap = await getDocs(interactionsQuery);
 
             return snap.docs
-                .map((docSnap) => docSnap.data() as UserInteraction)
+                .map((docSnap) => {
+                    const data = docSnap.data();
+                    return {
+                        role: data.role as 'user' | 'assistant',
+                        // Compatibilidade: suporta campo legado 'content' e novo 'contentPreview'
+                        content: String(data.contentPreview || data.content || ''),
+                        intent: data.intent,
+                        createdAt: data.createdAt,
+                    } as UserInteraction;
+                })
                 .reverse();
         } catch (err) {
             console.error('[UserProfileService] Error loading interactions:', err);

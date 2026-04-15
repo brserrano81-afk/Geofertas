@@ -23,6 +23,14 @@ function normalize(value: string): string {
         .trim();
 }
 
+function titleCase(value: string): string {
+    return String(value || '')
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+}
+
 class PredictiveShoppingService {
     async buildMonthlyPlan(userId: string): Promise<PredictivePlan> {
         const [purchases, offers] = await Promise.all([
@@ -71,17 +79,24 @@ class PredictiveShoppingService {
 
     formatMonthlyPlan(plan: PredictivePlan): string {
         if (plan.plannedPurchases.length === 0) {
-            return 'Ainda não tenho histórico suficiente para prever sua próxima compra. Me mande mais cupons e eu vou aprendendo.';
+            return 'Ainda não tenho histórico suficiente para planejar seu mês. Me manda mais cupons e eu vou aprendendo com você.';
         }
 
-        const lines = plan.plannedPurchases.map((item) => {
-            const urgency = item.urgent ? 'URGENTE' : `${item.daysRemaining}d`;
-            const price = item.currentPrice !== null ? `R$ ${item.currentPrice.toFixed(2).replace('.', ',')}` : 'sem oferta agora';
-            const market = item.marketName ? ` no ${item.marketName}` : '';
-            return `• ${item.product} — ${urgency} — ${price}${market}`;
+        const lines = plan.plannedPurchases.slice(0, 5).map((item) => {
+            const urgency = item.daysRemaining <= 0
+                ? '🔴'
+                : item.daysRemaining <= 3
+                    ? '🟡'
+                    : '🟢';
+            const timing = item.daysRemaining <= 0
+                ? 'acabou hoje'
+                : item.daysRemaining === 1
+                    ? 'acaba amanhã'
+                    : `acaba em ${item.daysRemaining} dias`;
+            return `${urgency} ${titleCase(item.product)} — ${timing}`;
         });
 
-        return `📈 **Planejamento previsto do mês**\n\n${lines.join('\n')}\n\n💰 Estimativa da próxima cesta: **R$ ${plan.estimatedBasketTotal.toFixed(2).replace('.', ',')}**\n📊 Gasto médio mensal: **R$ ${plan.averageMonthlySpend.toFixed(2).replace('.', ',')}**`;
+        return `📅 Planejamento do mês\n\nCom base no seu histórico:\n\n${lines.join('\n')}\n\n💰 Estimativa do mês: R$ ${plan.averageMonthlySpend.toFixed(2).replace('.', ',')}\n\nQuer que eu monte a lista? 🛒`;
     }
 
     private buildPlannedPurchase(product: string, dates: Date[], offers: any[], now: Date): PlannedPurchase | null {
@@ -99,7 +114,7 @@ class PredictiveShoppingService {
         const averageCycle = intervals.reduce((sum, value) => sum + value, 0) / intervals.length;
         const daysSinceLastPurchase = (now.getTime() - sortedDates[sortedDates.length - 1].getTime()) / (1000 * 60 * 60 * 24);
         const daysRemaining = Math.max(0, Math.round(averageCycle - daysSinceLastPurchase));
-        if (daysRemaining > 7) return null;
+        if (daysRemaining > 10) return null;
 
         const matchingOffers = offers.filter((offer) => {
             const name = normalize(String(offer.productName || offer.name || ''));

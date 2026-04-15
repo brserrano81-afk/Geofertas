@@ -2,6 +2,28 @@ import { addDoc, collection, getDocs, limit, orderBy, query, serverTimestamp, up
 import { db } from '../firebase';
 import { offerEngine } from './OfferEngine';
 import type { ActiveShoppingList, ShoppingListItem } from '../types/shopping';
+import { analyticsEventWriter } from '../workers/AnalyticsEventWriter';
+
+function toSortableTimestamp(value: unknown): number {
+    if (!value) return 0;
+    if (typeof value === 'object' && value !== null && 'toMillis' in (value as { toMillis?: unknown })) {
+        const toMillis = (value as { toMillis: () => number }).toMillis;
+        if (typeof toMillis === 'function') {
+            return toMillis();
+        }
+    }
+
+    if (value instanceof Date) {
+        return value.getTime();
+    }
+
+    if (typeof value === 'string') {
+        const parsed = Date.parse(value);
+        return Number.isNaN(parsed) ? 0 : parsed;
+    }
+
+    return 0;
+}
 
 function formatList(items: ShoppingListItem[]): string {
     if (items.length === 0) {
@@ -47,6 +69,11 @@ class ListManager {
                 status: 'active',
                 updatedAt: serverTimestamp(),
             });
+            // Analytics: lista atualizada (fire-and-forget, sem PII)
+            analyticsEventWriter.writeEvent({
+                eventType: 'list_updated',
+                basketSize: items.length,
+            }).catch(() => { /* já logado internamente */ });
             return;
         }
 
@@ -56,6 +83,11 @@ class ListManager {
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
         });
+        // Analytics: lista criada (fire-and-forget, sem PII)
+        analyticsEventWriter.writeEvent({
+            eventType: 'list_created',
+            basketSize: items.length,
+        }).catch(() => { /* já logado internamente */ });
     }
 
     async recoverActiveListItemsOnly(): Promise<{ text: string; items: ShoppingListItem[] }> {
@@ -150,13 +182,19 @@ class ListManager {
         completedAt?: unknown;
     } | null> {
         const listsRef = collection(db, 'users', this.userId, 'lists');
-        const activeQuery = query(listsRef, where('status', '==', 'active'), orderBy('updatedAt', 'desc'), limit(1));
+        // Avoid requiring a composite index while the WhatsApp worker boots user context.
+        const activeQuery = query(listsRef, where('status', '==', 'active'), limit(10));
         const snap = await getDocs(activeQuery);
         if (snap.empty) return null;
-        const data = snap.docs[0].data();
+        const [latestDoc] = snap.docs.sort((a, b) => {
+            const aUpdatedAt = toSortableTimestamp(a.data().updatedAt);
+            const bUpdatedAt = toSortableTimestamp(b.data().updatedAt);
+            return bUpdatedAt - aUpdatedAt;
+        });
+        const data = latestDoc.data();
         return {
-            id: snap.docs[0].id,
-            ref: snap.docs[0].ref,
+            id: latestDoc.id,
+            ref: latestDoc.ref,
             status: String(data.status || 'active'),
             items: (data.items || []) as ShoppingListItem[],
             createdAt: data.createdAt,

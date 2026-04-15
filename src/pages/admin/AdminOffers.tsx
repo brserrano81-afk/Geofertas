@@ -1,122 +1,129 @@
-import { addDoc, collection, getDocs, orderBy, query, serverTimestamp, updateDoc, doc } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 
-import { db } from "../../firebase";
 import {
+  adminMvpService,
+  createEmptyOfferInput,
+  dateInputFromIso,
+  formatCurrency,
+  formatDateLabel,
+  normalizeOfferInput,
+  offerToInput,
+  type AdminStatusFilter,
+  type MarketRecord,
+  type OfferInput,
+  type OfferRecord,
+} from "../../services/admin/AdminMvpService";
+import AdminNav from "./AdminNav";
+import {
+  adminActionsRowStyle,
+  adminBadgeStyle,
   adminButtonStyle,
+  adminDangerButtonStyle,
   adminGridStyle,
   adminInputStyle,
   adminPanelStyle,
   adminSecondaryButtonStyle,
   adminShellStyle,
+  adminTopbarStyle,
 } from "./adminStyles";
-
-type OfferRecord = {
-  id: string;
-  productName: string;
-  marketName: string;
-  networkName?: string;
-  marketId?: string;
-  category?: string;
-  price: number;
-  active?: boolean;
-  startsAt?: string;
-  expiresAt?: string;
-};
-
-type OfferFormState = {
-  productName: string;
-  marketName: string;
-  networkName: string;
-  marketId: string;
-  category: string;
-  price: string;
-  expiresAt: string;
-};
-
-const initialForm: OfferFormState = {
-  productName: "",
-  marketName: "",
-  networkName: "",
-  marketId: "",
-  category: "",
-  price: "",
-  expiresAt: "",
-};
 
 export default function AdminOffers() {
   const [offers, setOffers] = useState<OfferRecord[]>([]);
-  const [form, setForm] = useState<OfferFormState>(initialForm);
-  const [isSaving, setIsSaving] = useState(false);
-  const [feedback, setFeedback] = useState<string>("");
+  const [markets, setMarkets] = useState<MarketRecord[]>([]);
+  const [form, setForm] = useState<OfferInput>(createEmptyOfferInput());
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const [marketFilter, setMarketFilter] = useState("todos");
+  const [categoryFilter, setCategoryFilter] = useState("todos");
+  const [statusFilter, setStatusFilter] = useState<AdminStatusFilter>("todos");
 
-  async function loadOffers() {
-    const snap = await getDocs(query(collection(db, "offers"), orderBy("productName")));
-    const items = snap.docs.map((docSnap) => {
-      const data = docSnap.data() as Record<string, unknown>;
-      return {
-        id: docSnap.id,
-        productName: String(data.productName || data.name || ""),
-        marketName: String(data.marketName || data.networkName || ""),
-        networkName: String(data.networkName || ""),
-        marketId: String(data.marketId || ""),
-        category: String(data.category || ""),
-        price: Number(data.price || data.promoPrice || 0),
-        active: data.active !== false && data.isActive !== false,
-        startsAt: String(data.startsAt || ""),
-        expiresAt: String(data.expiresAt || ""),
-      };
-    });
-
-    setOffers(items);
+  async function loadData() {
+    const [offerItems, marketItems] = await Promise.all([
+      adminMvpService.listOffers(),
+      adminMvpService.listMarkets(),
+    ]);
+    setOffers(offerItems);
+    setMarkets(marketItems);
   }
 
   useEffect(() => {
-    loadOffers().catch((error) => {
-      console.error("[AdminOffers] load error", error);
-      setFeedback("Nao foi possivel carregar as ofertas.");
-    });
+    loadData()
+      .catch((error) => {
+        console.error("[AdminOffers] load error", error);
+        setFeedback("Nao foi possivel carregar as ofertas.");
+      })
+      .finally(() => setLoading(false));
   }, []);
+
+  const categoryOptions = useMemo(
+    () => Array.from(new Set(offers.map((offer) => offer.category).filter(Boolean))).sort(),
+    [offers],
+  );
+
+  const filteredOffers = useMemo(() => {
+    return offers.filter((offer) => {
+      if (marketFilter !== "todos" && offer.marketId !== marketFilter) return false;
+      if (categoryFilter !== "todos" && offer.category !== categoryFilter) return false;
+      if (statusFilter === "ativos" && !offer.active) return false;
+      if (statusFilter === "inativos" && offer.active) return false;
+      return true;
+    });
+  }, [offers, marketFilter, categoryFilter, statusFilter]);
+
+  const selectedMarket = useMemo(
+    () => markets.find((market) => market.id === form.marketId) || null,
+    [form.marketId, markets],
+  );
+
+  function resetForm() {
+    setForm(createEmptyOfferInput());
+    setEditingId(null);
+  }
+
+  function startEditing(record: OfferRecord) {
+    setForm(offerToInput(record));
+    setEditingId(record.id);
+    setFeedback("");
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setIsSaving(true);
+    setSaving(true);
     setFeedback("");
 
     try {
-      await addDoc(collection(db, "offers"), {
-        productName: form.productName.trim(),
-        marketName: form.marketName.trim(),
-        networkName: form.networkName.trim() || form.marketName.trim(),
-        marketId: form.marketId.trim() || null,
-        category: form.category.trim() || "geral",
-        price: Number(form.price),
-        active: true,
-        startsAt: new Date().toISOString(),
-        expiresAt: form.expiresAt ? new Date(form.expiresAt).toISOString() : null,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      if (!form.marketId) {
+        setFeedback("Por favor, selecione um mercado.");
+        setSaving(false);
+        return;
+      }
+      const normalized = normalizeOfferInput(form, selectedMarket);
+      if (editingId) {
+        await adminMvpService.updateOffer(editingId, normalized);
+        setFeedback("Oferta atualizada com sucesso.");
+      } else {
+        await adminMvpService.createOffer(normalized);
+        setFeedback("Oferta cadastrada com sucesso.");
+      }
 
-      setForm(initialForm);
-      setFeedback("Oferta cadastrada com sucesso.");
-      await loadOffers();
+      resetForm();
+      await loadData();
     } catch (error) {
       console.error("[AdminOffers] save error", error);
-      setFeedback("Erro ao cadastrar oferta.");
+      setFeedback("Erro ao salvar oferta.");
     } finally {
-      setIsSaving(false);
+      setSaving(false);
     }
   }
 
-  async function toggleOffer(offer: OfferRecord) {
+  async function handleToggle(record: OfferRecord) {
     try {
-      await updateDoc(doc(db, "offers", offer.id), {
-        active: !offer.active,
-        updatedAt: serverTimestamp(),
-      });
-      await loadOffers();
+      await adminMvpService.toggleOfferStatus(record);
+      setFeedback(`Oferta ${record.active ? "inativada" : "ativada"} com sucesso.`);
+      await loadData();
     } catch (error) {
       console.error("[AdminOffers] toggle error", error);
       setFeedback("Erro ao atualizar status da oferta.");
@@ -126,11 +133,18 @@ export default function AdminOffers() {
   return (
     <div style={adminShellStyle}>
       <section style={adminPanelStyle}>
-        <div style={{ display: "grid", gap: 8 }}>
-          <h1 style={{ margin: 0, color: "#17332f" }}>Ofertas</h1>
-          <p style={{ margin: 0, color: "rgba(23,51,47,0.74)", lineHeight: 1.7 }}>
-            Cadastre novas ofertas e controle rapidamente o status ativo do que entra no MVP.
-          </p>
+        <div style={{ display: "grid", gap: 16 }}>
+          <div style={adminTopbarStyle}>
+            <div style={{ display: "grid", gap: 8 }}>
+              <span style={adminBadgeStyle("green")}>Ofertas</span>
+              <h1 style={{ margin: 0, color: "#17332f" }}>Cadastro de ofertas</h1>
+              <p style={{ margin: 0, color: "rgba(23,51,47,0.74)", lineHeight: 1.7 }}>
+                Gerencie as ofertas compatíveis com a landing. Só entram na Home as ofertas
+                ativas, válidas e com dados essenciais preenchidos.
+              </p>
+            </div>
+          </div>
+          <AdminNav />
         </div>
       </section>
 
@@ -139,76 +153,144 @@ export default function AdminOffers() {
           <div style={adminGridStyle}>
             <input
               style={adminInputStyle}
-              placeholder="Produto"
+              placeholder="Nome do produto"
               value={form.productName}
               onChange={(event) => setForm((current) => ({ ...current, productName: event.target.value }))}
               required
             />
             <input
               style={adminInputStyle}
-              placeholder="Mercado"
-              value={form.marketName}
-              onChange={(event) => setForm((current) => ({ ...current, marketName: event.target.value }))}
+              placeholder="Categoria"
+              value={form.category}
+              onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))}
               required
             />
             <input
               style={adminInputStyle}
-              placeholder="Rede"
-              value={form.networkName}
-              onChange={(event) => setForm((current) => ({ ...current, networkName: event.target.value }))}
-            />
-            <input
-              style={adminInputStyle}
-              placeholder="Market ID"
-              value={form.marketId}
-              onChange={(event) => setForm((current) => ({ ...current, marketId: event.target.value }))}
-            />
-            <input
-              style={adminInputStyle}
-              placeholder="Categoria"
-              value={form.category}
-              onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))}
+              placeholder="Unidade"
+              value={form.unit}
+              onChange={(event) => setForm((current) => ({ ...current, unit: event.target.value }))}
+              required
             />
             <input
               style={adminInputStyle}
               type="number"
-              step="0.01"
               min="0"
+              step="0.01"
               placeholder="Preco"
-              value={form.price}
-              onChange={(event) => setForm((current) => ({ ...current, price: event.target.value }))}
+              value={form.price || ""}
+              onChange={(event) => setForm((current) => ({ ...current, price: Number(event.target.value) }))}
+              required
+            />
+            <select
+              style={adminInputStyle}
+              value={form.marketId}
+              onChange={(event) => setForm((current) => ({ ...current, marketId: event.target.value }))}
+              required
+            >
+              <option value="">Selecione o mercado</option>
+              {markets.map((market) => (
+                <option key={market.id} value={market.id}>
+                  {market.nome} · {market.bairro}
+                </option>
+              ))}
+            </select>
+            <input
+              style={adminInputStyle}
+              type="date"
+              value={dateInputFromIso(form.expiresAt)}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  expiresAt: event.target.value ? `${event.target.value}T12:00:00.000Z` : "",
+                }))
+              }
               required
             />
             <input
               style={adminInputStyle}
               type="date"
-              value={form.expiresAt}
-              onChange={(event) => setForm((current) => ({ ...current, expiresAt: event.target.value }))}
+              value={dateInputFromIso(form.collectedAt)}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  collectedAt: event.target.value ? `${event.target.value}T12:00:00.000Z` : "",
+                }))
+              }
+              required
             />
+            <label style={{ ...adminInputStyle, display: "flex", alignItems: "center", gap: 10 }}>
+              <input
+                type="checkbox"
+                checked={form.featured}
+                onChange={(event) => setForm((current) => ({ ...current, featured: event.target.checked }))}
+              />
+              Destaque na vitrine
+            </label>
           </div>
 
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
-            <button type="submit" style={adminButtonStyle} disabled={isSaving}>
-              {isSaving ? "Salvando..." : "Cadastrar oferta"}
+          {selectedMarket ? (
+            <div style={{ color: "rgba(23,51,47,0.76)", lineHeight: 1.7 }}>
+              Mercado selecionado: <strong>{selectedMarket.nome}</strong> · {selectedMarket.bairro} ·{" "}
+              {selectedMarket.cidade} - {selectedMarket.uf}
+            </div>
+          ) : null}
+
+          <div style={adminActionsRowStyle}>
+            <button type="submit" style={adminButtonStyle} disabled={saving}>
+              {saving ? "Salvando..." : editingId ? "Salvar oferta" : "Cadastrar oferta"}
             </button>
-            {feedback ? (
-              <span style={{ color: "#0f6d61", fontWeight: 700 }}>{feedback}</span>
+            {editingId ? (
+              <button type="button" style={adminSecondaryButtonStyle} onClick={resetForm}>
+                Cancelar edicao
+              </button>
             ) : null}
+            {feedback ? <span style={{ color: "#0f6d61", fontWeight: 700 }}>{feedback}</span> : null}
           </div>
         </form>
       </section>
 
       <section style={adminPanelStyle}>
         <div style={{ display: "grid", gap: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-            <h2 style={{ margin: 0, color: "#17332f" }}>Lista de ofertas</h2>
-            <span style={{ color: "rgba(23,51,47,0.66)", fontWeight: 700 }}>
-              {offers.length} registros
+          <div style={adminTopbarStyle}>
+            <h2 style={{ margin: 0, color: "#17332f" }}>Filtros e lista</h2>
+            <span style={adminBadgeStyle("neutral")}>
+              {loading ? "Carregando..." : `${filteredOffers.length} ofertas`}
             </span>
           </div>
 
+          <div style={adminGridStyle}>
+            <select style={adminInputStyle} value={marketFilter} onChange={(event) => setMarketFilter(event.target.value)}>
+              <option value="todos">Todos os mercados</option>
+              {markets.map((market) => (
+                <option key={market.id} value={market.id}>
+                  {market.nome}
+                </option>
+              ))}
+            </select>
+
+            <select style={adminInputStyle} value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+              <option value="todos">Todas as categorias</option>
+              {categoryOptions.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+
+            <select
+              style={adminInputStyle}
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as AdminStatusFilter)}
+            >
+              <option value="todos">Todos os status</option>
+              <option value="ativos">Somente ativos</option>
+              <option value="inativos">Somente inativos</option>
+            </select>
+          </div>
+
           <div style={{ display: "grid", gap: 12 }}>
-            {offers.map((offer) => (
+            {filteredOffers.map((offer) => (
               <article
                 key={offer.id}
                 style={{
@@ -217,48 +299,52 @@ export default function AdminOffers() {
                   background: "white",
                   border: "1px solid rgba(15,53,47,0.08)",
                   display: "grid",
-                  gap: 10,
+                  gap: 12,
                 }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                <div style={adminTopbarStyle}>
                   <div>
-                    <div style={{ fontWeight: 900, color: "#15322d" }}>{offer.productName || "Oferta sem nome"}</div>
-                    <div style={{ marginTop: 4, color: "rgba(21,50,45,0.72)" }}>
-                      {offer.marketName} {offer.networkName ? `• ${offer.networkName}` : ""}
+                    <div style={{ fontWeight: 900, color: "#15322d" }}>{offer.productName}</div>
+                    <div style={{ marginTop: 6, color: "rgba(21,50,45,0.72)", lineHeight: 1.6 }}>
+                      {offer.marketName} · {offer.category} · {offer.unit}
+                      <br />
+                      {offer.neighborhood} · {offer.city} - {offer.state}
                     </div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontWeight: 900, color: "#0f6d61" }}>
-                      R$ {offer.price.toFixed(2).replace(".", ",")}
-                    </div>
-                    <div style={{ marginTop: 4, color: offer.active ? "#127b55" : "#9a3b3b", fontWeight: 800 }}>
-                      {offer.active ? "Ativa" : "Inativa"}
+
+                  <div style={{ textAlign: "right", display: "grid", gap: 8 }}>
+                    <span style={{ fontWeight: 900, color: "#0f6d61" }}>{formatCurrency(offer.price)}</span>
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                      {offer.featured ? <span style={adminBadgeStyle("amber")}>Destaque</span> : null}
+                      <span style={adminBadgeStyle(offer.active ? "green" : "red")}>
+                        {offer.active ? "Ativa" : "Inativa"}
+                      </span>
                     </div>
                   </div>
                 </div>
 
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                  {offer.category ? (
-                    <span style={{ color: "rgba(21,50,45,0.66)" }}>Categoria: {offer.category}</span>
-                  ) : null}
-                  {offer.expiresAt ? (
-                    <span style={{ color: "rgba(21,50,45,0.66)" }}>
-                      Expira em {new Date(offer.expiresAt).toLocaleDateString("pt-BR")}
-                    </span>
-                  ) : null}
+                <div style={{ color: "rgba(21,50,45,0.66)", lineHeight: 1.7 }}>
+                  Validade: {formatDateLabel(offer.expiresAt)} · Coleta: {formatDateLabel(offer.collectedAt)}
                 </div>
 
-                <div>
+                <div style={adminActionsRowStyle}>
+                  <button type="button" style={adminSecondaryButtonStyle} onClick={() => startEditing(offer)}>
+                    Editar
+                  </button>
                   <button
                     type="button"
-                    style={adminSecondaryButtonStyle}
-                    onClick={() => toggleOffer(offer)}
+                    style={offer.active ? adminDangerButtonStyle : adminButtonStyle}
+                    onClick={() => handleToggle(offer)}
                   >
-                    {offer.active ? "Inativar oferta" : "Ativar oferta"}
+                    {offer.active ? "Inativar" : "Ativar"}
                   </button>
                 </div>
               </article>
             ))}
+
+            {!filteredOffers.length && !loading ? (
+              <div style={{ color: "rgba(23,51,47,0.68)" }}>Nenhuma oferta encontrada com os filtros atuais.</div>
+            ) : null}
           </div>
         </div>
       </section>
