@@ -1,0 +1,8 @@
+[build]
+# O Railway serve apenas o proxy SEFAZ (api/sefaz-proxy.js — JS puro).
+# O frontend React é deployado no Vercel via vercel.json.
+# Não precisa de tsc-b nem vite build aqui.
+buildCommand = "echo 'proxy build: no compile step needed'"
+
+[deploy]
+startCommand = "npm run proxy"
