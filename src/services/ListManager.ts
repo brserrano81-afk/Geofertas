@@ -2,6 +2,7 @@ import { addDoc, collection, getDocs, limit, orderBy, query, serverTimestamp, up
 import { db } from '../firebase';
 import { offerEngine } from './OfferEngine';
 import type { ActiveShoppingList, ShoppingListItem } from '../types/shopping';
+import { analyticsEventWriter } from '../workers/AnalyticsEventWriter';
 
 function toSortableTimestamp(value: unknown): number {
     if (!value) return 0;
@@ -68,6 +69,11 @@ class ListManager {
                 status: 'active',
                 updatedAt: serverTimestamp(),
             });
+            // Analytics: lista atualizada (fire-and-forget, sem PII)
+            analyticsEventWriter.writeEvent({
+                eventType: 'list_updated',
+                basketSize: items.length,
+            }).catch(() => { /* já logado internamente */ });
             return;
         }
 
@@ -77,6 +83,11 @@ class ListManager {
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
         });
+        // Analytics: lista criada (fire-and-forget, sem PII)
+        analyticsEventWriter.writeEvent({
+            eventType: 'list_created',
+            basketSize: items.length,
+        }).catch(() => { /* já logado internamente */ });
     }
 
     async recoverActiveListItemsOnly(): Promise<{ text: string; items: ShoppingListItem[] }> {

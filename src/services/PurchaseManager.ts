@@ -1,8 +1,34 @@
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
+import { analyticsEventWriter, slugifyMarketName } from '../workers/AnalyticsEventWriter';
+import { normalizeCatalogText, CATEGORY_ALIASES } from './ProductCatalogService';
 
 function formatCurrency(value: number): string {
     return `R$ ${Number(value || 0).toFixed(2).replace('.', ',')}`;
+}
+
+/**
+ * Infere a categoria dominante do carrinho por votação de aliases.
+ * Retorna slug ou string vazia quando indefinido.
+ * Nunca lança exceção.
+ */
+function inferDominantCategory(items: Array<{ name: string }>): string {
+    try {
+        const votes: Record<string, number> = {};
+        for (const item of items) {
+            const norm = normalizeCatalogText(item.name || '');
+            for (const [slug, aliases] of Object.entries(CATEGORY_ALIASES)) {
+                if (aliases.some((alias) => norm.includes(alias))) {
+                    votes[slug] = (votes[slug] || 0) + 1;
+                    break;
+                }
+            }
+        }
+        const sorted = Object.entries(votes).sort((a, b) => b[1] - a[1]);
+        return sorted[0]?.[0] || '';
+    } catch {
+        return '';
+    }
 }
 
 class PurchaseManager {
@@ -54,6 +80,26 @@ class PurchaseManager {
             source: receiptData.type || 'receipt',
             confidence: Number(receiptData.confidence || 0) || null,
         });
+
+        // ── Analytics anônimo (fire-and-forget, sem PII) ─────────────────────
+        const marketId = receiptData.marketId || slugifyMarketName(receiptData.marketName || 'desconhecido');
+        const categorySlug = inferDominantCategory(safeItems);
+
+        analyticsEventWriter.writeEvent({
+            eventType: 'purchase_recorded',
+            marketId,
+            categorySlug,
+            basketSize: safeItems.length,
+            totalAmount,
+        }).catch(() => { /* já logado internamente */ });
+
+        analyticsEventWriter.updateUserAggregate(this.userId, {
+            purchaseAmount: totalAmount,
+            basketSize: safeItems.length,
+            categorySlug,
+            marketId,
+        }).catch(() => { /* já logado internamente */ });
+        // ─────────────────────────────────────────────────────────────────────
 
         return {
             text:

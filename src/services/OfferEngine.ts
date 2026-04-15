@@ -9,6 +9,7 @@ import { geoDecisionEngine } from './GeoDecisionEngine';
 import { normalizeCatalogText, productCatalogService } from './ProductCatalogService';
 import { offerHygieneService } from './OfferHygieneService';
 import { categoryMetadataService } from './CategoryMetadataService';
+import { analyticsEventWriter } from '../workers/AnalyticsEventWriter';
 import type { ShoppingItemOfferCandidate, ShoppingListItem } from '../types/shopping';
 
 interface OfferResult {
@@ -236,6 +237,22 @@ class OfferEngine {
             if (matches.length === 0) {
                 return `Não encontrei ofertas vigentes para **${productName}** hoje.`;
             }
+
+            // ── Analytics: price_queried (fire-and-forget, sem PII) ───────────
+            {
+                const cheapest = matches.reduce(
+                    (min, m) => (m.price < min.price ? m : min),
+                    matches[0],
+                );
+                analyticsEventWriter.writeEvent({
+                    eventType: 'price_queried',
+                    marketId: cheapest.marketId || '',
+                    categorySlug: searchContext.matchedCategory || '',
+                    pricePoint: cheapest.price,
+                    basketSize: 1,
+                }).catch(() => { /* já logado internamente */ });
+            }
+            // ─────────────────────────────────────────────────────────────────
 
             // Identificar se é uma busca "genérica" analisando as marcas ou nomes
             const genericLabels = matches
