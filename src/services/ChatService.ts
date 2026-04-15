@@ -1,4 +1,4 @@
-﻿// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // ChatService â€” Orquestrador Puro
 // Recebe NlpResult â†’ delega para engine correto
 // â†’ retorna ChatResponse.
@@ -24,6 +24,8 @@ import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import type { ShoppingComparisonResult } from '../types/shopping';
 import { offerQueueService } from './admin/OfferQueueService';
+import { userDataDeletionService } from './UserDataDeletionService';
+import { lgpdConsentService } from './LgpdConsentService';
 
 export interface ChatResponse {
     text: string;
@@ -236,6 +238,20 @@ class ChatSession {
         const conversationState = this.conversationState;
         console.log(`[ChatService] >>> INCOMING: "${message}"`);
         
+        // LGPD: Registrar consentimento na primeira interacao
+        lgpdConsentService.recordConsent(this.context.userId).catch((err) => {
+            console.warn('[ChatService] Falha ao registrar consentimento LGPD:', err);
+        });
+
+        // LGPD: Interceptar comando de exclusao de dados
+        const normalizedForLgpd = message.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+        const isDeletionCommand = /\b(apagar|excluir|deletar|remover|esquece|esqueca)\s+(meus\s+)?dados\b/.test(normalizedForLgpd);
+        if (isDeletionCommand) {
+            console.log('[ChatService] [LGPD] Exclusao de dados solicitada: ' + this.context.userId);
+            const result = await userDataDeletionService.anonymizeUser(this.context.userId);
+            return { text: result.message };
+        }
+
         conversationState.addMessage(this.context.userId, 'user', message);
         await userProfileService.recordInteraction(this.context.userId, {
             role: 'user',

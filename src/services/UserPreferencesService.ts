@@ -1,5 +1,6 @@
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { lgpdConsentService } from './LgpdConsentService';
 
 export interface UserPreferences {
     name?: string;
@@ -13,6 +14,9 @@ export interface UserPreferences {
         lng: number;
         address?: string;
     };
+    // LGPD — campos de controle de localização
+    locationDeclaredAt?: unknown;           // Timestamp — quando a localização foi salva
+    locationSource?: 'user_declared' | 'gps_auto'; // origem: nunca inferida
 }
 
 class UserPreferencesService {
@@ -50,6 +54,12 @@ class UserPreferencesService {
 
         if (Object.keys(payload).length === 0) {
             return;
+        }
+
+        // LGPD — sempre que userLocation for atualizado, registrar origem e timestamp
+        if (partial.userLocation) {
+            const source = partial.locationSource ?? 'user_declared';
+            await lgpdConsentService.recordLocationDeclaration(userId, source);
         }
 
         await setDoc(userRef, {
