@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "geofertas-325b0"
-  }
+    "default": "geofertas-325b0",
+    "prod": "geofertas-325b0"
+  },
+  "targets": {},
+  "etags": {}
 }
