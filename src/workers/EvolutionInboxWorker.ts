@@ -1,18 +1,6 @@
-﻿import dotenv from 'dotenv';
-import {
-    addDoc,
-    collection,
-    doc,
-    getDocs,
-    limit,
-    query,
-    runTransaction,
-    serverTimestamp,
-    updateDoc,
-    where,
-} from 'firebase/firestore';
-
-import { db } from '../firebase';
+import dotenv from 'dotenv';
+import { adminDb as db, admin } from '../lib/firebase-admin';
+const serverTimestamp = admin.firestore.FieldValue.serverTimestamp;
 import { chatService } from '../services/ChatService';
 import { isMasterAdmin, masterAdminService } from '../services/MasterAdminService';
 import { maskIdentifier } from '../utils/maskSensitiveData';
@@ -201,11 +189,14 @@ function getEvolutionPresenceUrl(): string | null {
 }
 
 async function loadPendingMessages(): Promise<Array<{ id: string; data: InboxMessage }>> {
-    const inboxRef = collection(db, 'message_inbox');
-    const pendingQuery = query(inboxRef, where('status', '==', 'pending'), limit(5));
-    const snap = await getDocs(pendingQuery);
+    const snapshot = await db.collection('message_inbox')
+        .where('status', '==', 'pending')
+        .limit(10)
+        .get();
 
-    return snap.docs
+    if (snapshot.empty) return [];
+
+    return snapshot.docs
         .map((docSnap) => ({
             id: docSnap.id,
             data: docSnap.data() as InboxMessage,
@@ -218,11 +209,12 @@ async function loadPendingMessages(): Promise<Array<{ id: string; data: InboxMes
 }
 
 async function loadPendingOutboxMessages(): Promise<Array<{ id: string; data: OutboxMessage }>> {
-    const outboxRef = collection(db, 'message_outbox');
-    const pendingQuery = query(outboxRef, where('sendStatus', 'in', ['pending_send', 'retrying']), limit(10));
-    const snap = await getDocs(pendingQuery);
+    const snapshot = await db.collection('message_outbox')
+        .where('sendStatus', 'in', ['pending_send', 'retrying'])
+        .limit(10)
+        .get();
 
-    return snap.docs
+    return snapshot.docs
         .map((docSnap) => ({
             id: docSnap.id,
             data: docSnap.data() as OutboxMessage,
@@ -232,10 +224,9 @@ async function loadPendingOutboxMessages(): Promise<Array<{ id: string; data: Ou
 }
 
 async function markInboxStatus(id: string, status: string, extra: Record<string, unknown> = {}) {
-    const inboxDoc = doc(db, 'message_inbox', id);
-    await updateDoc(inboxDoc, {
+    const docRef = db.collection('message_inbox').doc(id);
+    await docRef.update({
         status,
-        ...(status === 'error' ? {} : { error: null }),
         ...(status === 'processing' ? { processingStartedAt: serverTimestamp() } : {}),
         updatedAt: serverTimestamp(),
         ...extra,
@@ -243,8 +234,8 @@ async function markInboxStatus(id: string, status: string, extra: Record<string,
 }
 
 async function markOutboxStatus(id: string, status: OutboxMessage['sendStatus'], extra: Record<string, unknown> = {}) {
-    const outboxDoc = doc(db, 'message_outbox', id);
-    await updateDoc(outboxDoc, {
+    const outboxDoc = db.collection('message_outbox').doc(id);
+    await outboxDoc.update({
         sendStatus: status,
         ...(status === 'send_failed' ? {} : { error: null }),
         ...(status === 'sent' ? { sentAt: serverTimestamp() } : {}),
@@ -268,7 +259,7 @@ async function persistPipelineAudit(payload: {
     metadata?: Record<string, unknown> | null;
 }) {
     try {
-        await addDoc(collection(db, 'integration_events'), {
+        await db.collection('integration_events').add({
             source: 'evolution-worker',
             kind: 'pipeline_audit',
             correlationId: payload.correlationId,
@@ -308,7 +299,7 @@ async function persistOutboxMessage(inboxId: string, payload: {
     lastRetryAtIso?: string | null;
     nextRetryAtIso?: string | null;
 }) {
-    const outboxRef = await addDoc(collection(db, 'message_outbox'), {
+    const outboxRef = await db.collection('message_outbox').add({
         inboxId,
         source: 'economizafacil-worker',
         correlationId: payload.correlationId || inboxId,
@@ -514,6 +505,22 @@ async function buildResponse(message: InboxMessage): Promise<ResponseBuildResult
         };
     }
 
+    // Branch explícito para áudio (Task 4)
+    if (message.messageType === 'audioMessage') {
+        const audioText = String(message.text || '').trim();
+        // Se não houver texto (transcrição) ou for apenas o placeholder [audio]
+        if (!audioText || audioText === '[audio]') {
+            console.log(`[FALLBACK_TRIGGERED] user=${message.userId} reason=audio_no_transcription`);
+            return {
+                text: 'Ainda não consigo processar áudio por aqui. Pode me mandar em texto ou foto?',
+                shouldSend: true,
+                usedFallback: true,
+                reason: 'audio_no_transcription',
+            };
+        }
+        // Se houver texto (transcrição da Evolution), segue fluxo normal de texto
+    }
+
     const text = String(message.text || '').trim();
     if (!text) {
         console.log(
@@ -561,16 +568,16 @@ async function buildResponse(message: InboxMessage): Promise<ResponseBuildResult
 }
 
 async function claimInboxItem(id: string): Promise<InboxMessage | null> {
-    const inboxDoc = doc(db, 'message_inbox', id);
+    const inboxDoc = db.collection('message_inbox').doc(id);
     const claimedAtIso = nowIso();
 
-    return runTransaction(db, async (transaction) => {
-        const snap = await transaction.get(inboxDoc);
-        if (!snap.exists()) {
+    return await db.runTransaction(async (transaction) => {
+        const docSnap = await transaction.get(inboxDoc);
+        if (!docSnap.exists) {
             return null;
         }
 
-        const data = snap.data() as InboxMessage;
+        const data = docSnap.data() as InboxMessage;
         if (data.status !== 'pending') {
             return null;
         }

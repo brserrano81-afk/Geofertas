@@ -1,5 +1,10 @@
-import { collection, doc, getDoc, getDocs, serverTimestamp, setDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { collection, doc, getDoc, getDocs, serverTimestamp as clientTimestamp, setDoc } from 'firebase/firestore';
+import { db as clientDb } from '../firebase';
+import { isServer } from '../lib/isServer';
+import { adminDb as serverDb, admin } from '../lib/firebase-admin';
+
+const serverTimestamp = isServer ? admin.firestore.FieldValue.serverTimestamp : clientTimestamp;
+const db = isServer ? (serverDb as any) : clientDb;
 import type { CanonicalIdentity } from '../types/identity';
 import { analyticsEventWriter } from '../workers/AnalyticsEventWriter';
 
@@ -50,6 +55,12 @@ function buildAliasKey(kind: 'bsuid' | 'phone' | 'remoteJid', value: string): st
 }
 
 async function readAliasTarget(aliasKey: string): Promise<string | null> {
+    if (isServer) {
+        const snap = await db.collection('identity_aliases').doc(aliasKey).get();
+        if (!snap.exists) return null;
+        return String(snap.data().canonicalUserId || '').trim() || null;
+    }
+
     const snap = await getDoc(doc(db, 'identity_aliases', aliasKey));
     if (!snap.exists()) {
         return null;
@@ -60,6 +71,10 @@ async function readAliasTarget(aliasKey: string): Promise<string | null> {
 
 async function hasUserDocument(userId: string): Promise<boolean> {
     if (!userId) return false;
+    if (isServer) {
+        const snap = await db.collection('users').doc(userId).get();
+        return snap.exists;
+    }
     const snap = await getDoc(doc(db, 'users', userId));
     return snap.exists();
 }
@@ -146,6 +161,35 @@ class IdentityResolutionService {
             return this.resolveWhatsAppIdentity({ remoteJid: normalizedUserId, channel: 'whatsapp' });
         }
 
+        if (isServer) {
+            const snap = await db.collection('canonical_identities').doc(normalizedUserId).get();
+            if (!snap.exists) {
+                return {
+                    canonicalUserId: normalizedUserId,
+                    storageUserId: normalizedUserId,
+                    legacyUserId: normalizedUserId,
+                    remoteJid: normalizedUserId.includes('@') ? normalizedUserId : undefined,
+                    channel: normalizedUserId.includes('@') ? 'whatsapp' : 'web',
+                    resolutionSource: 'legacy_passthrough',
+                    requiresBackfill: false,
+                    aliases: [],
+                };
+            }
+            const data = snap.data();
+            return {
+                canonicalUserId: normalizedUserId,
+                storageUserId: String(data.storageUserId || normalizedUserId),
+                legacyUserId: String(data.legacyUserId || normalizedUserId),
+                bsuid: data.bsuid,
+                phoneNumber: data.phoneNumber,
+                remoteJid: data.remoteJid,
+                channel: (data.channel || 'web') as CanonicalIdentity['channel'],
+                resolutionSource: (data.resolutionSource || 'legacy_passthrough') as CanonicalIdentity['resolutionSource'],
+                requiresBackfill: Boolean(data.requiresBackfill),
+                aliases: Array.isArray(data.aliases) ? data.aliases : [],
+            };
+        }
+
         const identitySnap = await getDoc(doc(db, 'canonical_identities', normalizedUserId));
         if (!identitySnap.exists()) {
             return {
@@ -185,6 +229,29 @@ class IdentityResolutionService {
     }
 
     private async persistIdentity(identity: CanonicalIdentity): Promise<void> {
+        if (isServer) {
+            await db.collection('canonical_identities').doc(identity.canonicalUserId).set({
+                ...identity,
+                updatedAt: serverTimestamp(),
+                createdAt: serverTimestamp(),
+            }, { merge: true });
+
+            await Promise.all(identity.aliases.map((aliasKey) =>
+                db.collection('identity_aliases').doc(aliasKey).set({
+                    canonicalUserId: identity.canonicalUserId,
+                    storageUserId: identity.storageUserId,
+                    legacyUserId: identity.legacyUserId,
+                    bsuid: identity.bsuid || null,
+                    remoteJid: identity.remoteJid || null,
+                    phoneNumber: identity.phoneNumber || null,
+                    channel: identity.channel,
+                    updatedAt: serverTimestamp(),
+                    createdAt: serverTimestamp(),
+                }, { merge: true })
+            ));
+            return;
+        }
+
         const canonicalRef = doc(db, 'canonical_identities', identity.canonicalUserId);
         await setDoc(canonicalRef, {
             ...identity,

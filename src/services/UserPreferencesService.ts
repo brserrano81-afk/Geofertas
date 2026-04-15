@@ -1,5 +1,10 @@
-import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { doc, getDoc, serverTimestamp as clientTimestamp, setDoc } from 'firebase/firestore';
+import { db as clientDb } from '../firebase';
+import { isServer } from '../lib/isServer';
+import { adminDb as serverDb, admin } from '../lib/firebase-admin';
+
+const serverTimestamp = isServer ? admin.firestore.FieldValue.serverTimestamp : clientTimestamp;
+const db = isServer ? (serverDb as any) : clientDb;
 import { lgpdConsentService } from './LgpdConsentService';
 import { identityResolutionService } from './IdentityResolutionService';
 
@@ -25,6 +30,22 @@ class UserPreferencesService {
             const compatibleUserIds = await identityResolutionService.getCompatibleUserIds(userId);
 
             for (const targetUserId of compatibleUserIds) {
+                if (isServer) {
+                    const snap = await db.collection('users').doc(targetUserId).get();
+                    if (!snap.exists) continue;
+                    const data = snap.data() as Record<string, unknown>;
+                    const nestedPreferences = (data.preferences || {}) as Record<string, unknown>;
+                    return {
+                        name: String(data.name || nestedPreferences.name || '').trim() || undefined,
+                        transportMode: String(data.transportMode || nestedPreferences.transportMode || '').trim() || undefined,
+                        consumption: Number(data.consumption || nestedPreferences.consumption || 0) || undefined,
+                        busTicket: Number(data.busTicket || nestedPreferences.busTicket || 0) || undefined,
+                        optimizationPreference: (data.optimizationPreference || nestedPreferences.optimizationPreference || undefined) as UserPreferences['optimizationPreference'],
+                        neighborhood: String(data.neighborhood || nestedPreferences.neighborhood || '').trim() || undefined,
+                        userLocation: this.parseUserLocation(data.userLocation || nestedPreferences.userLocation),
+                    };
+                }
+
                 const snap = await getDoc(doc(db, 'users', targetUserId));
                 if (!snap.exists()) {
                     continue;
@@ -71,17 +92,32 @@ class UserPreferencesService {
             identity.storageUserId,
         ].filter(Boolean)));
 
-        await Promise.all(writeUserIds.map((targetUserId) => setDoc(doc(db, 'users', targetUserId), {
-            userId: identity.canonicalUserId,
-            canonicalUserId: identity.canonicalUserId,
-            legacyUserId: identity.legacyUserId,
-            storageUserId: identity.storageUserId,
-            bsuid: identity.bsuid || null,
-            remoteJid: identity.remoteJid || null,
-            ...payload,
-            preferences: payload,
-            updatedAt: serverTimestamp(),
-        }, { merge: true })));
+        await Promise.all(writeUserIds.map((targetUserId) => {
+            if (isServer) {
+                return db.collection('users').doc(targetUserId).set({
+                    userId: identity.canonicalUserId,
+                    canonicalUserId: identity.canonicalUserId,
+                    legacyUserId: identity.legacyUserId,
+                    storageUserId: identity.storageUserId,
+                    bsuid: identity.bsuid || null,
+                    remoteJid: identity.remoteJid || null,
+                    ...payload,
+                    preferences: payload,
+                    updatedAt: serverTimestamp(),
+                }, { merge: true });
+            }
+            return setDoc(doc(db, 'users', targetUserId), {
+                userId: identity.canonicalUserId,
+                canonicalUserId: identity.canonicalUserId,
+                legacyUserId: identity.legacyUserId,
+                storageUserId: identity.storageUserId,
+                bsuid: identity.bsuid || null,
+                remoteJid: identity.remoteJid || null,
+                ...payload,
+                preferences: payload,
+                updatedAt: serverTimestamp(),
+            }, { merge: true });
+        }));
     }
 
     private parseUserLocation(value: unknown): UserPreferences['userLocation'] {

@@ -1,10 +1,4 @@
-import express from 'express';
-import dotenv from 'dotenv';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { initializeApp, getApps } from 'firebase/app';
-import { addDoc, collection, doc, getDoc, getDocs, getFirestore, limit, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
+import admin from 'firebase-admin';
 
 dotenv.config();
 
@@ -89,31 +83,34 @@ function readEnv(...names) {
     return '';
 }
 
-function requireFirebaseConfig() {
-    const firebaseConfig = {
-        apiKey: readEnv('FIREBASE_API_KEY', 'VITE_FIREBASE_API_KEY'),
-        authDomain: readEnv('FIREBASE_AUTH_DOMAIN', 'VITE_FIREBASE_AUTH_DOMAIN'),
-        projectId: readEnv('FIREBASE_PROJECT_ID', 'VITE_FIREBASE_PROJECT_ID'),
-        storageBucket: readEnv('FIREBASE_STORAGE_BUCKET', 'VITE_FIREBASE_STORAGE_BUCKET'),
-        messagingSenderId: readEnv('FIREBASE_MESSAGING_SENDER_ID', 'VITE_FIREBASE_MESSAGING_SENDER_ID'),
-        appId: readEnv('FIREBASE_APP_ID', 'VITE_FIREBASE_APP_ID'),
-    };
-
-    const missing = Object.entries(firebaseConfig)
-        .filter(([, value]) => !value)
-        .map(([key]) => key);
-
-    if (missing.length > 0) {
-        throw new Error(`[Geofertas API] Missing Firebase env vars: ${missing.join(', ')}`);
+function getServiceAccount(rootDir) {
+    const envJson = process.env.FIREBASE_SERVICE_ACCOUNT;
+    if (envJson) {
+        try { return JSON.parse(envJson); } catch (err) {}
     }
-
-    return firebaseConfig;
+    const saPath = path.join(rootDir, 'service-account.json');
+    if (fs.existsSync(saPath)) {
+        try { return JSON.parse(fs.readFileSync(saPath, 'utf8')); } catch (err) {}
+    }
+    return undefined;
 }
 
-const firebaseConfig = requireFirebaseConfig();
-const firebaseApp = getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig);
-const db = getFirestore(firebaseApp);
-const ENABLE_FILE_LOGS = readEnv('ENABLE_FILE_LOGS').toLowerCase() === 'true';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const ROOT_DIR = path.resolve(__dirname, '..');
+
+if (!admin.apps.length) {
+    const sa = getServiceAccount(ROOT_DIR);
+    if (sa) {
+        admin.initializeApp({ credential: admin.credential.cert(sa) });
+    } else {
+        admin.initializeApp();
+    }
+}
+
+const db = admin.firestore();
+const serverTimestamp = admin.firestore.FieldValue.serverTimestamp;
+const ENABLE_FILE_LOGS = process.env.ENABLE_FILE_LOGS?.toLowerCase() === 'true';
 
 function nowIso() {
     return new Date().toISOString();
@@ -175,14 +172,14 @@ function extractBsuidCandidate(payload = {}) {
 
 async function readAliasTarget(alias) {
     if (!alias) return null;
-    const snap = await getDoc(doc(db, 'identity_aliases', alias));
-    return snap.exists() ? String(snap.data().canonicalUserId || '').trim() || null : null;
+    const snap = await db.collection('identity_aliases').doc(alias).get();
+    return snap.exists ? String(snap.data().canonicalUserId || '').trim() || null : null;
 }
 
 async function hasUserDocument(userId) {
     if (!userId) return false;
-    const snap = await getDoc(doc(db, 'users', userId));
-    return snap.exists();
+    const snap = await db.collection('users').doc(userId).get();
+    return snap.exists;
 }
 
 async function resolveCanonicalIdentity(normalizedEvent) {
@@ -234,13 +231,13 @@ async function resolveCanonicalIdentity(normalizedEvent) {
         aliases: aliasCandidates.map((candidate) => candidate.key),
     };
 
-    await setDoc(doc(db, 'canonical_identities', canonicalUserId), {
+    await db.collection('canonical_identities').doc(canonicalUserId).set({
         ...identity,
         updatedAt: serverTimestamp(),
         createdAt: serverTimestamp(),
     }, { merge: true });
 
-    await Promise.all(identity.aliases.map((alias) => setDoc(doc(db, 'identity_aliases', alias), {
+    await Promise.all(identity.aliases.map((alias) => db.collection('identity_aliases').doc(alias).set({
         canonicalUserId,
         storageUserId,
         legacyUserId: identity.legacyUserId,
@@ -265,7 +262,7 @@ function extractMessageText(payload = {}) {
     const data = payload.data || payload;
     const message = data.message || {};
 
-    return (
+    const text = (
         message.conversation ||
         message.extendedTextMessage?.text ||
         message.imageMessage?.caption ||
@@ -274,15 +271,31 @@ function extractMessageText(payload = {}) {
         data.text ||
         ''
     );
+
+    // Se não houver texto mas for áudio comprovado, injetamos placeholder para o inbox
+    if (!text && (message.audioMessage || message.ptt || message.voice || data.messageType === 'audioMessage')) {
+        return '[audio]';
+    }
+
+    return text;
 }
 
 function normalizeEvolutionEvent(payload = {}, routeEvent = null) {
     const data = payload.data || {};
     const key = data.key || {};
+    const message = data.message || {};
     const remoteJid = normalizeRemoteJid(key.remoteJid || data.remoteJid || data.from || payload.sender || '');
     const fromMe = Boolean(key.fromMe ?? data.fromMe);
     const event = routeEvent || payload.event || payload.type || 'unknown';
-    const messageType = data.messageType || Object.keys(data.message || {})[0] || payload.type || 'unknown';
+
+    // Mapeamento robusto de tipo de mensagem
+    let messageType = data.messageType || Object.keys(message)[0] || payload.type || 'unknown';
+
+    // Normalização forçada para áudio (Evolution v1/v2 variam chaves)
+    if (message.audioMessage || message.ptt || message.voice || data.audio || (data.media && data.media.audio)) {
+        messageType = 'audioMessage';
+    }
+
     const text = extractMessageText(payload);
 
     return {
@@ -311,6 +324,16 @@ function shouldEnqueueInboundMessage(normalizedEvent) {
         return false;
     }
 
+    // Task 2: Impedir explicitamente que eventos de status como chats.update entrem no inbox
+    if (normalizedEvent.event === 'chats.update' || normalizedEvent.event === 'presence.update') {
+        return false;
+    }
+
+    // Suporte prioritário para áudio
+    if (normalizedEvent.messageType === 'audioMessage') {
+        return true;
+    }
+
     const supportedTypes = new Set([
         'conversation',
         'extendedTextMessage',
@@ -318,10 +341,14 @@ function shouldEnqueueInboundMessage(normalizedEvent) {
         'videoMessage',
         'audioMessage',
         'documentMessage',
-        'unknown',
     ]);
 
-    return supportedTypes.has(normalizedEvent.messageType) || Boolean(normalizedEvent.textPreview);
+    if (supportedTypes.has(normalizedEvent.messageType)) {
+        return true;
+    }
+
+    // Task 3: 'unknown' só entra se tiver texto real extraído
+    return normalizedEvent.messageType === 'unknown' && Boolean(normalizedEvent.textPreview);
 }
 
 function validateNormalizedEvent(normalizedEvent) {
@@ -349,28 +376,23 @@ async function findExistingInboxMessage(normalizedEvent) {
         return null;
     }
 
-    const inboxRef = collection(db, 'message_inbox');
     if (normalizedEvent.userId) {
-        const canonicalQuery = query(
-            inboxRef,
-            where('messageId', '==', normalizedEvent.messageId),
-            where('userId', '==', normalizedEvent.userId),
-            limit(1),
-        );
-        const canonicalSnap = await getDocs(canonicalQuery);
+        const canonicalSnap = await db.collection('message_inbox')
+            .where('messageId', '==', normalizedEvent.messageId)
+            .where('userId', '==', normalizedEvent.userId)
+            .limit(1)
+            .get();
         if (!canonicalSnap.empty) {
             return canonicalSnap.docs[0];
         }
     }
 
     if (normalizedEvent.remoteJid) {
-        const legacyQuery = query(
-            inboxRef,
-            where('messageId', '==', normalizedEvent.messageId),
-            where('remoteJid', '==', normalizedEvent.remoteJid),
-            limit(1),
-        );
-        const legacySnap = await getDocs(legacyQuery);
+        const legacySnap = await db.collection('message_inbox')
+            .where('messageId', '==', normalizedEvent.messageId)
+            .where('remoteJid', '==', normalizedEvent.remoteJid)
+            .limit(1)
+            .get();
         if (!legacySnap.empty) {
             return legacySnap.docs[0];
         }
@@ -381,7 +403,7 @@ async function findExistingInboxMessage(normalizedEvent) {
 
 async function persistPipelineAudit(normalizedEvent, extra = {}) {
     try {
-        await addDoc(collection(db, 'integration_events'), {
+        await db.collection('integration_events').add({
             source: normalizedEvent.source,
             kind: 'pipeline_audit',
             correlationId: normalizedEvent.correlationId,
@@ -423,7 +445,7 @@ async function enqueueInboundMessage(normalizedEvent) {
             return { inboxId: existing.id, duplicate: true };
         }
 
-        const inboxRef = await addDoc(collection(db, 'message_inbox'), {
+        const inboxRef = await db.collection('message_inbox').add({
             correlationId: normalizedEvent.correlationId,
             source: normalizedEvent.source,
             event: normalizedEvent.event,
@@ -465,7 +487,7 @@ async function persistEvolutionEvent(normalizedEvent, extra = {}) {
     }
 
     try {
-        await addDoc(collection(db, 'integration_events'), {
+        await db.collection('integration_events').add({
             kind: 'webhook_event',
             correlationId: normalizedEvent.correlationId,
             messageId: normalizedEvent.messageId || null,

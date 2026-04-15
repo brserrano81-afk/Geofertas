@@ -1,5 +1,10 @@
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
+import { addDoc, collection, serverTimestamp as clientTimestamp } from 'firebase/firestore';
+import { db as clientDb } from '../firebase';
+import { isServer } from '../lib/isServer';
+import { adminDb as serverDb, admin } from '../lib/firebase-admin';
+
+const serverTimestamp = isServer ? admin.firestore.FieldValue.serverTimestamp : clientTimestamp;
+const db = isServer ? (serverDb as any) : clientDb;
 import {
     analyticsEventWriter,
     inferDominantCategory,
@@ -53,15 +58,27 @@ class PurchaseManager {
             0,
         );
 
-        await addDoc(collection(db, 'users', this.userId, 'purchases'), {
-            marketName: receiptData.marketName || 'Mercado',
-            items: safeItems,
-            totalAmount,
-            savedAt: new Date().toISOString(),
-            createdAt: serverTimestamp(),
-            source: receiptData.type || 'receipt',
-            confidence: Number(receiptData.confidence || 0) || null,
-        });
+        if (isServer) {
+            await db.collection('users').doc(this.userId).collection('purchases').add({
+                marketName: receiptData.marketName || 'Mercado',
+                items: safeItems,
+                totalAmount,
+                savedAt: new Date().toISOString(),
+                createdAt: serverTimestamp(),
+                source: receiptData.type || 'receipt',
+                confidence: Number(receiptData.confidence || 0) || null,
+            });
+        } else {
+            await addDoc(collection(db, 'users', this.userId, 'purchases'), {
+                marketName: receiptData.marketName || 'Mercado',
+                items: safeItems,
+                totalAmount,
+                savedAt: new Date().toISOString(),
+                createdAt: serverTimestamp(),
+                source: receiptData.type || 'receipt',
+                confidence: Number(receiptData.confidence || 0) || null,
+            });
+        }
 
         // ── Analytics anônimo (fire-and-forget, sem PII) ─────────────────────
         const marketId = receiptData.marketId || slugifyMarketName(receiptData.marketName || 'desconhecido');

@@ -1,5 +1,11 @@
-import { addDoc, collection, getDocs, limit, orderBy, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
-import { db } from '../firebase';
+import { addDoc, collection, getDocs, limit, orderBy, query, serverTimestamp as clientTimestamp, updateDoc, where } from 'firebase/firestore';
+import { db as clientDb } from '../firebase';
+import { isServer } from '../lib/isServer';
+import { adminDb as serverDb, admin } from '../lib/firebase-admin';
+
+const serverTimestamp = isServer ? admin.firestore.FieldValue.serverTimestamp : clientTimestamp;
+const db = isServer ? (serverDb as any) : clientDb;
+
 import { offerEngine } from './OfferEngine';
 import type { ActiveShoppingList, ShoppingListItem } from '../types/shopping';
 import { analyticsEventWriter, inferDominantCategory } from '../workers/AnalyticsEventWriter';
@@ -65,33 +71,47 @@ class ListManager {
         const categorySlug = inferDominantCategory(items);
 
         const active = await this.getActiveListDoc();
-        if (active) {
-            await updateDoc(active.ref, {
-                items,
-                status: 'active',
-                updatedAt: serverTimestamp(),
-            });
-            // Analytics: lista atualizada (fire-and-forget, sem PII)
-            analyticsEventWriter.writeEvent({
-                eventType: 'list_updated',
-                categorySlug,
-                basketSize: items.length,
-            }).catch(() => { /* já logado internamente */ });
-            return;
+
+        if (isServer) {
+            if (active) {
+                await db.collection('users').doc(this.userId).collection('lists').doc(active.id).update({
+                    items,
+                    status: 'active',
+                    updatedAt: serverTimestamp(),
+                });
+            } else {
+                await db.collection('users').doc(this.userId).collection('lists').add({
+                    items,
+                    status: 'active',
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp(),
+                });
+            }
+        } else {
+            if (active) {
+                await updateDoc(active.ref, {
+                    items,
+                    status: 'active',
+                    updatedAt: serverTimestamp(),
+                });
+            } else {
+                await addDoc(collection(db, 'users', this.userId, 'lists'), {
+                    items,
+                    status: 'active',
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp(),
+                });
+            }
         }
 
-        await addDoc(collection(db, 'users', this.userId, 'lists'), {
-            items,
-            status: 'active',
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-        });
-        // Analytics: lista criada (fire-and-forget, sem PII)
+        // Analytics: (fire-and-forget, sem PII)
+        const eventType = active ? 'list_updated' : 'list_created';
         analyticsEventWriter.writeEvent({
-            eventType: 'list_created',
+            eventType,
             categorySlug,
             basketSize: items.length,
         }).catch(() => { /* já logado internamente */ });
+        return;
     }
 
     async recoverActiveListItemsOnly(): Promise<{ text: string; items: ShoppingListItem[] }> {
@@ -105,32 +125,66 @@ class ListManager {
     async archiveActiveList(): Promise<void> {
         const active = await this.getActiveListDoc();
         if (!active) return;
-        await updateDoc(active.ref, {
-            status: 'archived',
-            updatedAt: serverTimestamp(),
-        });
+        if (isServer) {
+            await db.collection('users').doc(this.userId).collection('lists').doc(active.id).update({
+                status: 'archived',
+                updatedAt: serverTimestamp(),
+            });
+        } else {
+            await updateDoc(active.ref, {
+                status: 'archived',
+                updatedAt: serverTimestamp(),
+            });
+        }
     }
 
     async deleteActiveList(): Promise<void> {
         const active = await this.getActiveListDoc();
         if (!active) return;
-        await updateDoc(active.ref, {
-            status: 'deleted',
-            updatedAt: serverTimestamp(),
-        });
+        if (isServer) {
+            await db.collection('users').doc(this.userId).collection('lists').doc(active.id).update({
+                status: 'deleted',
+                updatedAt: serverTimestamp(),
+            });
+        } else {
+            await updateDoc(active.ref, {
+                status: 'deleted',
+                updatedAt: serverTimestamp(),
+            });
+        }
     }
 
     async finalizeListWithReceipt(): Promise<void> {
         const active = await this.getActiveListDoc();
         if (!active) return;
-        await updateDoc(active.ref, {
-            status: 'completed',
-            completedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-        });
+        if (isServer) {
+            await db.collection('users').doc(this.userId).collection('lists').doc(active.id).update({
+                status: 'completed',
+                completedAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            });
+        } else {
+            await updateDoc(active.ref, {
+                status: 'completed',
+                completedAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            });
+        }
     }
 
     async getLastList(): Promise<{ text: string }> {
+        if (isServer) {
+            const snap = await db.collection('users').doc(this.userId).collection('lists')
+                .orderBy('updatedAt', 'desc')
+                .limit(1)
+                .get();
+            if (snap.empty) {
+                return { text: 'Ainda não encontrei nenhuma lista anterior sua.' };
+            }
+            const items = (snap.docs[0].data().items || []) as ShoppingListItem[];
+            return { text: `📋 Última lista salva\n\n${formatList(items)}` };
+        }
+
         const listsRef = collection(db, 'users', this.userId, 'lists');
         const snap = await getDocs(query(listsRef, orderBy('updatedAt', 'desc'), limit(1)));
         if (snap.empty) {
@@ -197,8 +251,30 @@ class ListManager {
         updatedAt?: unknown;
         completedAt?: unknown;
     } | null> {
+        if (isServer) {
+            const snap = await db.collection('users').doc(this.userId).collection('lists')
+                .where('status', '==', 'active')
+                .limit(5)
+                .get();
+            if (snap.empty) return null;
+            const [latestDoc] = snap.docs.sort((a: any, b: any) => {
+                const aUpdatedAt = toSortableTimestamp(a.data().updatedAt);
+                const bUpdatedAt = toSortableTimestamp(b.data().updatedAt);
+                return bUpdatedAt - aUpdatedAt;
+            });
+            const data = latestDoc.data();
+            return {
+                id: latestDoc.id,
+                ref: latestDoc.ref,
+                status: String(data.status || 'active'),
+                items: (data.items || []) as ShoppingListItem[],
+                createdAt: data.createdAt,
+                updatedAt: data.updatedAt,
+                completedAt: data.completedAt,
+            };
+        }
+
         const listsRef = collection(db, 'users', this.userId, 'lists');
-        // Avoid requiring a composite index while the WhatsApp worker boots user context.
         const activeQuery = query(listsRef, where('status', '==', 'active'), limit(10));
         const snap = await getDocs(activeQuery);
         if (snap.empty) return null;
