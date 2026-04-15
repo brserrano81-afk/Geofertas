@@ -21,7 +21,10 @@ import { geoDecisionEngine } from './GeoDecisionEngine';
 import { shoppingComparisonService } from './ShoppingComparisonService';
 import { type TransportMode, calculateAllTransportCosts } from '../app/utils/geoUtils';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db as clientDb } from '../firebase';
+import { isServer } from '../lib/isServer';
+import { adminDb as serverDb } from '../lib/firebase-admin';
+const db = isServer ? (serverDb as any) : clientDb;
 import type { ShoppingComparisonResult } from '../types/shopping';
 import { offerQueueService } from './admin/OfferQueueService';
 import { productCatalogService } from './ProductCatalogService';
@@ -1432,22 +1435,41 @@ class ChatSession {
         const remoteJid = `${digits}@s.whatsapp.net`;
         const correlationId = `manual-share-${Date.now()}`;
 
-        await addDoc(collection(db, 'message_outbox'), {
-            inboxId: correlationId,
-            source: 'economizafacil-share-list',
-            correlationId,
-            sourceMessageId: null,
-            userId: this.context.userId,
-            remoteJid,
-            text: shareText,
-            sendStatus: 'pending_send',
-            retryCount: 0,
-            lastRetryAtIso: null,
-            nextRetryAtIso: null,
-            sentAtIso: null,
-            createdAt: serverTimestamp(),
-            createdAtIso: new Date().toISOString(),
-        });
+        if (isServer) {
+            await (db as any).collection('message_outbox').add({
+                inboxId: correlationId,
+                source: 'economizafacil-share-list',
+                correlationId,
+                sourceMessageId: null,
+                userId: this.context.userId,
+                remoteJid,
+                text: shareText,
+                sendStatus: 'pending_send',
+                retryCount: 0,
+                lastRetryAtIso: null,
+                nextRetryAtIso: null,
+                sentAtIso: null,
+                createdAt: new Date(),
+                createdAtIso: new Date().toISOString(),
+            });
+        } else {
+            await addDoc(collection(db, 'message_outbox'), {
+                inboxId: correlationId,
+                source: 'economizafacil-share-list',
+                correlationId,
+                sourceMessageId: null,
+                userId: this.context.userId,
+                remoteJid,
+                text: shareText,
+                sendStatus: 'pending_send',
+                retryCount: 0,
+                lastRetryAtIso: null,
+                nextRetryAtIso: null,
+                sentAtIso: null,
+                createdAt: serverTimestamp(),
+                createdAtIso: new Date().toISOString(),
+            });
+        }
 
         return {
             text: `✅ Lista enviada pra ${targetPhone}!\n\nA outra pessoa recebeu sua lista com ${listItems.length} itens. Boas compras! 🛒`,

@@ -1,6 +1,8 @@
 import { collection, getDocs } from 'firebase/firestore';
-
-import { db } from '../firebase';
+import { db as clientDb } from '../firebase';
+import { isServer } from '../lib/isServer';
+import { adminDb as serverDb } from '../lib/firebase-admin';
+const db = isServer ? (serverDb as any) : clientDb;
 
 export interface CategoryMetadata {
     id: string;
@@ -19,15 +21,20 @@ class CategoryMetadataService {
             return this.cache;
         }
 
-        const snap = await getDocs(collection(db, 'categories'));
+        let snap;
+        if (isServer) {
+            snap = await db.collection('categories').get();
+        } else {
+            snap = await getDocs(collection(db, 'categories'));
+        }
         this.cache = snap.docs
-            .map((docSnap) => ({
+            .map((docSnap: any) => ({
                 id: docSnap.id,
                 ...(docSnap.data() as Omit<CategoryMetadata, 'id'>),
             }))
-            .sort((a, b) => (a.ordem || 999) - (b.ordem || 999));
+            .sort((a: any, b: any) => (a.ordem || 999) - (b.ordem || 999));
         this.loadedAt = now;
-        return this.cache;
+        return (this.cache || []) as CategoryMetadata[];
     }
 
     async getMap(): Promise<Map<string, CategoryMetadata>> {

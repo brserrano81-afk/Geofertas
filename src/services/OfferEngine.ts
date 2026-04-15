@@ -3,7 +3,10 @@
 // ─────────────────────────────────────────────
 
 import { collection, getDocs, query, where } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db as clientDb } from '../firebase';
+import { isServer } from '../lib/isServer';
+import { adminDb as serverDb } from '../lib/firebase-admin';
+const db = isServer ? (serverDb as any) : clientDb;
 import { calculateTransportCost, type TransportMode } from '../app/utils/geoUtils';
 import { geoDecisionEngine } from './GeoDecisionEngine';
 import { normalizeCatalogText, productCatalogService } from './ProductCatalogService';
@@ -174,11 +177,20 @@ class OfferEngine {
                 normalizedInput.includes(matchedCatalogBase),
             );
             const shouldExpandCatalogSearch = !hasSpecificDescriptor;
-            const offersRef = collection(db, 'offers');
-            const offersQuery = searchContext.matchedCategory
-                ? query(offersRef, where('category', '==', searchContext.matchedCategory))
-                : offersRef;
-            const snap = await getDocs(offersQuery);
+            let snap;
+            if (isServer) {
+                let queryRef: any = (db as any).collection('offers');
+                if (searchContext.matchedCategory) {
+                    queryRef = queryRef.where('category', '==', searchContext.matchedCategory);
+                }
+                snap = await queryRef.get();
+            } else {
+                const offersRef = collection(db, 'offers');
+                const offersQuery = searchContext.matchedCategory
+                    ? query(offersRef, where('category', '==', searchContext.matchedCategory))
+                    : offersRef;
+                snap = await getDocs(offersQuery);
+            }
 
             const matches: OfferResult[] = [];
             const searchTerms = new Set([
@@ -186,7 +198,7 @@ class OfferEngine {
                 ...searchContext.searchTerms,
             ]);
 
-            snap.forEach(doc => {
+            snap.forEach((doc: any) => {
                 const data = doc.data();
                 if (!offerHygieneService.isOfferUsableForSearch(data)) return;
                 const pName = data.productName || data.name || '';
@@ -480,11 +492,14 @@ class OfferEngine {
     async getTopOffersByMarket(marketName: string, purchaseHistory?: string[]): Promise<string> {
         console.log(`[OfferEngine] getTopOffersByMarket: ${marketName} (history: ${purchaseHistory?.length || 0} items)`);
         try {
-            const offersRef = collection(db, 'offers');
-            const [snap, categoryMap] = await Promise.all([
-                getDocs(offersRef),
-                categoryMetadataService.getMap(),
-            ]);
+            let snap: any;
+            if (isServer) {
+                snap = await (db as any).collection('offers').get();
+            } else {
+                const offersRef = collection(db, 'offers');
+                snap = await getDocs(offersRef);
+            }
+            const categoryMap = await categoryMetadataService.getMap();
 
             // Normalizar histórico para comparação
             const historyNorm = (purchaseHistory || []).map(p => normalize(p));
@@ -499,7 +514,7 @@ class OfferEngine {
                 categoryId: string;
             }>();
 
-            snap.forEach(doc => {
+            snap.forEach((doc: any) => {
                 const data = doc.data();
                 if (!offerHygieneService.isOfferUsableForSearch(data)) return;
                 const rawMarket = data.marketName || data.networkName || '';
@@ -646,11 +661,16 @@ class OfferEngine {
 
     async getWeeklyVitrine(): Promise<string> {
         try {
-            const offersRef = collection(db, 'offers');
-            const snap = await getDocs(offersRef);
+            let snap: any;
+            if (isServer) {
+                snap = await (db as any).collection('offers').get();
+            } else {
+                const offersRef = collection(db, 'offers');
+                snap = await getDocs(offersRef);
+            }
             const active: Array<{ name: string; price: number; market: string }> = [];
 
-            snap.forEach(doc => {
+            snap.forEach((doc: any) => {
                 const data = doc.data();
                 if (!offerHygieneService.isOfferUsableForSearch(data)) return;
                 if (data.expiresAt && new Date(data.expiresAt) < new Date()) return;
@@ -674,16 +694,25 @@ class OfferEngine {
 
     async getCategoryVitrine(category: string): Promise<string> {
         try {
-            const offersRef = collection(db, 'offers');
             const searchContext = await productCatalogService.resolveSearch(category);
-            const offersQuery = searchContext.matchedCategory
-                ? query(offersRef, where('category', '==', searchContext.matchedCategory))
-                : offersRef;
-            const snap = await getDocs(offersQuery);
+            let snap: any;
+            if (isServer) {
+                let queryRef: any = (db as any).collection('offers');
+                if (searchContext.matchedCategory) {
+                    queryRef = queryRef.where('category', '==', searchContext.matchedCategory);
+                }
+                snap = await queryRef.get();
+            } else {
+                const offersRef = collection(db, 'offers');
+                const offersQuery = searchContext.matchedCategory
+                    ? query(offersRef, where('category', '==', searchContext.matchedCategory))
+                    : offersRef;
+                snap = await getDocs(offersQuery);
+            }
             const matches: Array<{ name: string; price: number; market: string }> = [];
             const searchTerms = new Set([normalize(category), ...searchContext.searchTerms]);
 
-            snap.forEach(doc => {
+            snap.forEach((doc: any) => {
                 const data = doc.data();
                 if (!offerHygieneService.isOfferUsableForSearch(data)) return;
                 if (data.expiresAt && new Date(data.expiresAt) < new Date()) return;
@@ -713,11 +742,16 @@ class OfferEngine {
 
     async getHistoricalPrices(productName: string, targetDate?: string): Promise<string> {
         try {
-            const offersRef = collection(db, 'offers');
-            const snap = await getDocs(offersRef);
+            let snap: any;
+            if (isServer) {
+                snap = await (db as any).collection('offers').get();
+            } else {
+                const offersRef = collection(db, 'offers');
+                snap = await getDocs(offersRef);
+            }
             const matches: Array<{ name: string; price: number; market: string; date: string }> = [];
 
-            snap.forEach(doc => {
+            snap.forEach((doc: any) => {
                 const data = doc.data();
                 if (!offerHygieneService.isOfferUsableForSearch(data)) return;
                 if (fuzzyMatch(productName, data.productName || data.name || '')) {
@@ -760,10 +794,21 @@ class OfferEngine {
         try {
             const catalogByItem = await Promise.all(items.map((item) => productCatalogService.resolveSearch(item.name)));
             const categoryHints = Array.from(new Set(catalogByItem.map((search) => search.matchedCategory).filter(Boolean)));
-            const offersRef = collection(db, 'offers');
-            const snap = categoryHints.length === 1
-                ? await getDocs(query(offersRef, where('category', '==', categoryHints[0]!)))
-                : await getDocs(offersRef);
+            
+            let snap: any;
+            if (isServer) {
+                let queryRef: any = (db as any).collection('offers');
+                if (categoryHints.length === 1) {
+                    queryRef = queryRef.where('category', '==', categoryHints[0]!);
+                }
+                snap = await queryRef.get();
+            } else {
+                const offersRef = collection(db, 'offers');
+                const offersQuery = categoryHints.length === 1
+                    ? query(offersRef, where('category', '==', categoryHints[0]!))
+                    : offersRef;
+                snap = await getDocs(offersQuery);
+            }
 
             for (const [index, item] of items.entries()) {
                 const itemMatches = new Map<string, ShoppingItemOfferCandidate>();
@@ -771,7 +816,7 @@ class OfferEngine {
                 const searchTerms = new Set([normalize(item.name), ...searchContext.searchTerms]);
                 const quantity = item.quantity && item.quantity > 0 ? item.quantity : 1;
 
-                snap.forEach(doc => {
+                snap.forEach((doc: any) => {
                     const data = doc.data();
                     if (!offerHygieneService.isOfferUsableForSearch(data)) return;
                     const mName = data.marketName || data.networkName || '';
@@ -856,13 +901,18 @@ class OfferEngine {
             if (candidates.length === 0) return null;
 
             // 3. Buscar uma oferta ativa para um dos candidatos
-            const offersRef = collection(db, 'offers');
-            const snap = await getDocs(offersRef);
+            let snap: any;
+            if (isServer) {
+                snap = await (db as any).collection('offers').get();
+            } else {
+                const offersRef = collection(db, 'offers');
+                snap = await getDocs(offersRef);
+            }
 
             for (const candidate of candidates) {
                 let bestOffer: { name: string; price: number; market: string } | null = null;
 
-                snap.forEach(doc => {
+                snap.forEach((doc: any) => {
                     const data = doc.data();
                     if (!offerHygieneService.isOfferUsableForSearch(data)) return;
                     const pName = data.productName || data.name || '';

@@ -1,5 +1,9 @@
 import { collection, getDocs } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db as clientDb } from '../firebase';
+import { isServer } from '../lib/isServer';
+import { adminDb as serverDb } from '../lib/firebase-admin';
+
+const db = isServer ? (serverDb as any) : clientDb;
 
 export interface CatalogProduct {
     id: string;
@@ -73,15 +77,20 @@ class ProductCatalogService {
             return this.cache;
         }
 
-        const snap = await getDocs(collection(db, 'products'));
+        let snap;
+        if (isServer) {
+            snap = await db.collection('products').get();
+        } else {
+            snap = await getDocs(collection(db, 'products'));
+        }
         this.cache = snap.docs
-            .map((docSnap) => ({
+            .map((docSnap: any) => ({
                 id: docSnap.id,
                 ...(docSnap.data() as Omit<CatalogProduct, 'id'>),
             }))
-            .filter((product) => product.active !== false);
+            .filter((product: any) => product.active !== false);
         this.loadedAt = now;
-        return this.cache;
+        return this.cache || [];
     }
 
     async resolveSearch(term: string): Promise<CatalogSearchResult> {

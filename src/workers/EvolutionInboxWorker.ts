@@ -197,11 +197,11 @@ async function loadPendingMessages(): Promise<Array<{ id: string; data: InboxMes
     if (snapshot.empty) return [];
 
     return snapshot.docs
-        .map((docSnap) => ({
+        .map((docSnap: any) => ({
             id: docSnap.id,
             data: docSnap.data() as InboxMessage,
         }))
-        .sort((a, b) => {
+        .sort((a: any, b: any) => {
             const aTime = String((a.data as any).receivedAtIso || '');
             const bTime = String((b.data as any).receivedAtIso || '');
             return aTime.localeCompare(bTime);
@@ -215,12 +215,12 @@ async function loadPendingOutboxMessages(): Promise<Array<{ id: string; data: Ou
         .get();
 
     return snapshot.docs
-        .map((docSnap) => ({
+        .map((docSnap: any) => ({
             id: docSnap.id,
             data: docSnap.data() as OutboxMessage,
         }))
-        .filter((item) => isRetryDue(item.data.nextRetryAtIso))
-        .sort((a, b) => a.id.localeCompare(b.id));
+        .filter((item: any) => isRetryDue(item.data.nextRetryAtIso))
+        .sort((a: any, b: any) => a.id.localeCompare(b.id));
 }
 
 async function markInboxStatus(id: string, status: string, extra: Record<string, unknown> = {}) {
@@ -571,7 +571,7 @@ async function claimInboxItem(id: string): Promise<InboxMessage | null> {
     const inboxDoc = db.collection('message_inbox').doc(id);
     const claimedAtIso = nowIso();
 
-    return await db.runTransaction(async (transaction) => {
+    return await db.runTransaction(async (transaction: any) => {
         const docSnap = await transaction.get(inboxDoc);
         if (!docSnap.exists) {
             return null;

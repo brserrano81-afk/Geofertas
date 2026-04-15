@@ -2,11 +2,11 @@ import { addDoc, collection, doc, getDoc, getDocs, limit, orderBy, query, server
 import { db as clientDb } from '../firebase';
 import { isServer } from '../lib/isServer';
 import { adminDb as serverDb, admin } from '../lib/firebase-admin';
+import { identityResolutionService } from './IdentityResolutionService';
 
 // Helper de normalização de tempo
 const serverTimestamp = isServer ? admin.firestore.FieldValue.serverTimestamp : clientTimestamp;
 const db = isServer ? (serverDb as any) : clientDb;
-import { identityResolutionService } from './IdentityResolutionService';
 
 export interface UserInteraction {
     role: 'user' | 'assistant';
@@ -152,16 +152,31 @@ class UserProfileService {
             identity.storageUserId,
         ].filter(Boolean)));
 
-        await Promise.all(writeUserIds.map((targetUserId) => setDoc(doc(db, 'users', targetUserId), {
-            userId: identity.canonicalUserId,
-            canonicalUserId: identity.canonicalUserId,
-            legacyUserId: identity.legacyUserId,
-            storageUserId: identity.storageUserId,
-            bsuid: identity.bsuid || null,
-            remoteJid: identity.remoteJid || null,
-            name,
-            updatedAt: serverTimestamp(),
-        }, { merge: true })));
+        await Promise.all(writeUserIds.map(async (targetUserId) => {
+            if (isServer) {
+                await db.collection('users').doc(targetUserId).set({
+                    userId: identity.canonicalUserId,
+                    canonicalUserId: identity.canonicalUserId,
+                    legacyUserId: identity.legacyUserId,
+                    storageUserId: identity.storageUserId,
+                    bsuid: identity.bsuid || null,
+                    remoteJid: identity.remoteJid || null,
+                    name,
+                    updatedAt: serverTimestamp(),
+                }, { merge: true });
+            } else {
+                await setDoc(doc(db, 'users', targetUserId), {
+                    userId: identity.canonicalUserId,
+                    canonicalUserId: identity.canonicalUserId,
+                    legacyUserId: identity.legacyUserId,
+                    storageUserId: identity.storageUserId,
+                    bsuid: identity.bsuid || null,
+                    remoteJid: identity.remoteJid || null,
+                    name,
+                    updatedAt: serverTimestamp(),
+                }, { merge: true });
+            }
+        }));
     }
 
     async getRecentInteractions(userId: string): Promise<UserInteraction[]> {
@@ -189,7 +204,7 @@ class UserProfileService {
                 const interactionsQuery = query(interactionsRef, orderBy('createdAt', 'desc'), limit(8));
                 const snap = await getDocs(interactionsQuery);
 
-                return snap.docs.map((docSnap) => {
+                return snap.docs.map((docSnap: any) => {
                     const data = docSnap.data();
                     return {
                         role: data.role as 'user' | 'assistant',
@@ -213,9 +228,15 @@ class UserProfileService {
 
     private async getNextInteractionCount(userId: string): Promise<number> {
         try {
-            const userRef = doc(db, 'users', userId);
-            const snap = await getDoc(userRef);
-            const current = snap.exists() ? Number(snap.data().interactionCount || 0) : 0;
+            let data: any = null;
+            if (isServer) {
+                const snap = await db.collection('users').doc(userId).get();
+                if (snap.exists) data = snap.data();
+            } else {
+                const snap = await getDoc(doc(db, 'users', userId));
+                if (snap.exists()) data = snap.data();
+            }
+            const current = data ? Number(data.interactionCount || 0) : 0;
             return current + 1;
         } catch (err) {
             console.error('[UserProfileService] Error counting interactions:', err);

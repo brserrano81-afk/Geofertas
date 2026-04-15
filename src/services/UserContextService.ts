@@ -1,5 +1,9 @@
 import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db as clientDb } from '../firebase';
+import { isServer } from '../lib/isServer';
+import { adminDb as serverDb } from '../lib/firebase-admin';
+
+const db = isServer ? (serverDb as any) : clientDb;
 import { userPreferencesService } from './UserPreferencesService';
 
 interface PredictedNeed {
@@ -117,9 +121,13 @@ class UserContextService {
 
     private async getPurchases(userId: string): Promise<any[]> {
         try {
+            if (isServer) {
+                const snap = await (db as any).collection('users').doc(userId).collection('purchases').get();
+                return snap.docs.map((docSnap: any) => docSnap.data());
+            }
             const purchasesRef = collection(db, 'users', userId, 'purchases');
             const snap = await getDocs(purchasesRef);
-            return snap.docs.map((docSnap) => docSnap.data());
+            return snap.docs.map((docSnap: any) => docSnap.data());
         } catch (err) {
             console.error('[UserContextService] Error loading purchases:', err);
             return [];
@@ -128,6 +136,14 @@ class UserContextService {
 
     private async getActiveList(userId: string): Promise<any[]> {
         try {
+            if (isServer) {
+                const snap = await (db as any).collection('users').doc(userId).collection('lists')
+                    .orderBy('updatedAt', 'desc')
+                    .limit(1)
+                    .get();
+                if (snap.empty) return [];
+                return snap.docs[0].data().items || [];
+            }
             const listsRef = collection(db, 'users', userId, 'lists');
             const listsQuery = query(listsRef, orderBy('updatedAt', 'desc'), limit(1));
             const snap = await getDocs(listsQuery);
@@ -141,10 +157,17 @@ class UserContextService {
 
     private async getRecentInteractions(userId: string): Promise<any[]> {
         try {
+            if (isServer) {
+                const snap = await (db as any).collection('users').doc(userId).collection('interactions')
+                    .orderBy('createdAt', 'desc')
+                    .limit(8)
+                    .get();
+                return snap.docs.map((docSnap: any) => docSnap.data()).reverse();
+            }
             const interactionsRef = collection(db, 'users', userId, 'interactions');
             const interactionsQuery = query(interactionsRef, orderBy('createdAt', 'desc'), limit(8));
             const snap = await getDocs(interactionsQuery);
-            return snap.docs.map((docSnap) => docSnap.data()).reverse();
+            return snap.docs.map((docSnap: any) => docSnap.data()).reverse();
         } catch (err) {
             console.error('[UserContextService] Error loading interactions:', err);
             return [];

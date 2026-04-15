@@ -1,9 +1,9 @@
-import { collection, doc, getDoc, getDocs, serverTimestamp as clientTimestamp, setDoc } from 'firebase/firestore';
-import { db as clientDb } from '../firebase';
 import { isServer } from '../lib/isServer';
 import { adminDb as serverDb, admin } from '../lib/firebase-admin';
+import * as clientFirestore from 'firebase/firestore';
+import { db as clientDb } from '../firebase';
 
-const serverTimestamp = isServer ? admin.firestore.FieldValue.serverTimestamp : clientTimestamp;
+const serverTimestamp = isServer ? admin.firestore.FieldValue.serverTimestamp : clientFirestore.serverTimestamp;
 const db = isServer ? (serverDb as any) : clientDb;
 import type { CanonicalIdentity } from '../types/identity';
 import { analyticsEventWriter } from '../workers/AnalyticsEventWriter';
@@ -56,12 +56,12 @@ function buildAliasKey(kind: 'bsuid' | 'phone' | 'remoteJid', value: string): st
 
 async function readAliasTarget(aliasKey: string): Promise<string | null> {
     if (isServer) {
-        const snap = await db.collection('identity_aliases').doc(aliasKey).get();
+        const snap = await (db as any).collection('identity_aliases').doc(aliasKey).get();
         if (!snap.exists) return null;
         return String(snap.data().canonicalUserId || '').trim() || null;
     }
 
-    const snap = await getDoc(doc(db, 'identity_aliases', aliasKey));
+    const snap = await clientFirestore.getDoc(clientFirestore.doc(db, 'identity_aliases', aliasKey));
     if (!snap.exists()) {
         return null;
     }
@@ -72,10 +72,10 @@ async function readAliasTarget(aliasKey: string): Promise<string | null> {
 async function hasUserDocument(userId: string): Promise<boolean> {
     if (!userId) return false;
     if (isServer) {
-        const snap = await db.collection('users').doc(userId).get();
+        const snap = await (db as any).collection('users').doc(userId).get();
         return snap.exists;
     }
-    const snap = await getDoc(doc(db, 'users', userId));
+    const snap = await clientFirestore.getDoc(clientFirestore.doc(db, 'users', userId));
     return snap.exists();
 }
 
@@ -190,7 +190,37 @@ class IdentityResolutionService {
             };
         }
 
-        const identitySnap = await getDoc(doc(db, 'canonical_identities', normalizedUserId));
+        const identitySnapPath = ['canonical_identities', normalizedUserId];
+        if (isServer) {
+            const snap = await (db as any).collection(identitySnapPath[0]).doc(identitySnapPath[1]).get();
+            if (!snap.exists) {
+                return {
+                    canonicalUserId: normalizedUserId,
+                    storageUserId: normalizedUserId,
+                    legacyUserId: normalizedUserId,
+                    remoteJid: normalizedUserId.includes('@') ? normalizedUserId : undefined,
+                    channel: normalizedUserId.includes('@') ? 'whatsapp' : 'web',
+                    resolutionSource: 'legacy_passthrough',
+                    requiresBackfill: false,
+                    aliases: [],
+                };
+            }
+            const data = snap.data();
+            return {
+                canonicalUserId: normalizedUserId,
+                storageUserId: String(data.storageUserId || normalizedUserId),
+                legacyUserId: String(data.legacyUserId || normalizedUserId),
+                bsuid: data.bsuid,
+                phoneNumber: data.phoneNumber,
+                remoteJid: data.remoteJid,
+                channel: (data.channel || 'web') as CanonicalIdentity['channel'],
+                resolutionSource: (data.resolutionSource || 'legacy_passthrough') as CanonicalIdentity['resolutionSource'],
+                requiresBackfill: Boolean(data.requiresBackfill),
+                aliases: Array.isArray(data.aliases) ? data.aliases : [],
+            };
+        }
+
+        const identitySnap = await clientFirestore.getDoc(clientFirestore.doc(db, identitySnapPath[0], identitySnapPath[1]));
         if (!identitySnap.exists()) {
             return {
                 canonicalUserId: normalizedUserId,
@@ -252,15 +282,41 @@ class IdentityResolutionService {
             return;
         }
 
-        const canonicalRef = doc(db, 'canonical_identities', identity.canonicalUserId);
-        await setDoc(canonicalRef, {
+        if (isServer) {
+            const canonicalRef = (db as any).collection('canonical_identities').doc(identity.canonicalUserId);
+            await canonicalRef.set({
+                ...identity,
+                updatedAt: serverTimestamp(),
+                createdAt: serverTimestamp(),
+            }, { merge: true });
+
+            const aliasWrites = identity.aliases.map((aliasKey: string) =>
+                (db as any).collection('identity_aliases').doc(aliasKey).set({
+                    canonicalUserId: identity.canonicalUserId,
+                    storageUserId: identity.storageUserId,
+                    legacyUserId: identity.legacyUserId,
+                    bsuid: identity.bsuid || null,
+                    remoteJid: identity.remoteJid || null,
+                    phoneNumber: identity.phoneNumber || null,
+                    channel: identity.channel,
+                    updatedAt: serverTimestamp(),
+                    createdAt: serverTimestamp(),
+                }, { merge: true }),
+            );
+
+            await Promise.all(aliasWrites);
+            return;
+        }
+
+        const canonicalRef = clientFirestore.doc(db, 'canonical_identities', identity.canonicalUserId);
+        await clientFirestore.setDoc(canonicalRef, {
             ...identity,
             updatedAt: serverTimestamp(),
             createdAt: serverTimestamp(),
         }, { merge: true });
 
         const aliasWrites = identity.aliases.map((aliasKey) =>
-            setDoc(doc(db, 'identity_aliases', aliasKey), {
+            clientFirestore.setDoc(clientFirestore.doc(db, 'identity_aliases', aliasKey), {
                 canonicalUserId: identity.canonicalUserId,
                 storageUserId: identity.storageUserId,
                 legacyUserId: identity.legacyUserId,
@@ -281,28 +337,49 @@ class IdentityResolutionService {
             return;
         }
 
-        const [legacySnap, canonicalSnap] = await Promise.all([
-            getDoc(doc(db, 'users', identity.legacyUserId)),
-            getDoc(doc(db, 'users', identity.canonicalUserId)),
-        ]);
+        if (isServer) {
+            const [legacySnap, canonicalSnap] = await Promise.all([
+                (db as any).collection('users').doc(identity.legacyUserId).get(),
+                (db as any).collection('users').doc(identity.canonicalUserId).get(),
+            ]);
 
-        if (!legacySnap.exists()) {
-            return;
+            if (!legacySnap.exists) return;
+
+            const legacyData = legacySnap.data();
+            await (db as any).collection('users').doc(identity.canonicalUserId).set({
+                ...(canonicalSnap.exists ? canonicalSnap.data() : {}),
+                ...legacyData,
+                userId: identity.canonicalUserId,
+                canonicalUserId: identity.canonicalUserId,
+                legacyUserId: identity.legacyUserId,
+                storageUserId: identity.storageUserId,
+                bsuid: identity.bsuid || null,
+                remoteJid: identity.remoteJid || null,
+                identityBackfilledAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            }, { merge: true });
+        } else {
+            const [legacySnap, canonicalSnap] = await Promise.all([
+                clientFirestore.getDoc(clientFirestore.doc(db, 'users', identity.legacyUserId)),
+                clientFirestore.getDoc(clientFirestore.doc(db, 'users', identity.canonicalUserId)),
+            ]);
+
+            if (!legacySnap.exists()) return;
+
+            const legacyData = legacySnap.data();
+            await clientFirestore.setDoc(clientFirestore.doc(db, 'users', identity.canonicalUserId), {
+                ...(canonicalSnap.exists() ? canonicalSnap.data() : {}),
+                ...legacyData,
+                userId: identity.canonicalUserId,
+                canonicalUserId: identity.canonicalUserId,
+                legacyUserId: identity.legacyUserId,
+                storageUserId: identity.storageUserId,
+                bsuid: identity.bsuid || null,
+                remoteJid: identity.remoteJid || null,
+                identityBackfilledAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            }, { merge: true });
         }
-
-        const legacyData = legacySnap.data();
-        await setDoc(doc(db, 'users', identity.canonicalUserId), {
-            ...(canonicalSnap.exists() ? canonicalSnap.data() : {}),
-            ...legacyData,
-            userId: identity.canonicalUserId,
-            canonicalUserId: identity.canonicalUserId,
-            legacyUserId: identity.legacyUserId,
-            bsuid: identity.bsuid || null,
-            remoteJid: identity.remoteJid || null,
-            storageUserId: identity.canonicalUserId,
-            identityBackfilledAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-        }, { merge: true });
 
         await Promise.all([
             this.copySubcollection(identity.legacyUserId, identity.canonicalUserId, 'purchases'),
@@ -318,14 +395,25 @@ class IdentityResolutionService {
         };
         await this.persistIdentity(migratedIdentity);
 
-        await setDoc(doc(db, 'users', identity.legacyUserId), {
-            canonicalUserId: identity.canonicalUserId,
-            storageUserId: identity.canonicalUserId,
-            legacyUserId: identity.legacyUserId,
-            identityMigratedTo: identity.canonicalUserId,
-            identityBackfilledAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-        }, { merge: true });
+        if (isServer) {
+            await (db as any).collection('users').doc(identity.legacyUserId).set({
+                canonicalUserId: identity.canonicalUserId,
+                storageUserId: identity.canonicalUserId,
+                legacyUserId: identity.legacyUserId,
+                identityMigratedTo: identity.canonicalUserId,
+                identityBackfilledAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            }, { merge: true });
+        } else {
+            await clientFirestore.setDoc(clientFirestore.doc(db, 'users', identity.legacyUserId), {
+                canonicalUserId: identity.canonicalUserId,
+                storageUserId: identity.canonicalUserId,
+                legacyUserId: identity.legacyUserId,
+                identityMigratedTo: identity.canonicalUserId,
+                identityBackfilledAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            }, { merge: true });
+        }
     }
 
     private async copySubcollection(sourceUserId: string, targetUserId: string, subcollection: 'purchases' | 'lists' | 'interactions'): Promise<void> {
@@ -333,13 +421,28 @@ class IdentityResolutionService {
             return;
         }
 
-        const sourceSnap = await getDocs(collection(db, 'users', sourceUserId, subcollection));
+        if (isServer) {
+            const sourceSnap = await (db as any).collection('users').doc(sourceUserId).collection(subcollection).get();
+            if (sourceSnap.empty) return;
+
+            await Promise.all(sourceSnap.docs.map((docSnap: any) =>
+                (db as any).collection('users').doc(targetUserId).collection(subcollection).doc(docSnap.id).set({
+                    ...docSnap.data(),
+                    canonicalUserId: targetUserId,
+                    legacyUserId: sourceUserId,
+                    migratedFromLegacyAt: serverTimestamp(),
+                }, { merge: true })
+            ));
+            return;
+        }
+
+        const sourceSnap = await clientFirestore.getDocs(clientFirestore.collection(db, 'users', sourceUserId, subcollection));
         if (sourceSnap.empty) {
             return;
         }
 
-        await Promise.all(sourceSnap.docs.map((docSnap) => setDoc(
-            doc(db, 'users', targetUserId, subcollection, docSnap.id),
+        await Promise.all(sourceSnap.docs.map((docSnap) => clientFirestore.setDoc(
+            clientFirestore.doc(db, 'users', targetUserId, subcollection, docSnap.id),
             {
                 ...docSnap.data(),
                 canonicalUserId: targetUserId,

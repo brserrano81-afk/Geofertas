@@ -1,4 +1,4 @@
-﻿// OfferQueueService - Gestao da fila de contribuicoes colaborativas
+// OfferQueueService - Gestao da fila de contribuicoes colaborativas
 // Fluxo: cliente envia foto de oferta -> IA extrai -> salva em `offer_queue` (status: pending)
 //        admin revisa -> aprova (move para `offers`) ou rejeita (status: rejected)
 
@@ -9,11 +9,16 @@ import {
     getDocs,
     orderBy,
     query,
-    serverTimestamp,
+    serverTimestamp as clientTimestamp,
     updateDoc,
     where,
 } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db as clientDb } from '../../firebase';
+import { isServer } from '../../lib/isServer';
+import { adminDb as serverDb, admin } from '../../lib/firebase-admin';
+
+const db = isServer ? (serverDb as any) : clientDb;
+const serverTimestamp = isServer ? admin.firestore.FieldValue.serverTimestamp : clientTimestamp;
 
 export type OfferQueueStatus = 'pending' | 'approved' | 'rejected';
 
@@ -49,13 +54,23 @@ class OfferQueueService {
         const now = new Date().toISOString();
 
         for (const item of items) {
-            const ref = await addDoc(collection(db, 'offer_queue'), {
-                ...item,
-                status: 'pending',
-                submittedAt: now,
-                createdAt: serverTimestamp(),
-            });
-            ids.push(ref.id);
+            if (isServer) {
+                const ref = await (db as any).collection('offer_queue').add({
+                    ...item,
+                    status: 'pending',
+                    submittedAt: now,
+                    createdAt: serverTimestamp(),
+                });
+                ids.push(ref.id);
+            } else {
+                const ref = await addDoc(collection(db, 'offer_queue'), {
+                    ...item,
+                    status: 'pending',
+                    submittedAt: now,
+                    createdAt: serverTimestamp(),
+                });
+                ids.push(ref.id);
+            }
         }
 
         console.log(`[OfferQueueService] ${ids.length} contribuicao(oes) colaborativa(s) enfileirada(s).`);
@@ -67,17 +82,28 @@ class OfferQueueService {
     }
 
     async listAll(): Promise<OfferQueueItem[]> {
+        if (isServer) {
+            const snap = await (db as any).collection('offer_queue').orderBy('submittedAt', 'desc').get();
+            return snap.docs.map((docSnap: any) => ({ id: docSnap.id, ...(docSnap.data() as Omit<OfferQueueItem, 'id'>) }));
+        }
         const ref = collection(db, 'offer_queue');
         const q = query(ref, orderBy('submittedAt', 'desc'));
         const snap = await getDocs(q);
-        return snap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<OfferQueueItem, 'id'>) }));
+        return snap.docs.map((docSnap: any) => ({ id: docSnap.id, ...(docSnap.data() as Omit<OfferQueueItem, 'id'>) }));
     }
 
     private async _list(status: OfferQueueStatus): Promise<OfferQueueItem[]> {
+        if (isServer) {
+            const snap = await (db as any).collection('offer_queue')
+                .where('status', '==', status)
+                .orderBy('submittedAt', 'asc')
+                .get();
+            return snap.docs.map((docSnap: any) => ({ id: docSnap.id, ...(docSnap.data() as Omit<OfferQueueItem, 'id'>) }));
+        }
         const ref = collection(db, 'offer_queue');
         const q = query(ref, where('status', '==', status), orderBy('submittedAt', 'asc'));
         const snap = await getDocs(q);
-        return snap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<OfferQueueItem, 'id'>) }));
+        return snap.docs.map((docSnap: any) => ({ id: docSnap.id, ...(docSnap.data() as Omit<OfferQueueItem, 'id'>) }));
     }
 
     async approve(
@@ -90,45 +116,87 @@ class OfferQueueService {
         const merged = { ...item, ...overrides };
         const expiresAt = merged.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
-        const offerRef = await addDoc(collection(db, 'offers'), {
-            productName: merged.productName,
-            name: merged.productName,
-            marketName: merged.marketName,
-            price: merged.price,
-            unit: merged.unit || '',
-            brand: merged.brand || '',
-            category: merged.category || 'outros',
-            expiresAt,
-            active: true,
-            featured: false,
-            source: merged.imageSource === 'tabloid' ? 'community_tabloid' : 'community_price_tag',
-            submittedBy: merged.submittedBy,
-            approvedBy: reviewedBy,
-            queueItemId: itemId,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-        });
+        if (isServer) {
+            const offerRef = await (db as any).collection('offers').add({
+                productName: merged.productName,
+                name: merged.productName,
+                marketName: merged.marketName,
+                price: merged.price,
+                unit: merged.unit || '',
+                brand: merged.brand || '',
+                category: merged.category || 'outros',
+                expiresAt,
+                active: true,
+                featured: false,
+                source: merged.imageSource === 'tabloid' ? 'community_tabloid' : 'community_price_tag',
+                submittedBy: merged.submittedBy,
+                approvedBy: reviewedBy,
+                queueItemId: itemId,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            });
 
-        await updateDoc(doc(db, 'offer_queue', itemId), {
-            status: 'approved',
-            reviewedBy,
-            reviewedAt: now,
-            publishedOfferId: offerRef.id,
-            updatedAt: serverTimestamp(),
-        });
+            await (db as any).collection('offer_queue').doc(itemId).update({
+                status: 'approved',
+                reviewedBy,
+                reviewedAt: now,
+                publishedOfferId: offerRef.id,
+                updatedAt: serverTimestamp(),
+            });
 
-        console.log(`[OfferQueueService] Contribuicao ${itemId} aprovada -> offer ${offerRef.id}`);
-        return offerRef.id;
+            console.log(`[OfferQueueService] Contribuicao ${itemId} aprovada -> offer ${offerRef.id}`);
+            return offerRef.id;
+        } else {
+            const offerRef = await addDoc(collection(db, 'offers'), {
+                productName: merged.productName,
+                name: merged.productName,
+                marketName: merged.marketName,
+                price: merged.price,
+                unit: merged.unit || '',
+                brand: merged.brand || '',
+                category: merged.category || 'outros',
+                expiresAt,
+                active: true,
+                featured: false,
+                source: merged.imageSource === 'tabloid' ? 'community_tabloid' : 'community_price_tag',
+                submittedBy: merged.submittedBy,
+                approvedBy: reviewedBy,
+                queueItemId: itemId,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            });
+
+            await updateDoc(doc(db, 'offer_queue', itemId), {
+                status: 'approved',
+                reviewedBy,
+                reviewedAt: now,
+                publishedOfferId: offerRef.id,
+                updatedAt: serverTimestamp(),
+            });
+
+            console.log(`[OfferQueueService] Contribuicao ${itemId} aprovada -> offer ${offerRef.id}`);
+            return offerRef.id;
+        }
     }
 
     async reject(itemId: string, reviewedBy: string, reason: string = ''): Promise<void> {
-        await updateDoc(doc(db, 'offer_queue', itemId), {
-            status: 'rejected',
-            reviewedBy,
-            reviewedAt: new Date().toISOString(),
-            rejectionReason: reason,
-            updatedAt: serverTimestamp(),
-        });
+        if (isServer) {
+            await (db as any).collection('offer_queue').doc(itemId).update({
+                status: 'rejected',
+                reviewedBy,
+                reviewedAt: new Date().toISOString(),
+                rejectionReason: reason,
+                updatedAt: serverTimestamp(),
+            });
+        } else {
+            await updateDoc(doc(db, 'offer_queue', itemId), {
+                status: 'rejected',
+                reviewedBy,
+                reviewedAt: new Date().toISOString(),
+                rejectionReason: reason,
+                updatedAt: serverTimestamp(),
+            });
+        }
         console.log(`[OfferQueueService] Contribuicao ${itemId} rejeitada por ${reviewedBy}.`);
     }
 }

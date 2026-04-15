@@ -5,7 +5,10 @@
 
 import { haversineDistance, calculateTransportCost, type TransportMode } from '../app/utils/geoUtils';
 import { collection, getDocs } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db as clientDb } from '../firebase';
+import { isServer } from '../lib/isServer';
+import { adminDb as serverDb } from '../lib/firebase-admin';
+const db = isServer ? (serverDb as any) : clientDb;
 
 interface MarketResult {
     marketId: string;
@@ -25,11 +28,16 @@ class GeoDecisionEngine {
         radiusKm: number = 10,
     ): Promise<MarketResult[]> {
         try {
-            const marketsRef = collection(db, 'markets');
-            const snap = await getDocs(marketsRef);
+            let snap;
+            if (isServer) {
+                snap = await db.collection('markets').get();
+            } else {
+                const marketsRef = collection(db, 'markets');
+                snap = await getDocs(marketsRef);
+            }
             const results: MarketResult[] = [];
 
-            snap.forEach(doc => {
+            snap.forEach((doc: any) => {
                 const data = doc.data();
                 const lat = data.location?.lat || data.geo?.lat;
                 const lng = data.location?.lng || data.geo?.lng;

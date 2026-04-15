@@ -1,5 +1,9 @@
 import { collection, getDocs } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db as clientDb } from '../firebase';
+import { isServer } from '../lib/isServer';
+import { adminDb as serverDb } from '../lib/firebase-admin';
+
+const db = isServer ? (serverDb as any) : clientDb;
 
 interface PlannedPurchase {
     product: string;
@@ -65,9 +69,9 @@ class PredictiveShoppingService {
             .sort((a, b) => a.daysRemaining - b.daysRemaining)
             .slice(0, 10);
 
-        const estimatedBasketTotal = plannedPurchases.reduce((sum, item) => sum + (item.currentPrice || 0), 0);
+        const estimatedBasketTotal = plannedPurchases.reduce((sum: number, item: PlannedPurchase) => sum + (item.currentPrice || 0), 0);
         const averageMonthlySpend = monthlySpend.size > 0
-            ? Number((Array.from(monthlySpend.values()).reduce((sum, value) => sum + value, 0) / monthlySpend.size).toFixed(2))
+            ? Number((Array.from(monthlySpend.values()).reduce((sum: number, value: number) => sum + value, 0) / monthlySpend.size).toFixed(2))
             : 0;
 
         return {
@@ -135,9 +139,13 @@ class PredictiveShoppingService {
 
     private async getPurchases(userId: string): Promise<any[]> {
         try {
+            if (isServer) {
+                const snap = await (db as any).collection('users').doc(userId).collection('purchases').get();
+                return snap.docs.map((docSnap: any) => docSnap.data());
+            }
             const purchasesRef = collection(db, 'users', userId, 'purchases');
             const snap = await getDocs(purchasesRef);
-            return snap.docs.map((docSnap) => docSnap.data());
+            return snap.docs.map((docSnap: any) => docSnap.data());
         } catch (err) {
             console.error('[PredictiveShoppingService] Error loading purchases:', err);
             return [];
@@ -146,12 +154,17 @@ class PredictiveShoppingService {
 
     private async getActiveOffers(): Promise<any[]> {
         try {
-            const offersRef = collection(db, 'offers');
-            const snap = await getDocs(offersRef);
+            let docs: any[] = [];
+            if (isServer) {
+                const snap = await (db as any).collection('offers').get();
+                docs = snap.docs.map((docSnap: any) => docSnap.data());
+            } else {
+                const offersRef = collection(db, 'offers');
+                const snap = await getDocs(offersRef);
+                docs = snap.docs.map((docSnap: any) => docSnap.data());
+            }
             const nowIso = new Date().toISOString();
-            return snap.docs
-                .map((docSnap) => docSnap.data())
-                .filter((offer) => !offer.expiresAt || offer.expiresAt >= nowIso);
+            return docs.filter((offer) => !offer.expiresAt || offer.expiresAt >= nowIso);
         } catch (err) {
             console.error('[PredictiveShoppingService] Error loading offers:', err);
             return [];

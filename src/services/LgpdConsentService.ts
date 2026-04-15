@@ -166,8 +166,13 @@ class LgpdConsentService {
     async getConsent(userId: string): Promise<Partial<UserConsent>> {
         try {
             const identity = await identityResolutionService.getIdentitySnapshot(userId);
-            const snap = await getDoc(doc(db, 'users', identity.canonicalUserId));
-            if (!snap.exists()) return {};
+            let snap;
+            if (isServer) {
+                snap = await db.collection('users').doc(identity.canonicalUserId).get();
+            } else {
+                snap = await getDoc(doc(db, 'users', identity.canonicalUserId));
+            }
+            if (!snap.exists || (typeof snap.exists === 'function' && !snap.exists())) return {};
 
             const data = snap.data();
             return {
