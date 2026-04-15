@@ -47,20 +47,6 @@
         { "fieldPath": "eventType", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
-    },
-    {
-      "collectionGroup": "analytics_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "identity_aliases",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "aliasKey", "order": "ASCENDING" }
-      ]
     }
   ],
   "fieldOverrides": []
