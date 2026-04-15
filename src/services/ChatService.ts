@@ -1428,15 +1428,23 @@ class ChatSession {
         const shareText = this.listManager.getShareText(listItems);
         const digits = this.normalizeShareTargetPhone(targetPhone);
         const remoteJid = `${digits}@s.whatsapp.net`;
+        const correlationId = `manual-share-${Date.now()}`;
 
         await addDoc(collection(db, 'message_outbox'), {
-            inboxId: `manual-share-${Date.now()}`,
+            inboxId: correlationId,
             source: 'economizafacil-share-list',
+            correlationId,
+            sourceMessageId: null,
             userId: this.context.userId,
             remoteJid,
             text: shareText,
             sendStatus: 'pending_send',
+            retryCount: 0,
+            lastRetryAtIso: null,
+            nextRetryAtIso: null,
+            sentAtIso: null,
             createdAt: serverTimestamp(),
+            createdAtIso: new Date().toISOString(),
         });
 
         return {
