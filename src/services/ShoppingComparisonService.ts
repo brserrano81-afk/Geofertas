@@ -1,5 +1,6 @@
 import { ListManager } from './ListManager';
 import { offerEngine } from './OfferEngine';
+import { analyticsEventWriter, inferDominantCategory } from '../workers/AnalyticsEventWriter';
 import type {
     MarketComparisonEntry,
     MarketComparisonItem,
@@ -95,10 +96,22 @@ class ShoppingComparisonService {
             })
             .sort(rankMarkets);
 
+        const bestMarket = ranking[0];
+        analyticsEventWriter.writeEvent({
+            eventType: 'list_compared',
+            marketId: bestMarket?.marketId || '',
+            categorySlug: inferDominantCategory(normalizedItems),
+            pricePoint: bestMarket && normalizedItems.length > 0
+                ? Math.round((bestMarket.total / normalizedItems.length) * 100) / 100
+                : 0,
+            basketSize: normalizedItems.length,
+            totalAmount: bestMarket?.total || 0,
+        }).catch(() => { /* já logado internamente */ });
+
         return {
             items: normalizedItems,
             ranking,
-            bestMarket: ranking[0],
+            bestMarket,
             comparedAt: new Date().toISOString(),
         };
     }

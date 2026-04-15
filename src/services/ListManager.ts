@@ -2,7 +2,7 @@ import { addDoc, collection, getDocs, limit, orderBy, query, serverTimestamp, up
 import { db } from '../firebase';
 import { offerEngine } from './OfferEngine';
 import type { ActiveShoppingList, ShoppingListItem } from '../types/shopping';
-import { analyticsEventWriter } from '../workers/AnalyticsEventWriter';
+import { analyticsEventWriter, inferDominantCategory } from '../workers/AnalyticsEventWriter';
 
 function toSortableTimestamp(value: unknown): number {
     if (!value) return 0;
@@ -62,6 +62,8 @@ class ListManager {
     }
 
     async persistList(items: ShoppingListItem[]): Promise<void> {
+        const categorySlug = inferDominantCategory(items);
+
         const active = await this.getActiveListDoc();
         if (active) {
             await updateDoc(active.ref, {
@@ -72,6 +74,7 @@ class ListManager {
             // Analytics: lista atualizada (fire-and-forget, sem PII)
             analyticsEventWriter.writeEvent({
                 eventType: 'list_updated',
+                categorySlug,
                 basketSize: items.length,
             }).catch(() => { /* já logado internamente */ });
             return;
@@ -86,6 +89,7 @@ class ListManager {
         // Analytics: lista criada (fire-and-forget, sem PII)
         analyticsEventWriter.writeEvent({
             eventType: 'list_created',
+            categorySlug,
             basketSize: items.length,
         }).catch(() => { /* já logado internamente */ });
     }
@@ -148,6 +152,8 @@ class ListManager {
             return { text: 'Sua lista está vazia.', topMarketName: 'Mercado' };
         }
 
+        const categorySlug = inferDominantCategory(items);
+
         const pricesByItem = await offerEngine.getPricesForItems(items);
         const totals = new Map<string, number>();
 
@@ -165,10 +171,20 @@ class ListManager {
             return { text: 'Ainda não encontrei preços suficientes para comparar sua lista.', topMarketName: 'Mercado' };
         }
 
+        const [topMarketName, topMarketTotal] = ranking[0];
+        analyticsEventWriter.writeEvent({
+            eventType: 'list_compared',
+            marketId: '',
+            categorySlug,
+            pricePoint: items.length > 0 ? Math.round((topMarketTotal / items.length) * 100) / 100 : 0,
+            basketSize: items.length,
+            totalAmount: topMarketTotal,
+        }).catch(() => { /* já logado internamente */ });
+
         const lines = ranking.map(([market, total], index) => `${index + 1}️⃣ ${market} — R$ ${total.toFixed(2).replace('.', ',')}`);
         return {
             text: `🛒 Melhor mercado pra sua lista (${items.length} itens)\n\n${lines.join('\n')}`,
-            topMarketName: ranking[0][0],
+            topMarketName,
         };
     }
 

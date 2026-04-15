@@ -9,7 +9,7 @@ import { geoDecisionEngine } from './GeoDecisionEngine';
 import { normalizeCatalogText, productCatalogService } from './ProductCatalogService';
 import { offerHygieneService } from './OfferHygieneService';
 import { categoryMetadataService } from './CategoryMetadataService';
-import { analyticsEventWriter } from '../workers/AnalyticsEventWriter';
+import { analyticsEventWriter, sanitizeMarketRegion } from '../workers/AnalyticsEventWriter';
 import type { ShoppingItemOfferCandidate, ShoppingListItem } from '../types/shopping';
 
 interface OfferResult {
@@ -18,6 +18,7 @@ interface OfferResult {
     price: number;
     marketName: string;
     marketId: string;
+    marketRegion?: string;
     distance?: number;
     transportCost?: number;
     realCost?: number;
@@ -218,6 +219,7 @@ class OfferEngine {
                         price,
                         marketName: mName,
                         marketId: data.marketId || '',
+                        marketRegion: data.neighborhood || data.bairro || data.marketRegion || '',
                         expiresAt: data.expiresAt,
                     });
                 }
@@ -247,6 +249,7 @@ class OfferEngine {
                 analyticsEventWriter.writeEvent({
                     eventType: 'price_queried',
                     marketId: cheapest.marketId || '',
+                    marketRegion: sanitizeMarketRegion(cheapest.marketRegion),
                     categorySlug: searchContext.matchedCategory || '',
                     pricePoint: cheapest.price,
                     basketSize: 1,

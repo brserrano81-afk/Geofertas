@@ -22,7 +22,7 @@ import {
     setDoc,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { normalizeCatalogText } from '../services/ProductCatalogService';
+import { CATEGORY_ALIASES, normalizeCatalogText } from '../services/ProductCatalogService';
 
 // ── Tipos públicos ────────────────────────────────────────────────────────────
 
@@ -52,6 +52,14 @@ export interface AnalyticsEventPayload {
     basketSize?: number;
     /** Valor total da compra (0 quando não aplicável). */
     totalAmount?: number;
+}
+
+export interface AggregateUpdatePayload {
+    purchaseAmount?: number;
+    basketSize?: number;
+    categorySlug?: string;
+    marketId?: string;
+    estimatedSavings?: number;
 }
 
 /** Documento gravado em analytics_events/{eventId} */
@@ -131,6 +139,31 @@ export function slugifyMarketName(name: string): string {
     return normalizeCatalogText(name).replace(/\s+/g, '_');
 }
 
+export function sanitizeMarketRegion(region?: string | null): string {
+    return normalizeCatalogText(region || '').replace(/\s+/g, '_');
+}
+
+export function inferDominantCategory(items: Array<{ name?: string | null }>): string {
+    try {
+        const votes: Record<string, number> = {};
+        for (const item of items) {
+            const normalizedName = normalizeCatalogText(item?.name || '');
+            if (!normalizedName) continue;
+
+            for (const [slug, aliases] of Object.entries(CATEGORY_ALIASES)) {
+                if (aliases.some((alias) => normalizedName.includes(normalizeCatalogText(alias)))) {
+                    votes[slug] = (votes[slug] || 0) + 1;
+                    break;
+                }
+            }
+        }
+
+        return topN(votes, 1)[0] || '';
+    } catch {
+        return '';
+    }
+}
+
 // ── AnalyticsEventWriter ──────────────────────────────────────────────────────
 
 class AnalyticsEventWriter {
@@ -147,7 +180,7 @@ class AnalyticsEventWriter {
             const event: StoredAnalyticsEvent = {
                 eventType: payload.eventType,
                 marketId: payload.marketId || '',
-                marketRegion: normalizeCatalogText(payload.marketRegion || ''),
+                marketRegion: sanitizeMarketRegion(payload.marketRegion),
                 categorySlug: normalizeCatalogText(payload.categorySlug || ''),
                 pricePoint: Math.round(Number(payload.pricePoint || 0) * 100) / 100,
                 basketSize: Math.max(0, Math.floor(Number(payload.basketSize || 0))),
@@ -177,18 +210,7 @@ class AnalyticsEventWriter {
      */
     async updateUserAggregate(
         userId: string,
-        update: {
-            /** Valor da compra. Se informado, incrementa purchaseCount e totalSpent. */
-            purchaseAmount?: number;
-            /** Número de itens do carrinho para média. */
-            basketSize?: number;
-            /** Categoria da compra/consulta para ranking. */
-            categorySlug?: string;
-            /** marketId para ranking de mercados preferidos. */
-            marketId?: string;
-            /** Economia estimada nesta compra (ex: diferença vs. mercado mais caro). */
-            estimatedSavings?: number;
-        },
+        update: AggregateUpdatePayload,
     ): Promise<void> {
         try {
             const { periodStart, periodEnd } = currentMonthBounds();
