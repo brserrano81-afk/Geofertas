@@ -3,6 +3,7 @@ import { adminDb as db, admin } from '../lib/firebase-admin';
 const serverTimestamp = admin.firestore.FieldValue.serverTimestamp;
 import { chatService } from '../services/ChatService';
 import { isMasterAdmin, masterAdminService } from '../services/MasterAdminService';
+import { transcriptionService } from '../services/TranscriptionService';
 import { maskIdentifier } from '../utils/maskSensitiveData';
 
 dotenv.config();
@@ -478,7 +479,36 @@ async function sendTextViaEvolution(remoteJid: string, text: string) {
     );
 }
 
-async function buildResponse(message: InboxMessage): Promise<ResponseBuildResult> {
+async function buildResponse(rawMessage: InboxMessage): Promise<ResponseBuildResult> {
+    let message = rawMessage;
+
+    // ── Interceptador de Áudio ────────────────────────────────────────────────
+    // Se a mensagem for áudio com payload binário, tenta transcrever via Whisper.
+    // Em caso de sucesso, normaliza para o fluxo de texto.
+    // Em caso de falha, retorna fallback imediatamente sem propagar o erro.
+    if (message.messageType === 'audioMessage' && message.mediaBase64) {
+        try {
+            const transcribedText = await transcriptionService.transcribeAudio(
+                Buffer.from(message.mediaBase64, 'base64'),
+            );
+            if (transcribedText) {
+                console.log(`[TRANSCRIPTION_OK] user=${message.userId} chars=${transcribedText.length}`);
+                message = { ...message, text: transcribedText };
+            } else {
+                console.warn(`[TRANSCRIPTION_EMPTY] user=${message.userId} — Whisper retornou texto vazio`);
+            }
+        } catch (err: any) {
+            console.warn(`[FALLBACK_TRIGGERED] user=${message.userId} reason=transcription_failed err=${err?.message}`);
+            return {
+                text: 'Ainda não consigo processar áudio por aqui. Pode me mandar em texto ou foto?',
+                shouldSend: true,
+                usedFallback: true,
+                reason: 'audio_transcription_failed',
+            };
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     if (message.messageType === 'imageMessage' && message.mediaBase64) {
         const buffer = Buffer.from(message.mediaBase64, 'base64');
         const response = await chatService.processImage(

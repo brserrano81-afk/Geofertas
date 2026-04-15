@@ -19,11 +19,18 @@ import {
     deleteDoc,
     doc,
     getDoc,
-    serverTimestamp,
+    serverTimestamp as clientServerTimestamp,
     setDoc,
 } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db as clientDb } from '../firebase';
+import { isServer } from '../lib/isServer';
+import { adminDb, admin } from '../lib/firebase-admin';
 import { CATEGORY_ALIASES, normalizeCatalogText } from '../services/ProductCatalogService';
+
+const db = isServer ? (adminDb as any) : clientDb;
+const serverTimestamp: () => unknown = isServer
+    ? admin.firestore.FieldValue.serverTimestamp
+    : clientServerTimestamp;
 
 // ── Tipos públicos ────────────────────────────────────────────────────────────
 
@@ -74,7 +81,7 @@ interface StoredAnalyticsEvent {
     totalAmount: number;
     weekday: number;          // 0 = domingo … 6 = sábado
     hour: number;             // 0–23
-    createdAt: ReturnType<typeof serverTimestamp>;
+    createdAt: unknown;       // serverTimestamp() — type varies between Admin and Client SDK
 }
 
 /** Documento gravado em user_aggregates/{userId} */
@@ -194,7 +201,11 @@ class AnalyticsEventWriter {
             // Guarda de PII em runtime
             assertNoPii(event as unknown as Record<string, unknown>);
 
-            await addDoc(collection(db, 'analytics_events'), event);
+            if (isServer) {
+                await db.collection('analytics_events').add(event);
+            } else {
+                await addDoc(collection(db, 'analytics_events'), event);
+            }
             console.log(`[AnalyticsEventWriter] Evento gravado: ${payload.eventType} | market=${event.marketId} | cat=${event.categorySlug}`);
         } catch (err) {
             console.error('[AnalyticsEventWriter] Falha ao gravar evento (não crítico):', err);
@@ -215,9 +226,11 @@ class AnalyticsEventWriter {
     ): Promise<void> {
         try {
             const { periodStart, periodEnd } = currentMonthBounds();
-            const aggRef = doc(db, 'user_aggregates', userId);
-            const snap = await getDoc(aggRef);
-            const prev = snap.exists() ? snap.data() : {};
+            const aggRef = isServer
+                ? db.collection('user_aggregates').doc(userId)
+                : doc(db, 'user_aggregates', userId);
+            const snap = await (isServer ? aggRef.get() : getDoc(aggRef));
+            const prev = isServer ? (snap.exists ? snap.data() : {}) : (snap.exists() ? snap.data() : {});
 
             // ── Votos de categoria e mercado ─────────────────────────────────
             const categoryVotes: Record<string, number> = { ...(prev._categoryVotes || {}) };
@@ -272,7 +285,11 @@ class AnalyticsEventWriter {
             // Guarda de PII: verifica que nenhum campo proibido escapou
             assertNoPii(aggregate);
 
-            await setDoc(aggRef, aggregate, { merge: true });
+            if (isServer) {
+                await aggRef.set(aggregate, { merge: true });
+            } else {
+                await setDoc(aggRef, aggregate, { merge: true });
+            }
             console.log(`[AnalyticsEventWriter] Agregado atualizado: ${userId.slice(0, 8)}… | purchases=${purchaseCount}`);
         } catch (err) {
             console.error('[AnalyticsEventWriter] Falha ao atualizar agregado (não crítico):', err);
@@ -286,14 +303,19 @@ class AnalyticsEventWriter {
                 return;
             }
 
-            const targetRef = doc(db, 'user_aggregates', targetUserId);
+            const targetRef = isServer
+                ? db.collection('user_aggregates').doc(targetUserId)
+                : doc(db, 'user_aggregates', targetUserId);
             const [targetSnap, ...sourceSnaps] = await Promise.all([
-                getDoc(targetRef),
-                ...uniqueSourceIds.map((userId) => getDoc(doc(db, 'user_aggregates', userId))),
+                isServer ? targetRef.get() : getDoc(targetRef),
+                ...uniqueSourceIds.map((userId) => isServer
+                    ? db.collection('user_aggregates').doc(userId).get()
+                    : getDoc(doc(db, 'user_aggregates', userId))),
             ]);
+            const snapExists = (s: any) => isServer ? s.exists : s.exists();
 
             const merged = sourceSnaps.reduce<Record<string, unknown>>((acc, snap) => {
-                if (!snap.exists()) {
+                if (!snapExists(snap)) {
                     return acc;
                 }
 
@@ -321,7 +343,7 @@ class AnalyticsEventWriter {
                 acc.periodStart = String(acc.periodStart || data.periodStart || currentMonthBounds().periodStart);
                 acc.periodEnd = String(acc.periodEnd || data.periodEnd || currentMonthBounds().periodEnd);
                 return acc;
-            }, targetSnap.exists() ? { ...targetSnap.data() } : {});
+            }, snapExists(targetSnap) ? { ...targetSnap.data() } : {});
 
             const purchaseCount = Number(merged.purchaseCount || 0);
             const totalSpent = Math.round(Number(merged.totalSpent || 0) * 100) / 100;
@@ -332,7 +354,7 @@ class AnalyticsEventWriter {
             const categoryVotes = (merged._categoryVotes || {}) as Record<string, number>;
             const marketVotes = (merged._marketVotes || {}) as Record<string, number>;
 
-            await setDoc(targetRef, {
+            const mergedDoc = {
                 periodStart: merged.periodStart || currentMonthBounds().periodStart,
                 periodEnd: merged.periodEnd || currentMonthBounds().periodEnd,
                 purchaseCount,
@@ -347,11 +369,21 @@ class AnalyticsEventWriter {
                 _basketSizeTotal: basketSizeTotal,
                 _basketSizeCount: basketSizeCount,
                 updatedAt: serverTimestamp(),
-            }, { merge: true });
+            };
+
+            if (isServer) {
+                await targetRef.set(mergedDoc, { merge: true });
+            } else {
+                await setDoc(targetRef, mergedDoc, { merge: true });
+            }
 
             await Promise.all(sourceSnaps.map(async (snap) => {
-                if (!snap.exists()) return;
-                await deleteDoc(snap.ref);
+                if (!snapExists(snap)) return;
+                if (isServer) {
+                    await snap.ref.delete();
+                } else {
+                    await deleteDoc(snap.ref);
+                }
             }));
         } catch (err) {
             console.error('[AnalyticsEventWriter] Falha ao unificar aggregates (não crítico):', err);
