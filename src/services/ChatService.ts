@@ -24,6 +24,7 @@ import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import type { ShoppingComparisonResult } from '../types/shopping';
 import { offerQueueService } from './admin/OfferQueueService';
+import { productCatalogService } from './ProductCatalogService';
 import { userDataDeletionService } from './UserDataDeletionService';
 import { lgpdConsentService } from './LgpdConsentService';
 
@@ -1299,22 +1300,31 @@ class ChatSession {
             return { text: 'Recebi a imagem, mas nao consegui ler os produtos. Tente uma foto mais nitida do encarte.' };
         }
         try {
-            const toEnqueue = items
-                .filter((i: any) => i.product && Number(i.price) > 0)
-                .map((i: any) => ({
-                    productName: String(i.product || '').trim(),
-                    marketName: marketName || String(i.marketName || '').trim(),
-                    price: Number(i.price),
-                    unit: String(i.unit || 'un').trim(),
-                    brand: String(i.brand || '').trim(),
-                    category: '',
-                    imageSource: 'tabloid' as const,
-                    submittedBy: this.context.userId,
-                    rawExtracted: i,
-                }));
-            if (toEnqueue.length === 0) {
+            const validItems = items.filter((i: any) => i.product && Number(i.price) > 0);
+            if (validItems.length === 0) {
                 return { text: 'Li a imagem, mas os produtos nao tinham preco legivel. Tente uma foto mais proxima.' };
             }
+
+            // Enriquecimento semântico paralelo — resolve categoria e nome canônico
+            const enriched = await Promise.all(
+                validItems.map(async (i: any) => {
+                    const rawName = String(i.product || '').trim();
+                    const semantic = await productCatalogService.enrichProductSemantically(rawName);
+                    return {
+                        productName: rawName,
+                        marketName: marketName || String(i.marketName || '').trim(),
+                        price: Number(i.price),
+                        unit: String(i.unit || 'un').trim(),
+                        brand: String(i.brand || '').trim(),
+                        ...semantic,          // category, normalizedName, catalogProductId, semanticScore
+                        imageSource: 'tabloid' as const,
+                        submittedBy: this.context.userId,
+                        rawExtracted: i,
+                    };
+                }),
+            );
+
+            const toEnqueue = enriched;
             await offerQueueService.enqueue(toEnqueue);
             const summaryLines = toEnqueue.slice(0, 3)
                 .map((o: any) => `â€¢ ${o.productName} â€” R$ ${o.price.toFixed(2).replace('.', ',')} ${o.unit}`);
@@ -1331,7 +1341,7 @@ class ChatSession {
         }
     }
 
-    /** Enfileira uma etiqueta de preÃ§o (produto Ãºnico) para aprovaÃ§Ã£o do admin */
+    /** Enfileira uma etiqueta de preço (produto único) para aprovação do admin */
     private async enqueuePriceTagToQueue(tagData: any): Promise<ChatResponse> {
         const marketName = String(tagData.marketName || '').trim();
         const productName = String(tagData.product || '').trim();
@@ -1340,13 +1350,16 @@ class ChatSession {
             return { text: 'Vi a etiqueta, mas nao consegui ler o produto ou preco. Tente uma foto mais proxima.' };
         }
         try {
+            // Enriquecimento semântico — resolve categoria e nome canônico
+            const semantic = await productCatalogService.enrichProductSemantically(productName);
+
             await offerQueueService.enqueue([{
                 productName,
                 marketName,
                 price,
                 unit: String(tagData.unit || 'un').trim(),
                 brand: String(tagData.brand || '').trim(),
-                category: '',
+                ...semantic,          // category, normalizedName, catalogProductId, semanticScore
                 imageSource: 'price_tag' as const,
                 submittedBy: this.context.userId,
                 rawExtracted: tagData,

@@ -25,6 +25,10 @@ export interface OfferQueueItem {
     unit?: string;
     brand?: string;
     category?: string;
+    // Enriquecimento semântico — preenchido automaticamente na ingestão
+    normalizedName?: string;       // Nome canônico do catálogo (se matched)
+    catalogProductId?: string;     // ID do produto no catálogo (se matched)
+    semanticScore?: number;        // Confiança do match semântico (0–1)
     expiresAt?: string;
     submittedBy: string;
     submittedAt: string;
