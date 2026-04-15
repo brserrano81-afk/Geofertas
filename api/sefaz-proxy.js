@@ -8,6 +8,26 @@ import { addDoc, collection, doc, getDoc, getDocs, getFirestore, limit, query, s
 
 dotenv.config();
 
+// --- Mascaramento de identificadores pessoais (LGPD) ---
+function maskPhone(phone) {
+    if (!phone || typeof phone !== 'string') return '***';
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length <= 10) return '***' + digits.slice(-4);
+    const prefix = digits.slice(0, 6);
+    const suffix = digits.slice(-4);
+    const masked = '*'.repeat(Math.max(digits.length - 10, 3));
+    return `${prefix}${masked}${suffix}`;
+}
+function maskIdentifier(value) {
+    if (!value) return 'desconhecido';
+    if (value.includes('@')) {
+        const atIdx = value.indexOf('@');
+        return `${maskPhone(value.slice(0, atIdx))}${value.slice(atIdx)}`;
+    }
+    return maskPhone(value);
+}
+// --------------------------------------------------------
+
 const app = express();
 app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -556,7 +576,7 @@ app.post('/webhook/whatsapp-entrada', async (req, res) => {
                 inboxId: enqueueResult.inboxId,
                 reason: 'message_id_already_seen',
             });
-            console.warn(`[EvolutionWebhook] [${normalizedEvent.correlationId}] Duplicidade detectada para ${normalizedEvent.remoteJid || 'desconhecido'}.`);
+            console.warn(`[EvolutionWebhook] [${normalizedEvent.correlationId}] Duplicidade detectada para ${maskIdentifier(normalizedEvent.remoteJid)}.`);
             res.status(200).json({
                 ok: true,
                 event: normalizedEvent.event,
@@ -582,7 +602,7 @@ app.post('/webhook/whatsapp-entrada', async (req, res) => {
             status: 'accepted',
             inboxId: enqueueResult.inboxId,
         });
-        console.log(`[EvolutionWebhook] [${normalizedEvent.correlationId}] Event ${normalizedEvent.event} recebido de ${normalizedEvent.remoteJid || 'desconhecido'} -> ${filePath}`);
+        console.log(`[EvolutionWebhook] [${normalizedEvent.correlationId}] Event ${normalizedEvent.event} recebido de ${maskIdentifier(normalizedEvent.remoteJid)} -> ${filePath}`);
         res.status(200).json({ ok: true, event: normalizedEvent.event, inboxId: enqueueResult.inboxId, correlationId: normalizedEvent.correlationId });
     } catch (err) {
         console.error('[EvolutionWebhook] Error handling webhook:', err);
@@ -636,7 +656,7 @@ app.post('/webhook/whatsapp-entrada/:event', async (req, res) => {
                 inboxId: enqueueResult.inboxId,
                 reason: 'message_id_already_seen',
             });
-            console.warn(`[EvolutionWebhook] [${normalizedEvent.correlationId}] Duplicidade detectada para ${normalizedEvent.remoteJid || 'desconhecido'}.`);
+            console.warn(`[EvolutionWebhook] [${normalizedEvent.correlationId}] Duplicidade detectada para ${maskIdentifier(normalizedEvent.remoteJid)}.`);
             res.status(200).json({
                 ok: true,
                 event: normalizedEvent.event,
@@ -662,7 +682,7 @@ app.post('/webhook/whatsapp-entrada/:event', async (req, res) => {
             status: 'accepted',
             inboxId: enqueueResult.inboxId,
         });
-        console.log(`[EvolutionWebhook] [${normalizedEvent.correlationId}] Event ${normalizedEvent.event} recebido de ${normalizedEvent.remoteJid || 'desconhecido'} -> ${filePath}`);
+        console.log(`[EvolutionWebhook] [${normalizedEvent.correlationId}] Event ${normalizedEvent.event} recebido de ${maskIdentifier(normalizedEvent.remoteJid)} -> ${filePath}`);
         res.status(200).json({ ok: true, event: normalizedEvent.event, inboxId: enqueueResult.inboxId, correlationId: normalizedEvent.correlationId });
     } catch (err) {
         console.error('[EvolutionWebhook] Error handling event webhook:', err);

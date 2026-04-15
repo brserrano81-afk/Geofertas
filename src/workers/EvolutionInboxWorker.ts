@@ -15,6 +15,7 @@ import {
 import { db } from '../firebase';
 import { chatService } from '../services/ChatService';
 import { isMasterAdmin, masterAdminService } from '../services/MasterAdminService';
+import { maskIdentifier } from '../utils/maskSensitiveData';
 
 dotenv.config();
 
@@ -738,7 +739,7 @@ async function processInboxItem(item: { id: string; data: InboxMessage }) {
                 metadata: responseBuild.usedFallback ? { responseType: 'fallback', reason: responseBuild.reason } : { responseType: 'resolved' },
             });
 
-            console.log(`[EvolutionInboxWorker] [${correlationId}] Inbox ${id} processada para ${data.remoteJid} (${sendResult.status}).`);
+            console.log(`[EvolutionInboxWorker] [${correlationId}] Inbox ${id} processada para ${maskIdentifier(data.remoteJid)} (${sendResult.status}).`);
             return;
         } catch (sendErr: any) {
             const errorMessage = sendErr?.message || 'unknown_send_error';
@@ -883,7 +884,7 @@ async function flushPendingOutboxBatch() {
                 retryCount: currentRetryCount,
             });
 
-            console.log(`[EvolutionInboxWorker] [${correlationId}] Outbox ${item.id} reenviado para ${item.data.remoteJid} (${sendResult.status}).`);
+            console.log(`[EvolutionInboxWorker] [${correlationId}] Outbox ${item.id} reenviado para ${maskIdentifier(item.data.remoteJid)} (${sendResult.status}).`);
         } catch (err: any) {
             const correlationId = item.data.correlationId || item.data.inboxId || item.id;
             console.error(`[EvolutionInboxWorker] [${correlationId}] Erro ao reenviar outbox ${item.id}:`, err);
