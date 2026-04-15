@@ -1,5 +1,9 @@
 import { collection, getDocs } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db as clientDb } from '../firebase';
+import { isServer } from '../lib/isServer';
+import { adminDb as serverDb } from '../lib/firebase-admin';
+
+const db = isServer ? (serverDb as any) : clientDb;
 
 function normalize(value: string): string {
     return String(value || '')
@@ -150,6 +154,10 @@ class PurchaseAnalyticsService {
 
     private async getPurchases(): Promise<any[]> {
         try {
+            if (isServer) {
+                const snap = await db.collection('users').doc(this.userId).collection('purchases').get();
+                return snap.docs.map((docSnap: any) => docSnap.data());
+            }
             const purchasesRef = collection(db, 'users', this.userId, 'purchases');
             const snap = await getDocs(purchasesRef);
             return snap.docs.map((docSnap) => docSnap.data());
