@@ -1,4 +1,9 @@
+import express from 'express';
 import admin from 'firebase-admin';
+import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
 
@@ -95,9 +100,7 @@ function getServiceAccount(rootDir) {
     return undefined;
 }
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const ROOT_DIR = path.resolve(__dirname, '..');
+// Identity and config initialization
 
 if (!admin.apps.length) {
     const sa = getServiceAccount(ROOT_DIR);
