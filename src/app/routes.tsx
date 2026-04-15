@@ -8,6 +8,7 @@ import AdminOffers from "../pages/admin/AdminOffers";
 import AdminQueue from "../pages/admin/AdminQueue";
 import AdminMarkets from "../pages/admin/AdminMarkets";
 import AdminCampaigns from "../pages/admin/AdminCampaigns";
+import AdminAnalytics from "../pages/admin/AdminAnalytics";
 import AdminLogin from "../pages/admin/AdminLogin";
 import AdminRouteGuard from "../pages/admin/AdminRouteGuard";
 
@@ -24,6 +25,7 @@ export default function AppRoutes() {
           <Route path="/admin/queue" element={<AdminQueue />} />
           <Route path="/admin/markets" element={<AdminMarkets />} />
           <Route path="/admin/campaigns" element={<AdminCampaigns />} />
+          <Route path="/admin/analytics" element={<AdminAnalytics />} />
         </Route>
         <Route path="/analises" element={<Analises />} />
         <Route path="/criar-lista" element={<Navigate to="/" replace />} />

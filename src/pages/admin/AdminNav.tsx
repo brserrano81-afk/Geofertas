@@ -8,6 +8,7 @@ const links = [
   { to: "/admin/offers", label: "Ofertas" },
   { to: "/admin/queue", label: "Fila" },
   { to: "/admin/campaigns", label: "Campanhas" },
+  { to: "/admin/analytics", label: "Análises" },
 ];
 
 export default function AdminNav() {
