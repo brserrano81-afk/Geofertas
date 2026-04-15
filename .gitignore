@@ -20,6 +20,11 @@ dist-ssr
 !.env.example
 !.env.integration.example
 
+# Credenciais e arquivos sensíveis
+service-account.json
+service-account*.json
+.claude/settings.local.json
+
 # Runtime / sessions
 .wwebjs_cache/
 whatsapp-session/
