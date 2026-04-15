@@ -6,9 +6,8 @@ import { db } from "../firebase";
 import { categoryMetadataService } from "../services/CategoryMetadataService";
 import { offerHygieneService, type OfferSnapshot } from "../services/OfferHygieneService";
 
-const WHATSAPP_URL =
-  import.meta.env.VITE_WHATSAPP_ENTRY_URL ||
-  "https://api.whatsapp.com/send?text=Oi%2C%20quero%20comparar%20minha%20lista%20com%20o%20Economiza%20Facil";
+const WHATSAPP_URL: string = import.meta.env.VITE_WHATSAPP_ENTRY_URL || "";
+if (!WHATSAPP_URL) console.warn("[EF] VITE_WHATSAPP_ENTRY_URL não configurada — botões WhatsApp ficarão sem destino.");
 
 type MarketRecord = { id: string; name: string; address: string };
 type OfferCard = {
