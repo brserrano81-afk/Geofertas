@@ -28,6 +28,35 @@ function maskIdentifier(value) {
 }
 // --------------------------------------------------------
 
+// --- Rate limiting simples por IP (sem dependência externa) ---
+// Limita /webhook/* a 60 req/min por IP. Adequado para instância única.
+const _rlWindows = new Map(); // ip -> { count, windowStart }
+const RATE_LIMIT_MAX = 60;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+function webhookRateLimit(req, res, next) {
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const entry = _rlWindows.get(ip);
+    if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
+        _rlWindows.set(ip, { count: 1, windowStart: now });
+        return next();
+    }
+    entry.count++;
+    if (entry.count > RATE_LIMIT_MAX) {
+        console.warn(`[RateLimit] IP ${ip} excedeu ${RATE_LIMIT_MAX} req/min no webhook.`);
+        return res.status(429).json({ ok: false, error: 'too_many_requests' });
+    }
+    next();
+}
+// Limpeza periódica para evitar vazamento de memória
+setInterval(() => {
+    const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS * 2;
+    for (const [ip, e] of _rlWindows.entries()) {
+        if (e.windowStart < cutoff) _rlWindows.delete(ip);
+    }
+}, RATE_LIMIT_WINDOW_MS);
+// ---------------------------------------------------------------
+
 const app = express();
 app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -530,7 +559,7 @@ app.get('/proxy', async (req, res) => {
     }
 });
 
-app.post('/webhook/whatsapp-entrada', async (req, res) => {
+app.post('/webhook/whatsapp-entrada', webhookRateLimit, async (req, res) => {
     const normalizedEvent = normalizeEvolutionEvent(req.body);
     const identity = await resolveCanonicalIdentity(normalizedEvent);
     normalizedEvent.userId = identity.canonicalUserId;
@@ -610,7 +639,7 @@ app.post('/webhook/whatsapp-entrada', async (req, res) => {
     }
 });
 
-app.post('/webhook/whatsapp-entrada/:event', async (req, res) => {
+app.post('/webhook/whatsapp-entrada/:event', webhookRateLimit, async (req, res) => {
     const normalizedEvent = normalizeEvolutionEvent(req.body, req.params.event);
     const identity = await resolveCanonicalIdentity(normalizedEvent);
     normalizedEvent.userId = identity.canonicalUserId;

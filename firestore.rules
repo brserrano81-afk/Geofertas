@@ -1,0 +1,108 @@
+rules_version = '2';
+
+// Firestore Security Rules — Economiza Fácil
+// Revisão: 2026-04-15
+//
+// Modelo de acesso:
+//   - Leitura/escrita das coleções operacionais (inbox, outbox, events) é feita
+//     exclusivamente pelo backend via Admin SDK (service account) — acesso direto
+//     do cliente é bloqueado.
+//   - Dados públicos (offers, markets, categories) são legíveis sem autenticação
+//     para alimentar a landing page e o app web.
+//   - Dados de usuário (users, canonical_identities) requerem auth ou são
+//     bloqueados para o cliente (backend usa Admin SDK que ignora estas regras).
+//   - Coleções de analytics não são acessíveis pelo cliente.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Dados públicos de catálogo (landing page + app web) ---
+    match /offers/{id} {
+      allow read: if true;
+      allow write: if false; // somente backend/admin SDK
+    }
+
+    match /markets/{id} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /categories/{id} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /networks/{id} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // --- Dados de usuário: apenas o próprio usuário autenticado ---
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      match /lists/{listId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      match /purchases/{purchaseId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      match /interactions/{interactionId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+
+    // --- Pipeline operacional: bloqueado para cliente ---
+    // Backend usa Admin SDK (service account) — essas regras não se aplicam a ele.
+    // Qualquer tentativa de acesso direto via SDK do cliente é negada.
+    match /message_inbox/{id} {
+      allow read, write: if false;
+    }
+
+    match /message_outbox/{id} {
+      allow read, write: if false;
+    }
+
+    match /integration_events/{id} {
+      allow read, write: if false;
+    }
+
+    // --- Identidade canônica: bloqueado para cliente ---
+    match /canonical_identities/{id} {
+      allow read, write: if false;
+    }
+
+    match /identity_aliases/{id} {
+      allow read, write: if false;
+    }
+
+    // --- Analytics: bloqueado para cliente ---
+    match /analytics_events/{id} {
+      allow read, write: if false;
+    }
+
+    match /user_aggregates/{id} {
+      allow read, write: if false;
+    }
+
+    // --- Painel admin: gerenciado via Admin SDK, bloqueado para cliente ---
+    match /campaigns/{id} {
+      allow read, write: if false;
+    }
+
+    match /offer_queue/{id} {
+      allow read, write: if false;
+    }
+
+    match /offers_archive/{id} {
+      allow read, write: if false;
+    }
+
+    // --- Fallback: negar tudo que não foi explicitamente listado ---
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
