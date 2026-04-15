@@ -1,5 +1,6 @@
 import { addDoc, collection, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { identityResolutionService } from './IdentityResolutionService';
 
 export interface UserInteraction {
     role: 'user' | 'assistant';
@@ -27,18 +28,24 @@ class UserProfileService {
     }
 
     async ensureUser(userId: string): Promise<UserProfile> {
-        const userRef = doc(db, 'users', userId);
+        const identity = await identityResolutionService.getIdentitySnapshot(userId);
+        const userRef = doc(db, 'users', identity.canonicalUserId);
         const snap = await getDoc(userRef);
 
         if (!snap.exists()) {
             const profile: UserProfile = {
-                userId,
-                channel: userId.endsWith('@c.us') ? 'whatsapp' : 'web',
+                userId: identity.canonicalUserId,
+                channel: identity.channel,
                 interactionCount: 0,
             };
 
             await setDoc(userRef, {
                 ...profile,
+                canonicalUserId: identity.canonicalUserId,
+                legacyUserId: identity.legacyUserId,
+                storageUserId: identity.storageUserId,
+                bsuid: identity.bsuid || null,
+                remoteJid: identity.remoteJid || null,
                 createdAt: serverTimestamp(),
                 lastInteractionAt: serverTimestamp(),
             }, { merge: true });
@@ -47,65 +54,87 @@ class UserProfileService {
         }
 
         return {
-            userId,
+            userId: identity.canonicalUserId,
             ...(snap.data() as Omit<UserProfile, 'userId'>),
         };
     }
 
     async recordInteraction(userId: string, interaction: UserInteraction) {
-        const userRef = doc(db, 'users', userId);
-        const interactionsRef = collection(db, 'users', userId, 'interactions');
+        const identity = await identityResolutionService.getIdentitySnapshot(userId);
+        const writeUserIds = Array.from(new Set([
+            identity.canonicalUserId,
+            identity.storageUserId,
+        ].filter(Boolean)));
 
-        // LGPD — Minimização de dados (art. 6º, III):
-        // Nunca salvamos o texto completo da mensagem — apenas um preview ≤80 chars.
-        // Isso evita captura acidental de dados sensíveis na conversa.
         const contentPreview = String(interaction.content || '').slice(0, 80);
-
         const interactionPayload = {
             role: interaction.role,
-            contentPreview,          // preview ≤80 chars — nunca o texto completo
+            contentPreview,
             ...(interaction.intent ? { intent: interaction.intent } : {}),
             createdAt: serverTimestamp(),
         };
+        const nextInteractionCount = await this.getNextInteractionCount(identity.canonicalUserId);
 
-        await addDoc(interactionsRef, interactionPayload);
-
-        await setDoc(userRef, {
-            userId,
-            channel: userId.endsWith('@c.us') ? 'whatsapp' : 'web',
-            lastInteractionAt: serverTimestamp(),
-            lastIntent: interaction.intent || null,
-            lastMessagePreview: contentPreview,
-            interactionCount: await this.getNextInteractionCount(userId),
-        }, { merge: true });
+        await Promise.all(writeUserIds.map(async (targetUserId) => {
+            await addDoc(collection(db, 'users', targetUserId, 'interactions'), interactionPayload);
+            await setDoc(doc(db, 'users', targetUserId), {
+                userId: identity.canonicalUserId,
+                canonicalUserId: identity.canonicalUserId,
+                legacyUserId: identity.legacyUserId,
+                storageUserId: identity.storageUserId,
+                bsuid: identity.bsuid || null,
+                remoteJid: identity.remoteJid || null,
+                channel: identity.channel,
+                lastInteractionAt: serverTimestamp(),
+                lastIntent: interaction.intent || null,
+                lastMessagePreview: contentPreview,
+                interactionCount: nextInteractionCount,
+            }, { merge: true });
+        }));
     }
 
     async updateUserName(userId: string, name: string) {
-        const userRef = doc(db, 'users', userId);
-        await setDoc(userRef, {
-            userId,
+        const identity = await identityResolutionService.getIdentitySnapshot(userId);
+        const writeUserIds = Array.from(new Set([
+            identity.canonicalUserId,
+            identity.storageUserId,
+        ].filter(Boolean)));
+
+        await Promise.all(writeUserIds.map((targetUserId) => setDoc(doc(db, 'users', targetUserId), {
+            userId: identity.canonicalUserId,
+            canonicalUserId: identity.canonicalUserId,
+            legacyUserId: identity.legacyUserId,
+            storageUserId: identity.storageUserId,
+            bsuid: identity.bsuid || null,
+            remoteJid: identity.remoteJid || null,
             name,
             updatedAt: serverTimestamp(),
-        }, { merge: true });
+        }, { merge: true })));
     }
 
-    private async getRecentInteractions(userId: string): Promise<UserInteraction[]> {
+    async getRecentInteractions(userId: string): Promise<UserInteraction[]> {
         try {
-            const interactionsRef = collection(db, 'users', userId, 'interactions');
-            const interactionsQuery = query(interactionsRef, orderBy('createdAt', 'desc'), limit(8));
-            const snap = await getDocs(interactionsQuery);
+            const compatibleUserIds = await identityResolutionService.getCompatibleUserIds(userId);
+            const batches = await Promise.all(compatibleUserIds.map(async (targetUserId) => {
+                const interactionsRef = collection(db, 'users', targetUserId, 'interactions');
+                const interactionsQuery = query(interactionsRef, orderBy('createdAt', 'desc'), limit(8));
+                const snap = await getDocs(interactionsQuery);
 
-            return snap.docs
-                .map((docSnap) => {
+                return snap.docs.map((docSnap) => {
                     const data = docSnap.data();
                     return {
                         role: data.role as 'user' | 'assistant',
-                        // Compatibilidade: suporta campo legado 'content' e novo 'contentPreview'
                         content: String(data.contentPreview || data.content || ''),
                         intent: data.intent,
                         createdAt: data.createdAt,
                     } as UserInteraction;
-                })
+                });
+            }));
+
+            return batches
+                .flat()
+                .sort((a, b) => this.getTimestamp(b.createdAt) - this.getTimestamp(a.createdAt))
+                .slice(0, 8)
                 .reverse();
         } catch (err) {
             console.error('[UserProfileService] Error loading interactions:', err);
@@ -123,6 +152,24 @@ class UserProfileService {
             console.error('[UserProfileService] Error counting interactions:', err);
             return 1;
         }
+    }
+
+    private getTimestamp(value: unknown): number {
+        if (!value) return 0;
+        if (typeof value === 'object' && value !== null && 'toMillis' in (value as { toMillis?: unknown })) {
+            const toMillis = (value as { toMillis: () => number }).toMillis;
+            if (typeof toMillis === 'function') {
+                return toMillis();
+            }
+        }
+        if (value instanceof Date) {
+            return value.getTime();
+        }
+        if (typeof value === 'string') {
+            const parsed = Date.parse(value);
+            return Number.isNaN(parsed) ? 0 : parsed;
+        }
+        return 0;
     }
 }
 

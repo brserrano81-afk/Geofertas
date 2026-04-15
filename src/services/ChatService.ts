@@ -56,6 +56,7 @@ interface ChatContext {
     shoppingList: ListItem[];
     lastProduct?: string;
     userId: string;
+    storageUserId: string;
     userName?: string;
     isFirstContact?: boolean;
     pendingPurchase?: any;
@@ -192,18 +193,19 @@ class ChatSession {
     private readonly ready: Promise<void>;
     private lastContextRefreshAt = 0;
 
-    constructor(userId: string = 'default_user') {
+    constructor(userId: string = 'default_user', storageUserId: string = userId) {
         this.context = {
             shoppingList: [],
             userId,
+            storageUserId,
             transportMode: 'car',
             consumption: 10,
             isFirstContact: true,
         };
 
-        this.listManager = new ListManager(userId);
-        this.purchaseManager = new PurchaseManager(userId);
-        this.purchaseAnalytics = new PurchaseAnalyticsService(userId);
+        this.listManager = new ListManager(storageUserId);
+        this.purchaseManager = new PurchaseManager(storageUserId, userId);
+        this.purchaseAnalytics = new PurchaseAnalyticsService(storageUserId);
 
         if (!ChatSession.diagnosticsChecked) {
             diagnosticService.runFullCheck();
@@ -238,11 +240,6 @@ class ChatSession {
         await this.refreshRichContext();
         const conversationState = this.conversationState;
         console.log(`[ChatService] >>> INCOMING: "${message}"`);
-        
-        // LGPD: Registrar consentimento na primeira interacao
-        lgpdConsentService.recordConsent(this.context.userId).catch((err) => {
-            console.warn('[ChatService] Falha ao registrar consentimento LGPD:', err);
-        });
 
         // LGPD: Interceptar comando de exclusao de dados
         const normalizedForLgpd = message.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
@@ -251,6 +248,11 @@ class ChatSession {
             console.log('[ChatService] [LGPD] Exclusao de dados solicitada: ' + this.context.userId);
             const result = await userDataDeletionService.anonymizeUser(this.context.userId);
             return { text: result.message };
+        }
+
+        const consentGate = await lgpdConsentService.evaluateConsentGate(this.context.userId, message);
+        if (!consentGate.allowed) {
+            return { text: consentGate.responseText || '' };
         }
 
         conversationState.addMessage(this.context.userId, 'user', message);
@@ -968,7 +970,7 @@ class ChatSession {
             case 'ver_padrao_consumo': {
                 const daysPattern = interpretation.nlpResult.entities[0]?.days || this.extractDaysFromMessage(message);
                 const pattern = await this.purchaseAnalytics.getConsumptionPattern(daysPattern);
-                const predictivePlan = await predictiveShoppingService.buildMonthlyPlan(this.context.userId);
+                const predictivePlan = await predictiveShoppingService.buildMonthlyPlan(this.context.storageUserId);
                 const predictiveText = predictiveShoppingService.formatMonthlyPlan(predictivePlan);
                 return { text: `${this.purchaseAnalytics.formatConsumptionPattern(pattern, daysPattern)}\n\n${predictiveText}` };
             }
@@ -1384,7 +1386,7 @@ class ChatSession {
             return;
         }
 
-        const richContext = await userContextService.buildRichContext(this.context.userId, this.context.userName);
+        const richContext = await userContextService.buildRichContext(this.context.storageUserId, this.context.userName);
         this.context.richContextSummary = richContext.summary;
         this.context.predictedNeeds = richContext.predictedNeeds;
         this.lastContextRefreshAt = now;
@@ -1394,7 +1396,7 @@ class ChatSession {
         const [prefs, profile, richContext] = await Promise.all([
             userPreferencesService.getPreferences(this.context.userId),
             userProfileService.ensureUser(this.context.userId),
-            userContextService.buildRichContext(this.context.userId, this.context.userName),
+            userContextService.buildRichContext(this.context.storageUserId, this.context.userName),
         ]);
 
         const favoriteMarket = richContext.favoriteMarkets[0] || 'ainda aprendendo';
@@ -2004,22 +2006,22 @@ class ChatSession {
 class ChatService {
     private readonly sessions = new Map<string, ChatSession>();
 
-    private getSession(userId: string = 'default_user'): ChatSession {
+    private getSession(userId: string = 'default_user', storageUserId: string = userId): ChatSession {
         const normalizedUserId = userId || 'default_user';
 
         if (!this.sessions.has(normalizedUserId)) {
-            this.sessions.set(normalizedUserId, new ChatSession(normalizedUserId));
+            this.sessions.set(normalizedUserId, new ChatSession(normalizedUserId, storageUserId || normalizedUserId));
         }
 
         return this.sessions.get(normalizedUserId)!;
     }
 
-    public async processMessage(message: string, userId: string = 'default_user'): Promise<ChatResponse> {
-        return this.getSession(userId).processMessage(message);
+    public async processMessage(message: string, userId: string = 'default_user', storageUserId: string = userId): Promise<ChatResponse> {
+        return this.getSession(userId, storageUserId).processMessage(message);
     }
 
-    public async processImage(imageData: Uint8Array, userId: string = 'default_user'): Promise<ChatResponse> {
-        return this.getSession(userId).processImage(imageData);
+    public async processImage(imageData: Uint8Array, userId: string = 'default_user', storageUserId: string = userId): Promise<ChatResponse> {
+        return this.getSession(userId, storageUserId).processImage(imageData);
     }
 }
 

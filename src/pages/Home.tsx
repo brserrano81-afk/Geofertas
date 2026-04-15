@@ -1,5 +1,6 @@
 import { collection, getDocs } from "firebase/firestore";
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { db } from "../firebase";
 import { categoryMetadataService } from "../services/CategoryMetadataService";
@@ -835,6 +836,18 @@ export default function Home() {
         <div>
           <div style={{ color: "#12332d", fontWeight: 900 }}>Economiza Facil</div>
           <div style={{ marginTop: 6 }}>Descubra onde sua lista de compras sai mais barata.</div>
+          <div style={{ marginTop: 10 }}>
+            <Link
+              to="/privacidade"
+              style={{
+                color: "#0f6f60",
+                textDecoration: "none",
+                fontWeight: 800,
+              }}
+            >
+              Política de Privacidade
+            </Link>
+          </div>
         </div>
         <div style={{ maxWidth: 360, lineHeight: 1.7 }}>
           {isLoading ? "Sincronizando a base para exibir ofertas reais na landing." : "Landing comercial conectada a ofertas reais da base quando disponiveis, com fallback elegante quando a colecao ainda nao entrega volume suficiente."}

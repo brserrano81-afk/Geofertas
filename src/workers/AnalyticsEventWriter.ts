@@ -16,6 +16,7 @@
 import {
     addDoc,
     collection,
+    deleteDoc,
     doc,
     getDoc,
     serverTimestamp,
@@ -275,6 +276,85 @@ class AnalyticsEventWriter {
             console.log(`[AnalyticsEventWriter] Agregado atualizado: ${userId.slice(0, 8)}… | purchases=${purchaseCount}`);
         } catch (err) {
             console.error('[AnalyticsEventWriter] Falha ao atualizar agregado (não crítico):', err);
+        }
+    }
+
+    async mergeAggregateDocuments(targetUserId: string, sourceUserIds: string[]): Promise<void> {
+        try {
+            const uniqueSourceIds = Array.from(new Set(sourceUserIds.filter((userId) => userId && userId !== targetUserId)));
+            if (!targetUserId || uniqueSourceIds.length === 0) {
+                return;
+            }
+
+            const targetRef = doc(db, 'user_aggregates', targetUserId);
+            const [targetSnap, ...sourceSnaps] = await Promise.all([
+                getDoc(targetRef),
+                ...uniqueSourceIds.map((userId) => getDoc(doc(db, 'user_aggregates', userId))),
+            ]);
+
+            const merged = sourceSnaps.reduce<Record<string, unknown>>((acc, snap) => {
+                if (!snap.exists()) {
+                    return acc;
+                }
+
+                const data = snap.data();
+                const mergeVotes = (current: Record<string, number>, incoming: Record<string, number>) => {
+                    for (const [key, value] of Object.entries(incoming || {})) {
+                        current[key] = (current[key] || 0) + Number(value || 0);
+                    }
+                    return current;
+                };
+
+                acc.purchaseCount = Number(acc.purchaseCount || 0) + Number(data.purchaseCount || 0);
+                acc.totalSpent = Number(acc.totalSpent || 0) + Number(data.totalSpent || 0);
+                acc.estimatedSavings = Number(acc.estimatedSavings || 0) + Number(data.estimatedSavings || 0);
+                acc._basketSizeTotal = Number(acc._basketSizeTotal || 0) + Number(data._basketSizeTotal || 0);
+                acc._basketSizeCount = Number(acc._basketSizeCount || 0) + Number(data._basketSizeCount || 0);
+                acc._categoryVotes = mergeVotes(
+                    (acc._categoryVotes || {}) as Record<string, number>,
+                    (data._categoryVotes || {}) as Record<string, number>,
+                );
+                acc._marketVotes = mergeVotes(
+                    (acc._marketVotes || {}) as Record<string, number>,
+                    (data._marketVotes || {}) as Record<string, number>,
+                );
+                acc.periodStart = String(acc.periodStart || data.periodStart || currentMonthBounds().periodStart);
+                acc.periodEnd = String(acc.periodEnd || data.periodEnd || currentMonthBounds().periodEnd);
+                return acc;
+            }, targetSnap.exists() ? { ...targetSnap.data() } : {});
+
+            const purchaseCount = Number(merged.purchaseCount || 0);
+            const totalSpent = Math.round(Number(merged.totalSpent || 0) * 100) / 100;
+            const basketSizeTotal = Number(merged._basketSizeTotal || 0);
+            const basketSizeCount = Number(merged._basketSizeCount || 0);
+            const averageTicket = purchaseCount > 0 ? Math.round((totalSpent / purchaseCount) * 100) / 100 : 0;
+            const basketAvgSize = basketSizeCount > 0 ? Math.round((basketSizeTotal / basketSizeCount) * 10) / 10 : 0;
+            const categoryVotes = (merged._categoryVotes || {}) as Record<string, number>;
+            const marketVotes = (merged._marketVotes || {}) as Record<string, number>;
+
+            await setDoc(targetRef, {
+                periodStart: merged.periodStart || currentMonthBounds().periodStart,
+                periodEnd: merged.periodEnd || currentMonthBounds().periodEnd,
+                purchaseCount,
+                totalSpent,
+                averageTicket,
+                topCategories: topN(categoryVotes),
+                topMarketIds: topN(marketVotes),
+                basketAvgSize,
+                estimatedSavings: Math.round(Number(merged.estimatedSavings || 0) * 100) / 100,
+                _categoryVotes: categoryVotes,
+                _marketVotes: marketVotes,
+                _basketSizeTotal: basketSizeTotal,
+                _basketSizeCount: basketSizeCount,
+                updatedAt: serverTimestamp(),
+            }, { merge: true });
+
+            await Promise.all(sourceSnaps.map(async (snap) => {
+                if (!snap.exists()) return;
+                await deleteDoc(snap.ref);
+            }));
+        } catch (err) {
+            console.error('[AnalyticsEventWriter] Falha ao unificar aggregates (não crítico):', err);
         }
     }
 }

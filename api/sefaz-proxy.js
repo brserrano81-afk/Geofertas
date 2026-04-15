@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { initializeApp, getApps } from 'firebase/app';
-import { addDoc, collection, getDocs, getFirestore, limit, query, serverTimestamp, where } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, getFirestore, limit, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
 
 dotenv.config();
 
@@ -70,6 +70,142 @@ function nowIso() {
     return new Date().toISOString();
 }
 
+function normalizeValue(value = '') {
+    return String(value || '').trim().toLowerCase();
+}
+
+function normalizeRemoteJid(remoteJid = '') {
+    const normalized = normalizeValue(remoteJid);
+    if (!normalized) return '';
+    if (normalized.includes('@')) return normalized;
+    return `${normalized}@s.whatsapp.net`;
+}
+
+function extractPhoneNumber(remoteJid = '') {
+    const digits = normalizeRemoteJid(remoteJid).split('@')[0].replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.length === 11 && !digits.startsWith('55')) {
+        return `55${digits}`;
+    }
+    return digits;
+}
+
+function normalizeBsuid(bsuid = '') {
+    return normalizeValue(bsuid).replace(/\s+/g, '');
+}
+
+function buildLegacyUserId(remoteJid = '') {
+    return normalizeRemoteJid(remoteJid);
+}
+
+function buildCanonicalUserId({ bsuid = '', phoneNumber = '', legacyUserId = '' }) {
+    if (bsuid) return `bsuid:${bsuid}`;
+    if (phoneNumber) return `wa:${phoneNumber}`;
+    return legacyUserId || 'default_user';
+}
+
+function aliasKey(kind, value) {
+    return `${kind}:${normalizeValue(value)}`;
+}
+
+function extractBsuidCandidate(payload = {}) {
+    const data = payload.data || {};
+    const key = data.key || {};
+    return normalizeBsuid(
+        payload.bsuid ||
+        payload.businessScopedUserId ||
+        data.bsuid ||
+        data.businessScopedUserId ||
+        data.senderLid ||
+        data.lid ||
+        key.senderLid ||
+        key.lid ||
+        '',
+    );
+}
+
+async function readAliasTarget(alias) {
+    if (!alias) return null;
+    const snap = await getDoc(doc(db, 'identity_aliases', alias));
+    return snap.exists() ? String(snap.data().canonicalUserId || '').trim() || null : null;
+}
+
+async function hasUserDocument(userId) {
+    if (!userId) return false;
+    const snap = await getDoc(doc(db, 'users', userId));
+    return snap.exists();
+}
+
+async function resolveCanonicalIdentity(normalizedEvent) {
+    const remoteJid = normalizeRemoteJid(normalizedEvent.remoteJid);
+    const legacyUserId = buildLegacyUserId(remoteJid);
+    const phoneNumber = extractPhoneNumber(remoteJid);
+    const bsuid = extractBsuidCandidate(normalizedEvent.raw || {});
+
+    const aliasCandidates = [
+        bsuid ? { key: aliasKey('bsuid', bsuid), source: 'bsuid_alias' } : null,
+        phoneNumber ? { key: aliasKey('phone', phoneNumber), source: 'phone_alias' } : null,
+        remoteJid ? { key: aliasKey('remoteJid', remoteJid), source: 'remote_jid_alias' } : null,
+    ].filter(Boolean);
+
+    let canonicalUserId = '';
+    let resolutionSource = bsuid ? 'bsuid_generated' : 'phone_generated';
+
+    for (const candidate of aliasCandidates) {
+        const target = await readAliasTarget(candidate.key);
+        if (target) {
+            canonicalUserId = target;
+            resolutionSource = candidate.source;
+            break;
+        }
+    }
+
+    if (!canonicalUserId) {
+        canonicalUserId = buildCanonicalUserId({ bsuid, phoneNumber, legacyUserId });
+    }
+
+    const canonicalUserExists = await hasUserDocument(canonicalUserId);
+    const legacyUserExists = legacyUserId && legacyUserId !== canonicalUserId
+        ? await hasUserDocument(legacyUserId)
+        : false;
+    const storageUserId = legacyUserExists && !canonicalUserExists
+        ? legacyUserId
+        : canonicalUserId;
+
+    const identity = {
+        canonicalUserId,
+        storageUserId,
+        legacyUserId: legacyUserId || canonicalUserId,
+        bsuid: bsuid || null,
+        phoneNumber: phoneNumber || null,
+        remoteJid: remoteJid || null,
+        channel: 'whatsapp',
+        resolutionSource,
+        requiresBackfill: Boolean(legacyUserExists && storageUserId !== canonicalUserId),
+        aliases: aliasCandidates.map((candidate) => candidate.key),
+    };
+
+    await setDoc(doc(db, 'canonical_identities', canonicalUserId), {
+        ...identity,
+        updatedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+    }, { merge: true });
+
+    await Promise.all(identity.aliases.map((alias) => setDoc(doc(db, 'identity_aliases', alias), {
+        canonicalUserId,
+        storageUserId,
+        legacyUserId: identity.legacyUserId,
+        bsuid: identity.bsuid,
+        remoteJid: identity.remoteJid,
+        phoneNumber: identity.phoneNumber,
+        channel: 'whatsapp',
+        updatedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+    }, { merge: true })));
+
+    return identity;
+}
+
 function ensureWebhookLogDir() {
     if (!fs.existsSync(WEBHOOK_LOG_DIR)) {
         fs.mkdirSync(WEBHOOK_LOG_DIR, { recursive: true });
@@ -94,7 +230,7 @@ function extractMessageText(payload = {}) {
 function normalizeEvolutionEvent(payload = {}, routeEvent = null) {
     const data = payload.data || {};
     const key = data.key || {};
-    const remoteJid = key.remoteJid || data.remoteJid || data.from || payload.sender || '';
+    const remoteJid = normalizeRemoteJid(key.remoteJid || data.remoteJid || data.from || payload.sender || '');
     const fromMe = Boolean(key.fromMe ?? data.fromMe);
     const event = routeEvent || payload.event || payload.type || 'unknown';
     const messageType = data.messageType || Object.keys(data.message || {})[0] || payload.type || 'unknown';
@@ -108,6 +244,9 @@ function normalizeEvolutionEvent(payload = {}, routeEvent = null) {
         instance: payload.instance || payload.instanceName || payload.apikey || null,
         remoteJid,
         userId: remoteJid,
+        storageUserId: remoteJid,
+        legacyUserId: remoteJid,
+        bsuid: extractBsuidCandidate(payload) || null,
         fromMe,
         direction: fromMe ? 'outbound' : 'inbound',
         messageType,
@@ -157,19 +296,38 @@ function validateNormalizedEvent(normalizedEvent) {
 }
 
 async function findExistingInboxMessage(normalizedEvent) {
-    if (!db || !normalizedEvent.messageId || !normalizedEvent.remoteJid) {
+    if (!db || !normalizedEvent.messageId) {
         return null;
     }
 
     const inboxRef = collection(db, 'message_inbox');
-    const existingQuery = query(
-        inboxRef,
-        where('messageId', '==', normalizedEvent.messageId),
-        where('remoteJid', '==', normalizedEvent.remoteJid),
-        limit(1),
-    );
-    const snap = await getDocs(existingQuery);
-    return snap.empty ? null : snap.docs[0];
+    if (normalizedEvent.userId) {
+        const canonicalQuery = query(
+            inboxRef,
+            where('messageId', '==', normalizedEvent.messageId),
+            where('userId', '==', normalizedEvent.userId),
+            limit(1),
+        );
+        const canonicalSnap = await getDocs(canonicalQuery);
+        if (!canonicalSnap.empty) {
+            return canonicalSnap.docs[0];
+        }
+    }
+
+    if (normalizedEvent.remoteJid) {
+        const legacyQuery = query(
+            inboxRef,
+            where('messageId', '==', normalizedEvent.messageId),
+            where('remoteJid', '==', normalizedEvent.remoteJid),
+            limit(1),
+        );
+        const legacySnap = await getDocs(legacyQuery);
+        if (!legacySnap.empty) {
+            return legacySnap.docs[0];
+        }
+    }
+
+    return null;
 }
 
 async function persistPipelineAudit(normalizedEvent, extra = {}) {
@@ -183,6 +341,9 @@ async function persistPipelineAudit(normalizedEvent, extra = {}) {
             instance: normalizedEvent.instance,
             remoteJid: normalizedEvent.remoteJid,
             userId: normalizedEvent.userId,
+            storageUserId: normalizedEvent.storageUserId || normalizedEvent.userId,
+            legacyUserId: normalizedEvent.legacyUserId || normalizedEvent.userId,
+            bsuid: normalizedEvent.bsuid || null,
             direction: normalizedEvent.direction,
             messageType: normalizedEvent.messageType,
             textPreview: normalizedEvent.textPreview,
@@ -219,6 +380,9 @@ async function enqueueInboundMessage(normalizedEvent) {
             event: normalizedEvent.event,
             instance: normalizedEvent.instance,
             userId: normalizedEvent.userId,
+            storageUserId: normalizedEvent.storageUserId || normalizedEvent.userId,
+            legacyUserId: normalizedEvent.legacyUserId || normalizedEvent.userId,
+            bsuid: normalizedEvent.bsuid || null,
             remoteJid: normalizedEvent.remoteJid,
             messageType: normalizedEvent.messageType,
             text: normalizedEvent.text || '',
@@ -261,6 +425,9 @@ async function persistEvolutionEvent(normalizedEvent, extra = {}) {
             instance: normalizedEvent.instance,
             remoteJid: normalizedEvent.remoteJid,
             userId: normalizedEvent.userId,
+            storageUserId: normalizedEvent.storageUserId || normalizedEvent.userId,
+            legacyUserId: normalizedEvent.legacyUserId || normalizedEvent.userId,
+            bsuid: normalizedEvent.bsuid || null,
             fromMe: normalizedEvent.fromMe,
             direction: normalizedEvent.direction,
             messageType: normalizedEvent.messageType,
@@ -345,6 +512,11 @@ app.get('/proxy', async (req, res) => {
 
 app.post('/webhook/whatsapp-entrada', async (req, res) => {
     const normalizedEvent = normalizeEvolutionEvent(req.body);
+    const identity = await resolveCanonicalIdentity(normalizedEvent);
+    normalizedEvent.userId = identity.canonicalUserId;
+    normalizedEvent.storageUserId = identity.storageUserId;
+    normalizedEvent.legacyUserId = identity.legacyUserId;
+    normalizedEvent.bsuid = identity.bsuid;
     const validation = validateNormalizedEvent(normalizedEvent);
 
     try {
@@ -420,6 +592,11 @@ app.post('/webhook/whatsapp-entrada', async (req, res) => {
 
 app.post('/webhook/whatsapp-entrada/:event', async (req, res) => {
     const normalizedEvent = normalizeEvolutionEvent(req.body, req.params.event);
+    const identity = await resolveCanonicalIdentity(normalizedEvent);
+    normalizedEvent.userId = identity.canonicalUserId;
+    normalizedEvent.storageUserId = identity.storageUserId;
+    normalizedEvent.legacyUserId = identity.legacyUserId;
+    normalizedEvent.bsuid = identity.bsuid;
     const validation = validateNormalizedEvent(normalizedEvent);
 
     try {

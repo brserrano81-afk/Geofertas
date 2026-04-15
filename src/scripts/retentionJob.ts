@@ -1,39 +1,21 @@
-// ─────────────────────────────────────────────────────────────
-// retentionJob.ts — Job de Retenção de Dados LGPD
-// Identifica usuários inativos há >12 meses e anonimiza.
-//
-// Execução: npx ts-node src/scripts/retentionJob.ts
-// Pode ser agendado como Cloud Function (cron mensal) ou
-// chamado manualmente pelo admin.
-//
-// LGPD — art. 16: "Os dados pessoais serão eliminados após
-// o término de seu tratamento."
-// ─────────────────────────────────────────────────────────────
-
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import * as path from 'path';
 import * as fs from 'fs';
 
-// ── Inicializar Firebase Admin ──────────────────────────────
 const serviceAccountPath = path.resolve(process.cwd(), 'service-account.json');
 if (!fs.existsSync(serviceAccountPath)) {
     console.error('[RetentionJob] ERRO: service-account.json não encontrado.');
-    console.error('[RetentionJob] Crie o arquivo em: ' + serviceAccountPath);
     process.exit(1);
 }
 
 initializeApp({ credential: cert(serviceAccountPath) });
 const db = getFirestore();
 
-// ── Configurações ───────────────────────────────────────────
-const RETENTION_DAYS = 365;          // 12 meses = padrão LGPD
+const RETENTION_DAYS = 365;
 const DRY_RUN = process.argv.includes('--dry-run');
 const BATCH_LIMIT = 400;
 
-console.log(`[RetentionJob] Iniciando... DryRun=${DRY_RUN} | Retenção=${RETENTION_DAYS} dias`);
-
-// ── Funções auxiliares ──────────────────────────────────────
 function generateAnonymousId(userId: string): string {
     let hash = 0;
     for (let i = 0; i < userId.length; i++) {
@@ -68,59 +50,22 @@ async function clearSubcollection(userId: string, subcollection: string): Promis
     return deleted;
 }
 
-// ── Job principal ────────────────────────────────────────────
-async function runRetentionJob(): Promise<void> {
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - RETENTION_DAYS);
+async function getCompatibleUserIds(canonicalDocId: string, canonicalData: FirebaseFirestore.DocumentData): Promise<string[]> {
+    const ids = new Set<string>([
+        canonicalDocId,
+        String(canonicalData.storageUserId || '').trim(),
+        String(canonicalData.legacyUserId || '').trim(),
+    ].filter(Boolean));
 
-    console.log(`[RetentionJob] Cutoff: ${cutoffDate.toISOString()} (${RETENTION_DAYS} dias)`);
+    return Array.from(ids);
+}
 
-    const usersRef = db.collection('users');
-    const snap = await usersRef.get();
+async function anonymizeCanonicalIdentity(canonicalDocId: string, canonicalData: FirebaseFirestore.DocumentData): Promise<void> {
+    const compatibleUserIds = await getCompatibleUserIds(canonicalDocId, canonicalData);
 
-    let processed = 0;
-    let anonymized = 0;
-    let skipped = 0;
-
-    for (const userDoc of snap.docs) {
-        processed++;
-        const data = userDoc.data();
-        const userId = userDoc.id;
-
-        // Pular usuários já anonimizados
-        if (data.anonymizedAt) {
-            skipped++;
-            continue;
-        }
-
-        // Pular usuários com consentimento personalizado de retenção maior
-        const userRetentionDays = Number(data.dataRetentionDays || RETENTION_DAYS);
-        const userCutoff = new Date();
-        userCutoff.setDate(userCutoff.getDate() - userRetentionDays);
-        const userCutoffTs = Timestamp.fromDate(userCutoff);
-
-        // Verificar última interação
-        const lastInteractionAt = data.lastInteractionAt as Timestamp | undefined;
-
-        if (!lastInteractionAt) {
-            // Sem interação registrada — verificar data de criação
-            const createdAt = data.createdAt as Timestamp | undefined;
-            if (!createdAt || createdAt.toMillis() > userCutoffTs.toMillis()) {
-                skipped++;
-                continue;
-            }
-        } else if (lastInteractionAt.toMillis() > userCutoffTs.toMillis()) {
-            // Usuário ativo dentro da janela de retenção
-            skipped++;
-            continue;
-        }
-
-        // Usuário elegível para anonimização
-        console.log(`[RetentionJob] Anonimizando: ${userId} (última interação: ${lastInteractionAt?.toDate().toISOString() ?? 'N/A'})`);
-
-        if (!DRY_RUN) {
-            // Anonimizar perfil raiz
-            await usersRef.doc(userId).set({
+    if (!DRY_RUN) {
+        for (const userId of compatibleUserIds) {
+            await db.collection('users').doc(userId).set({
                 name: null,
                 lastMessagePreview: null,
                 lastIntent: null,
@@ -135,29 +80,83 @@ async function runRetentionJob(): Promise<void> {
                 preferences: null,
                 anonymizedAt: Timestamp.now(),
                 retentionJobReason: 'inactivity_ttl',
-                anonymousAlias: generateAnonymousId(userId),
+                anonymousAlias: generateAnonymousId(canonicalDocId),
+                canonicalUserId: canonicalDocId,
+                storageUserId: canonicalDocId,
+                remoteJid: null,
+                bsuid: null,
             }, { merge: true });
 
-            // Limpar sub-coleções
             const deletedInteractions = await clearSubcollection(userId, 'interactions');
             const deletedPurchases = await clearSubcollection(userId, 'purchases');
             const deletedLists = await clearSubcollection(userId, 'lists');
+            await db.collection('user_aggregates').doc(userId).delete().catch(() => undefined);
 
             console.log(`[RetentionJob] ✅ ${userId} anonimizado | interactions:${deletedInteractions} purchases:${deletedPurchases} lists:${deletedLists}`);
-        } else {
-            console.log(`[RetentionJob] [DRY_RUN] Seria anonimizado: ${userId}`);
         }
 
+        const aliasSnap = await db.collection('identity_aliases')
+            .where('canonicalUserId', '==', canonicalDocId)
+            .get();
+        for (const aliasDoc of aliasSnap.docs) {
+            await aliasDoc.ref.delete();
+        }
+        await db.collection('canonical_identities').doc(canonicalDocId).delete();
+    } else {
+        console.log(`[RetentionJob] [DRY_RUN] Seria anonimizado: ${canonicalDocId} -> ${compatibleUserIds.join(', ')}`);
+    }
+}
+
+async function runRetentionJob(): Promise<void> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - RETENTION_DAYS);
+    console.log(`[RetentionJob] Cutoff: ${cutoffDate.toISOString()} (${RETENTION_DAYS} dias)`);
+
+    const canonicalSnap = await db.collection('canonical_identities').get();
+    let processed = 0;
+    let anonymized = 0;
+    let skipped = 0;
+
+    for (const canonicalDoc of canonicalSnap.docs) {
+        processed++;
+        const data = canonicalDoc.data();
+        const canonicalUserId = canonicalDoc.id;
+
+        const userRef = db.collection('users').doc(canonicalUserId);
+        const userSnap = await userRef.get();
+        const userData = userSnap.exists ? userSnap.data() || {} : {};
+
+        if (userData.anonymizedAt) {
+            skipped++;
+            continue;
+        }
+
+        const userRetentionDays = Number(userData.dataRetentionDays || RETENTION_DAYS);
+        const userCutoff = new Date();
+        userCutoff.setDate(userCutoff.getDate() - userRetentionDays);
+        const userCutoffTs = Timestamp.fromDate(userCutoff);
+        const lastInteractionAt = userData.lastInteractionAt as Timestamp | undefined;
+
+        if (!lastInteractionAt) {
+            const createdAt = userData.createdAt as Timestamp | undefined;
+            if (!createdAt || createdAt.toMillis() > userCutoffTs.toMillis()) {
+                skipped++;
+                continue;
+            }
+        } else if (lastInteractionAt.toMillis() > userCutoffTs.toMillis()) {
+            skipped++;
+            continue;
+        }
+
+        console.log(`[RetentionJob] Anonimizando: ${canonicalUserId}`);
+        await anonymizeCanonicalIdentity(canonicalUserId, data);
         anonymized++;
     }
 
-    console.log(`\n[RetentionJob] ─────────────────────────────────────`);
     console.log(`[RetentionJob] Total processados : ${processed}`);
     console.log(`[RetentionJob] Anonimizados      : ${anonymized}`);
     console.log(`[RetentionJob] Ignorados (ativos): ${skipped}`);
     console.log(`[RetentionJob] DryRun            : ${DRY_RUN}`);
-    console.log(`[RetentionJob] ─────────────────────────────────────`);
-    console.log(`[RetentionJob] Concluído!`);
 }
 
 runRetentionJob().catch((err) => {

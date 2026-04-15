@@ -1,10 +1,6 @@
-// ─────────────────────────────────────────────────────────────
-// UserDataDeletionService — Exclusão e Anonimização LGPD
-// Lei 13.709/2018 — art. 18, IV (direito de exclusão)
-// ─────────────────────────────────────────────────────────────
-
 import {
     collection,
+    deleteDoc,
     doc,
     getDoc,
     getDocs,
@@ -13,8 +9,8 @@ import {
     writeBatch,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { identityResolutionService } from './IdentityResolutionService';
 
-/** Gera pseudônimo anônimo determinístico baseado no userId */
 function generateAnonymousId(userId: string): string {
     let hash = 0;
     for (let i = 0; i < userId.length; i++) {
@@ -25,57 +21,42 @@ function generateAnonymousId(userId: string): string {
 }
 
 class UserDataDeletionService {
-    /**
-     * Anonimiza completamente o perfil do usuário.
-     *
-     * O que é preservado (sem PII):
-     *   - userId (necessário para integridade referencial)
-     *   - channel, interactionCount (estatísticas anonimizadas)
-     *   - anonymizedAt (registro de conformidade LGPD)
-     *
-     * O que é removido:
-     *   - name, lastMessagePreview, lastIntent
-     *   - userLocation (lat, lng, address, neighborhood)
-     *   - transportMode, consumption, busTicket
-     *   - preferences aninhadas
-     *   - locationDeclaredAt, locationSource
-     *   - interactions, purchases, lists (sub-coleções)
-     */
     async anonymizeUser(userId: string): Promise<{ success: boolean; message: string }> {
         try {
-            console.log(`[UserDataDeletionService] Iniciando anonimização para ${userId}`);
+            const identity = await identityResolutionService.getIdentitySnapshot(userId);
+            const compatibleUserIds = await identityResolutionService.getCompatibleUserIds(userId);
 
-            // 1. Anonimizar perfil raiz — apagar todos os campos PII
-            const userRef = doc(db, 'users', userId);
-            await setDoc(userRef, {
-                name: null,
-                lastMessagePreview: null,
-                lastIntent: null,
-                neighborhood: null,
-                transportMode: null,
-                consumption: null,
-                busTicket: null,
-                optimizationPreference: null,
-                locationDeclaredAt: null,
-                locationSource: null,
-                userLocation: null,
-                preferences: null,
-                // Registro de conformidade LGPD
-                anonymizedAt: serverTimestamp(),
-                deletionRequestedAt: serverTimestamp(),
-                anonymousAlias: generateAnonymousId(userId),
-            }, { merge: true });
+            for (const targetUserId of compatibleUserIds) {
+                await setDoc(doc(db, 'users', targetUserId), {
+                    name: null,
+                    lastMessagePreview: null,
+                    lastIntent: null,
+                    neighborhood: null,
+                    transportMode: null,
+                    consumption: null,
+                    busTicket: null,
+                    optimizationPreference: null,
+                    locationDeclaredAt: null,
+                    locationSource: null,
+                    userLocation: null,
+                    preferences: null,
+                    anonymizedAt: serverTimestamp(),
+                    deletionRequestedAt: serverTimestamp(),
+                    anonymousAlias: generateAnonymousId(identity.canonicalUserId),
+                    canonicalUserId: identity.canonicalUserId,
+                    storageUserId: identity.canonicalUserId,
+                    legacyUserId: identity.legacyUserId,
+                    remoteJid: null,
+                    bsuid: null,
+                }, { merge: true });
 
-            // 2. Limpar sub-coleção de interações (conversas)
-            await this.clearSubcollection(userId, 'interactions');
+                await this.clearSubcollection(targetUserId, 'interactions');
+                await this.clearSubcollection(targetUserId, 'purchases');
+                await this.clearSubcollection(targetUserId, 'lists');
+                await deleteDoc(doc(db, 'user_aggregates', targetUserId));
+            }
 
-            // 3. Limpar sub-coleção de compras pessoais
-            await this.clearSubcollection(userId, 'purchases');
-
-            // 4. Limpar sub-coleção de listas
-            await this.clearSubcollection(userId, 'lists');
-
-            console.log(`[UserDataDeletionService] ✅ Anonimização concluída para ${userId}`);
+            await this.clearIdentityArtifacts(identity);
 
             return {
                 success: true,
@@ -101,76 +82,65 @@ class UserDataDeletionService {
         }
     }
 
-    /**
-     * Remove apenas a localização do usuário — chamado por TTL expirado.
-     */
     async clearLocation(userId: string): Promise<void> {
         try {
-            const userRef = doc(db, 'users', userId);
-            await setDoc(userRef, {
+            const compatibleUserIds = await identityResolutionService.getCompatibleUserIds(userId);
+            await Promise.all(compatibleUserIds.map((targetUserId) => setDoc(doc(db, 'users', targetUserId), {
                 userLocation: null,
                 locationDeclaredAt: null,
                 locationSource: null,
-            }, { merge: true });
-            console.log(`[UserDataDeletionService] Localização de ${userId} removida (TTL expirado)`);
+            }, { merge: true })));
         } catch (err) {
             console.error('[UserDataDeletionService] Erro ao limpar localização:', err);
         }
     }
 
-    /**
-     * Verifica se o usuário já solicitou exclusão anteriormente.
-     */
     async isDeletionRequested(userId: string): Promise<boolean> {
         try {
-            const userRef = doc(db, 'users', userId);
-            const snap = await getDoc(userRef);
-            if (!snap.exists()) return false;
-            return Boolean(snap.data().deletionRequestedAt);
+            const compatibleUserIds = await identityResolutionService.getCompatibleUserIds(userId);
+            for (const targetUserId of compatibleUserIds) {
+                const snap = await getDoc(doc(db, 'users', targetUserId));
+                if (snap.exists() && snap.data().deletionRequestedAt) {
+                    return true;
+                }
+            }
+            return false;
         } catch {
             return false;
         }
     }
 
-    /**
-     * Remove todos os documentos de uma sub-coleção em batches seguros (≤400 por vez).
-     */
+    private async clearIdentityArtifacts(identity: Awaited<ReturnType<typeof identityResolutionService.getIdentitySnapshot>>): Promise<void> {
+        const deletions = [
+            deleteDoc(doc(db, 'canonical_identities', identity.canonicalUserId)),
+            ...identity.aliases.map((alias) => deleteDoc(doc(db, 'identity_aliases', alias))),
+        ];
+        await Promise.all(deletions);
+    }
+
     private async clearSubcollection(userId: string, subcollection: string): Promise<void> {
-        try {
-            const colRef = collection(db, 'users', userId, subcollection);
-            const snap = await getDocs(colRef);
+        const colRef = collection(db, 'users', userId, subcollection);
+        const snap = await getDocs(colRef);
 
-            if (snap.empty) return;
+        if (snap.empty) return;
 
-            const batchSize = 400; // Firestore permite até 500 — margem de segurança
-            let batch = writeBatch(db);
-            let opCount = 0;
+        const batchSize = 400;
+        let batch = writeBatch(db);
+        let opCount = 0;
 
-            for (const docSnap of snap.docs) {
-                batch.delete(docSnap.ref);
-                opCount++;
+        for (const docSnap of snap.docs) {
+            batch.delete(docSnap.ref);
+            opCount++;
 
-                if (opCount >= batchSize) {
-                    await batch.commit();
-                    batch = writeBatch(db);
-                    opCount = 0;
-                }
-            }
-
-            if (opCount > 0) {
+            if (opCount >= batchSize) {
                 await batch.commit();
+                batch = writeBatch(db);
+                opCount = 0;
             }
+        }
 
-            console.log(
-                `[UserDataDeletionService] Sub-coleção "${subcollection}" de ${userId} ` +
-                `removida (${snap.docs.length} documentos)`,
-            );
-        } catch (err) {
-            console.error(
-                `[UserDataDeletionService] Erro ao limpar sub-coleção "${subcollection}" de ${userId}:`,
-                err,
-            );
-            throw err;
+        if (opCount > 0) {
+            await batch.commit();
         }
     }
 }

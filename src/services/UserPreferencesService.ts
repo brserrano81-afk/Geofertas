@@ -1,6 +1,7 @@
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { lgpdConsentService } from './LgpdConsentService';
+import { identityResolutionService } from './IdentityResolutionService';
 
 export interface UserPreferences {
     name?: string;
@@ -14,32 +15,36 @@ export interface UserPreferences {
         lng: number;
         address?: string;
     };
-    // LGPD — campos de controle de localização
-    locationDeclaredAt?: unknown;           // Timestamp — quando a localização foi salva
-    locationSource?: 'user_declared' | 'gps_auto'; // origem: nunca inferida
+    locationDeclaredAt?: unknown;
+    locationSource?: 'user_declared' | 'gps_auto';
 }
 
 class UserPreferencesService {
     async getPreferences(userId: string): Promise<UserPreferences> {
         try {
-            const userRef = doc(db, 'users', userId);
-            const snap = await getDoc(userRef);
-            if (!snap.exists()) {
-                return {};
+            const compatibleUserIds = await identityResolutionService.getCompatibleUserIds(userId);
+
+            for (const targetUserId of compatibleUserIds) {
+                const snap = await getDoc(doc(db, 'users', targetUserId));
+                if (!snap.exists()) {
+                    continue;
+                }
+
+                const data = snap.data() as Record<string, unknown>;
+                const nestedPreferences = (data.preferences || {}) as Record<string, unknown>;
+
+                return {
+                    name: String(data.name || nestedPreferences.name || '').trim() || undefined,
+                    transportMode: String(data.transportMode || nestedPreferences.transportMode || '').trim() || undefined,
+                    consumption: Number(data.consumption || nestedPreferences.consumption || 0) || undefined,
+                    busTicket: Number(data.busTicket || nestedPreferences.busTicket || 0) || undefined,
+                    optimizationPreference: (data.optimizationPreference || nestedPreferences.optimizationPreference || undefined) as UserPreferences['optimizationPreference'],
+                    neighborhood: String(data.neighborhood || nestedPreferences.neighborhood || '').trim() || undefined,
+                    userLocation: this.parseUserLocation(data.userLocation || nestedPreferences.userLocation),
+                };
             }
 
-            const data = snap.data() as Record<string, unknown>;
-            const nestedPreferences = (data.preferences || {}) as Record<string, unknown>;
-
-            return {
-                name: String(data.name || nestedPreferences.name || '').trim() || undefined,
-                transportMode: String(data.transportMode || nestedPreferences.transportMode || '').trim() || undefined,
-                consumption: Number(data.consumption || nestedPreferences.consumption || 0) || undefined,
-                busTicket: Number(data.busTicket || nestedPreferences.busTicket || 0) || undefined,
-                optimizationPreference: (data.optimizationPreference || nestedPreferences.optimizationPreference || undefined) as UserPreferences['optimizationPreference'],
-                neighborhood: String(data.neighborhood || nestedPreferences.neighborhood || '').trim() || undefined,
-                userLocation: this.parseUserLocation(data.userLocation || nestedPreferences.userLocation),
-            };
+            return {};
         } catch (err) {
             console.error('[UserPreferencesService] Error loading preferences:', err);
             return {};
@@ -47,7 +52,7 @@ class UserPreferencesService {
     }
 
     async savePreferences(userId: string, partial: UserPreferences): Promise<void> {
-        const userRef = doc(db, 'users', userId);
+        const identity = await identityResolutionService.getIdentitySnapshot(userId);
         const payload = Object.fromEntries(
             Object.entries(partial).filter(([, value]) => value !== undefined),
         );
@@ -56,18 +61,27 @@ class UserPreferencesService {
             return;
         }
 
-        // LGPD — sempre que userLocation for atualizado, registrar origem e timestamp
         if (partial.userLocation) {
             const source = partial.locationSource ?? 'user_declared';
-            await lgpdConsentService.recordLocationDeclaration(userId, source);
+            await lgpdConsentService.recordLocationDeclaration(identity.canonicalUserId, source);
         }
 
-        await setDoc(userRef, {
-            userId,
+        const writeUserIds = Array.from(new Set([
+            identity.canonicalUserId,
+            identity.storageUserId,
+        ].filter(Boolean)));
+
+        await Promise.all(writeUserIds.map((targetUserId) => setDoc(doc(db, 'users', targetUserId), {
+            userId: identity.canonicalUserId,
+            canonicalUserId: identity.canonicalUserId,
+            legacyUserId: identity.legacyUserId,
+            storageUserId: identity.storageUserId,
+            bsuid: identity.bsuid || null,
+            remoteJid: identity.remoteJid || null,
             ...payload,
             preferences: payload,
             updatedAt: serverTimestamp(),
-        }, { merge: true });
+        }, { merge: true })));
     }
 
     private parseUserLocation(value: unknown): UserPreferences['userLocation'] {

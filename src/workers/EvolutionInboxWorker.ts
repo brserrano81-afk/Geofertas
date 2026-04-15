@@ -22,6 +22,9 @@ interface InboxMessage {
     correlationId?: string;
     messageId?: string | null;
     userId: string;
+    storageUserId?: string;
+    legacyUserId?: string;
+    bsuid?: string | null;
     remoteJid: string;
     messageType?: string;
     text?: string;
@@ -41,6 +44,9 @@ interface OutboxMessage {
     sourceMessageId?: string | null;
     inboxId: string;
     userId: string;
+    storageUserId?: string;
+    legacyUserId?: string;
+    bsuid?: string | null;
     remoteJid: string;
     text: string;
     sendStatus?: 'pending_send' | 'retrying' | 'sent' | 'send_failed';
@@ -288,6 +294,9 @@ async function persistOutboxMessage(inboxId: string, payload: {
     correlationId?: string;
     sourceMessageId?: string | null;
     userId: string;
+    storageUserId?: string;
+    legacyUserId?: string;
+    bsuid?: string | null;
     remoteJid: string;
     text: string;
     sendStatus: 'pending_send' | 'retrying' | 'sent' | 'send_failed';
@@ -304,6 +313,9 @@ async function persistOutboxMessage(inboxId: string, payload: {
         correlationId: payload.correlationId || inboxId,
         sourceMessageId: payload.sourceMessageId || null,
         userId: payload.userId,
+        storageUserId: payload.storageUserId || payload.userId,
+        legacyUserId: payload.legacyUserId || payload.userId,
+        bsuid: payload.bsuid || null,
         remoteJid: payload.remoteJid,
         text: payload.text,
         sendStatus: payload.sendStatus,
@@ -477,7 +489,11 @@ async function sendTextViaEvolution(remoteJid: string, text: string) {
 async function buildResponse(message: InboxMessage): Promise<ResponseBuildResult> {
     if (message.messageType === 'imageMessage' && message.mediaBase64) {
         const buffer = Buffer.from(message.mediaBase64, 'base64');
-        const response = await chatService.processImage(new Uint8Array(buffer), message.userId);
+        const response = await chatService.processImage(
+            new Uint8Array(buffer),
+            message.userId,
+            message.storageUserId || message.userId,
+        );
         console.log(`[INTENT_RESOLVED] user=${message.userId} channel=whatsapp source=imageMessage`);
         return {
             text: response.text,
@@ -524,7 +540,7 @@ async function buildResponse(message: InboxMessage): Promise<ResponseBuildResult
         }
     }
 
-    const response = await chatService.processMessage(text, message.userId);
+    const response = await chatService.processMessage(text, message.userId, message.storageUserId || message.userId);
     if (!String(response.text || '').trim()) {
         console.warn(`[FALLBACK_TRIGGERED] user=${message.userId} reason=empty_chat_response`);
         return {
@@ -586,6 +602,9 @@ async function scheduleOutboxRetry(params: {
     correlationId: string;
     sourceMessageId?: string | null;
     userId: string;
+    storageUserId?: string;
+    legacyUserId?: string;
+    bsuid?: string | null;
     remoteJid: string;
     text: string;
     errorMessage: string;
@@ -609,6 +628,9 @@ async function scheduleOutboxRetry(params: {
         correlationId: params.correlationId,
         sourceMessageId: params.sourceMessageId || null,
         userId: params.userId,
+        storageUserId: params.storageUserId || params.userId,
+        legacyUserId: params.legacyUserId || params.userId,
+        bsuid: params.bsuid || null,
         remoteJid: params.remoteJid,
         text: params.text,
         sendStatus: 'retrying',
@@ -675,6 +697,9 @@ async function processInboxItem(item: { id: string; data: InboxMessage }) {
                 correlationId,
                 sourceMessageId,
                 userId: data.userId,
+                storageUserId: data.storageUserId || data.userId,
+                legacyUserId: data.legacyUserId || data.userId,
+                bsuid: data.bsuid || null,
                 remoteJid: data.remoteJid,
                 text: responseText,
                 sendStatus: sendResult.status,
@@ -722,6 +747,9 @@ async function processInboxItem(item: { id: string; data: InboxMessage }) {
                 correlationId,
                 sourceMessageId,
                 userId: data.userId,
+                storageUserId: data.storageUserId || data.userId,
+                legacyUserId: data.legacyUserId || data.userId,
+                bsuid: data.bsuid || null,
                 remoteJid: data.remoteJid,
                 text: responseText,
                 errorMessage,

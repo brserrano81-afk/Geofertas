@@ -72,7 +72,7 @@ class AnalyticsService {
      * Limita o custo de leitura no Firestore para o MVP.
      */
     async loadSummary(): Promise<AnalyticsSummary> {
-        const [eventsSnap, aggregatesSnap] = await Promise.all([
+        const [eventsSnap, aggregatesSnap, identitiesSnap] = await Promise.all([
             getDocs(
                 query(
                     collection(db, 'analytics_events'),
@@ -81,6 +81,7 @@ class AnalyticsService {
                 ),
             ),
             getDocs(collection(db, 'user_aggregates')),
+            getDocs(collection(db, 'canonical_identities')),
         ]);
 
         // ── Agregação de analytics_events ────────────────────────────────────
@@ -121,26 +122,62 @@ class AnalyticsService {
         });
 
         // ── Agregação de user_aggregates ──────────────────────────────────────
+        const aliasToCanonical = new Map<string, string>();
+        identitiesSnap.forEach((docSnap) => {
+            const data = docSnap.data();
+            const canonicalId = docSnap.id;
+            aliasToCanonical.set(canonicalId, canonicalId);
+            if (data.storageUserId) aliasToCanonical.set(String(data.storageUserId), canonicalId);
+            if (data.legacyUserId) aliasToCanonical.set(String(data.legacyUserId), canonicalId);
+        });
+
+        const aggregateByCanonical = new Map<string, {
+            averageTicketSum: number;
+            basketAvgSum: number;
+            savingsSum: number;
+            purchaseCount: number;
+            samples: number;
+        }>();
+
+        aggregatesSnap.forEach((docSnap) => {
+            const d = docSnap.data();
+            const canonicalId = aliasToCanonical.get(docSnap.id) || docSnap.id;
+            const current = aggregateByCanonical.get(canonicalId) || {
+                averageTicketSum: 0,
+                basketAvgSum: 0,
+                savingsSum: 0,
+                purchaseCount: 0,
+                samples: 0,
+            };
+            const purchases = Number(d.purchaseCount || 0);
+            if (purchases <= 0) {
+                aggregateByCanonical.set(canonicalId, current);
+                return;
+            }
+
+            current.averageTicketSum += Number(d.averageTicket || 0);
+            current.basketAvgSum += Number(d.basketAvgSize || 0);
+            current.savingsSum += Number(d.estimatedSavings || 0);
+            current.purchaseCount += purchases;
+            current.samples += 1;
+            aggregateByCanonical.set(canonicalId, current);
+        });
+
         let totalTicket = 0;
         let totalBasket = 0;
         let totalSavings = 0;
         let totalPurchases = 0;
         let usersWithData = 0;
 
-        aggregatesSnap.forEach((docSnap) => {
-            const d = docSnap.data();
-            const avgTicket = Number(d.averageTicket || 0);
-            const basketAvg = Number(d.basketAvgSize || 0);
-            const savings = Number(d.estimatedSavings || 0);
-            const purchases = Number(d.purchaseCount || 0);
-
-            if (purchases > 0) {
-                totalTicket += avgTicket;
-                totalBasket += basketAvg;
-                totalSavings += savings;
-                totalPurchases += purchases;
-                usersWithData++;
+        aggregateByCanonical.forEach((entry) => {
+            if (entry.purchaseCount <= 0 || entry.samples <= 0) {
+                return;
             }
+            totalTicket += entry.averageTicketSum / entry.samples;
+            totalBasket += entry.basketAvgSum / entry.samples;
+            totalSavings += entry.savingsSum;
+            totalPurchases += entry.purchaseCount;
+            usersWithData++;
         });
 
         const avgTicket = usersWithData > 0
@@ -164,7 +201,7 @@ class AnalyticsService {
 
         return {
             eventCount: eventsSnap.size,
-            userCount: aggregatesSnap.size,
+            userCount: aggregateByCanonical.size,
             topCategories: topN(purchaseCategoryCount, 8, labelCategory),
             topPriceQueryCategories: topN(priceQueryCategoryCount, 8, labelCategory),
             topMarkets: topN(marketCount, 8, labelMarket),

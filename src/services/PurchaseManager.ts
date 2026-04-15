@@ -13,9 +13,11 @@ function formatCurrency(value: number): string {
 
 class PurchaseManager {
     private readonly userId: string;
+    private readonly aggregateUserId: string;
 
-    constructor(userId: string) {
+    constructor(userId: string, aggregateUserId: string = userId) {
         this.userId = userId;
+        this.aggregateUserId = aggregateUserId;
     }
 
     formatReceiptConference(
@@ -76,7 +78,7 @@ class PurchaseManager {
             totalAmount,
         }).catch(() => { /* já logado internamente */ });
 
-        analyticsEventWriter.updateUserAggregate(this.userId, {
+        analyticsEventWriter.updateUserAggregate(this.aggregateUserId, {
             purchaseAmount: totalAmount,
             basketSize: safeItems.length,
             categorySlug,

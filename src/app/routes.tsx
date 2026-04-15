@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./Layout";
 
 import Home from "../pages/Home";
+import Privacidade from "../pages/Privacidade";
 import Analises from "../pages/Analises";
 import AdminHome from "../pages/admin/AdminHome";
 import AdminOffers from "../pages/admin/AdminOffers";
@@ -17,6 +18,7 @@ export default function AppRoutes() {
     <Routes>
       <Route element={<Layout />}>
         <Route path="/" element={<Home />} />
+        <Route path="/privacidade" element={<Privacidade />} />
         <Route path="/admin/login" element={<AdminLogin />} />
         <Route element={<AdminRouteGuard />}>
           <Route path="/admin" element={<Navigate to="/admin/home" replace />} />
