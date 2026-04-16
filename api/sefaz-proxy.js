@@ -737,7 +737,7 @@ async function processAudioMessage(normalizedEvent) {
     try {
         console.log('[AudioProcessor] Chamando Gemini 1.5 Flash...');
         const geminiResp = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },

@@ -627,7 +627,7 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
     try {
         console.log(`[AudioProcessor] user=${message.userId} — Chamando Gemini 1.5 Flash...`);
         const geminiResp = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
             { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(geminiPayload) },
         );
         if (!geminiResp.ok) {
