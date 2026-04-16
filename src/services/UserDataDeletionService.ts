@@ -33,7 +33,7 @@ class UserDataDeletionService {
             const identity = await identityResolutionService.getIdentitySnapshot(userId);
             const compatibleUserIds = await identityResolutionService.getCompatibleUserIds(userId);
 
-            const anonymizePayload = (targetUserId: string) => ({
+            const anonymizePayload = () => ({
                 name: null,
                 lastMessagePreview: null,
                 lastIntent: null,
@@ -58,10 +58,10 @@ class UserDataDeletionService {
 
             for (const targetUserId of compatibleUserIds) {
                 if (isServer) {
-                    await db.collection('users').doc(targetUserId).set(anonymizePayload(targetUserId), { merge: true });
+                    await db.collection('users').doc(targetUserId).set(anonymizePayload(), { merge: true });
                     await db.collection('user_aggregates').doc(targetUserId).delete();
                 } else {
-                    await setDoc(doc(db, 'users', targetUserId), anonymizePayload(targetUserId), { merge: true });
+                    await setDoc(doc(db, 'users', targetUserId), anonymizePayload(), { merge: true });
                     await deleteDoc(doc(db, 'user_aggregates', targetUserId));
                 }
 

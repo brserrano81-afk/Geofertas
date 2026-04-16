@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { 
-  Store, 
   Plus, 
   Search, 
   MapPin, 
   Edit2, 
   Power, 
-  X,
-  Buildings
+  X
 } from "lucide-react";
 
 import {

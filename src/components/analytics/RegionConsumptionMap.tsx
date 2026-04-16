@@ -8,7 +8,6 @@ interface Props {
 export default function RegionConsumptionMap({ data }: Props) {
     return (
         <HorizontalBarChart
-            title=""
             data={data}
             emptyMessage="Nenhuma região identificada ainda."
         />

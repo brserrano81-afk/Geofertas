@@ -8,7 +8,6 @@ interface Props {
 export default function TopProductsChart({ data }: Props) {
     return (
         <HorizontalBarChart
-            title=""
             data={data}
             emptyMessage="Nenhum produto consultado ainda."
         />

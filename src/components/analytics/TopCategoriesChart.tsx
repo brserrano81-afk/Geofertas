@@ -8,7 +8,6 @@ interface Props {
 export default function TopCategoriesChart({ data }: Props) {
     return (
         <HorizontalBarChart
-            title=""
             data={data}
             emptyMessage="Nenhuma categoria registrada ainda."
         />

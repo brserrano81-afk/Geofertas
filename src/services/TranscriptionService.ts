@@ -25,7 +25,7 @@ class TranscriptionService {
 
         const formData = new FormData();
         // WhatsApp envia áudio em formato OGG/OPUS
-        formData.append('file', new Blob([buffer], { type: 'audio/ogg' }), 'audio.ogg');
+        formData.append('file', new Blob([buffer as any], { type: 'audio/ogg' }), 'audio.ogg');
         formData.append('model', 'whisper-1');
         formData.append('language', 'pt');
 

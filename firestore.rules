@@ -1,46 +1,39 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // ---------------------------------------------------------
+    // ARQUITETURA "COFRE" - Geofertas
+    // ---------------------------------------------------------
     
-    // Auxiliar: Verifica se é um administrador logado
-    // Um admin é definido pelo email da organização ou claim personalizada 'admin'
-    function isAdmin() {
-      return request.auth != null && (
-        request.auth.token.admin == true || 
-        request.auth.token.email.matches('.*@economizafacil\\.ia\\.br$')
-      );
-    }
-
-    // --- Dados Públicos de Catálogo (Landing Page + Web App) ---
-    // Acesso de leitura aberto para o público. Escrita restrita apenas a Admins.
-    match /offers/{id}      { allow read: if true; allow write: if isAdmin(); }
-    match /markets/{id}     { allow read: if true; allow write: if isAdmin(); }
-    match /categories/{id}  { allow read: if true; allow write: if isAdmin(); }
-    match /networks/{id}    { allow read: if true; allow write: if isAdmin(); }
-
-    // --- Dados de Usuário (WhatsApp First) ---
-    // Estratégia "Cofre": Clientes não logam via Web, apenas usam o robô.
-    // Bloqueamos acesso via Client SDK. O Admin SDK (Backend) continuará funcionando normalmente.
-    match /users/{userId} {
-      allow read, write: if isAdmin();
-      
-      match /{allSubcollections=**} {
-        allow read, write: if isAdmin();
-      }
-    }
-
-    // --- Pipeline Operacional e Integração ---
-    // Bloqueio total no client-side. Exclusivo para Backend/Admin SDK.
-    match /message_inbox/{id}      { allow read, write: if false; }
-    match /message_outbox/{id}     { allow read, write: if false; }
-    match /integration_events/{id} { allow read, write: if false; }
-    
-    // --- Fila de Moderação e Auditoria ---
-    match /offer_queue/{id}        { allow read, write: if isAdmin(); }
-    match /campaigns/{id}          { allow read, write: if isAdmin(); }
-
-    // --- Fallback de Segurança: Negar tudo que não foi explicitamente permitido ---
+    // Bloqueio Global (Default Deny)
     match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Acesso Administrativo (Temporário para MVP)
+    // TODO: Migrar para Firebase Auth + Custom Claims para segurança real.
+    // Atualmente permite acesso pelo painel administrativo para as coleções operacionais.
+    match /markets/{market} {
+      allow read, write: if true; 
+    }
+    match /offers/{offer} {
+      allow read, write: if true;
+    }
+    match /campaigns/{campaign} {
+      allow read, write: if true;
+    }
+    match /offer_queue/{item} {
+      allow read, write: if true;
+    }
+    
+    // Coleções de Usuários - Blindagem Total (Apenas via Backend)
+    match /users/{user} {
+      allow read, write: if false;
+    }
+    match /user_interactions/{interaction} {
+      allow read, write: if false;
+    }
+    match /user_lists/{list} {
       allow read, write: if false;
     }
   }

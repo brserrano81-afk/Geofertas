@@ -8,7 +8,6 @@ import {
   Edit2, 
   Power, 
   X,
-  Bell,
   MapPin
 } from "lucide-react";
 

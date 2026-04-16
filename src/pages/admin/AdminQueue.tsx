@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
 import { 
   CheckCircle, 
-  XCircle, 
   Clock, 
   Image as ImageIcon, 
-  User, 
   MapPin, 
   Edit3,
   Search,

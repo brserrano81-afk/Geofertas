@@ -3,7 +3,6 @@ import type { RankedItem } from '../../services/admin/AnalyticsService';
 import { adminColors } from '../../pages/admin/adminStyles';
 
 interface Props {
-    title: string;
     badge?: string;
     data: RankedItem[];
     color?: string;
@@ -11,7 +10,6 @@ interface Props {
 }
 
 export default function HorizontalBarChart({
-    title,
     badge,
     data,
     color = adminColors.primary,

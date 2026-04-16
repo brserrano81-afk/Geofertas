@@ -1,15 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { 
-  Tag, 
   Plus, 
   Search, 
-  Filter, 
   Edit2, 
   Power, 
   X, 
-  Calendar,
-  DollarSign,
+  Clock,
   ShoppingCart,
   Star
 } from "lucide-react";
