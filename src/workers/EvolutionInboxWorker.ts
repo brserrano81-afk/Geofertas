@@ -480,14 +480,6 @@ async function sendTextViaEvolution(remoteJid: string, text: string) {
     );
 }
 
-/**
- * Chama o endpoint /message/downloadMedia/{instance} da Evolution API para
- * baixar e descriptografar a mídia. A Evolution cuida da descriptografia com
- * a mediaKey — o fetch direto na mmg.whatsapp.net retornaria o arquivo .enc
- * inutilizável.
- *
- * Retorna { base64, mimeType } ou null em caso de falha.
- */
 async function downloadAudioViaEvolution(
     rawMessageJson: string,
     userId: string,
@@ -495,61 +487,83 @@ async function downloadAudioViaEvolution(
     const instance = getEvolutionInstance();
     const baseUrl = process.env.EVOLUTION_API_BASE_URL?.trim();
 
+    // Log de diagnóstico de configuração — visível mesmo se nada mais funcionar
+    console.log(`[AudioProcessor] user=${userId} — EVOLUTION_API_BASE_URL: ${baseUrl || '(NÃO CONFIGURADO)'}`);
+    console.log(`[AudioProcessor] user=${userId} — EVOLUTION_INSTANCE: ${instance || '(NÃO CONFIGURADO)'}`);
+
     if (!instance || !baseUrl) {
-        console.error(`[AudioProcessor] user=${userId} — EVOLUTION_API_BASE_URL ou EVOLUTION_SEND_INSTANCE não configurados`);
+        console.error(`[AudioProcessor] user=${userId} — Abortando download: env vars ausentes`);
         return null;
     }
 
-    let rawMessageData: unknown;
+    let msgData: any;
     try {
         const parsed = JSON.parse(rawMessageJson);
-        // Garante que nunca enviamos um array para a Evolution API —
-        // caso o rawMessageJson tenha sido salvo com payload.data bruto (array)
-        rawMessageData = Array.isArray(parsed) ? (parsed[0] || {}) : parsed;
+        msgData = Array.isArray(parsed) ? (parsed[0] || {}) : parsed;
+        console.log(`[AudioProcessor] user=${userId} — rawMessageData keys: ${Object.keys(msgData).join(', ')}`);
     } catch (err) {
         console.error(`[AudioProcessor] user=${userId} — Falha ao parsear rawMessageJson:`, err);
         return null;
     }
 
-    console.log(`[AudioProcessor] user=${userId} — rawMessageData keys:`, Object.keys(rawMessageData as object));
-
-    const downloadUrl = `${baseUrl.replace(/\/+$/, '')}/message/downloadMedia/${encodeURIComponent(instance)}`;
     const apiKey = process.env.EVOLUTION_API_KEY || process.env.EVOLUTION_APIKEY || '';
     const apiKeyHeader = process.env.EVOLUTION_API_KEY_HEADER || 'apikey';
+    const base = baseUrl.replace(/\/+$/, '');
+    const enc = encodeURIComponent(instance);
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (apiKey) headers[apiKeyHeader] = apiKey;
+    else console.warn(`[AudioProcessor] user=${userId} — EVOLUTION_API_KEY não configurada (req sem auth)`);
 
-    console.log(`[AudioProcessor] user=${userId} — Chamando Evolution downloadMedia: ${downloadUrl}`);
-
-    try {
-        const resp = await fetch(downloadUrl, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(rawMessageData),
-        });
-
-        if (!resp.ok) {
-            const errText = await resp.text().catch(() => '');
-            console.error(`[AudioProcessor] user=${userId} — Evolution downloadMedia HTTP ${resp.status}: ${errText}`);
-            return null;
+    // ── Tentativa 1: POST /message/downloadMedia/{instance} ───────────────────
+    // Body: o objeto data do webhook (contém key + message + messageType)
+    {
+        const url = `${base}/message/downloadMedia/${enc}`;
+        console.log(`[AudioProcessor] user=${userId} — [1] POST ${url}`);
+        try {
+            const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(msgData) });
+            const text = await resp.text();
+            console.log(`[AudioProcessor] user=${userId} — [1] HTTP ${resp.status}: ${text.slice(0, 400)}`);
+            if (resp.ok) {
+                const json = JSON.parse(text);
+                if (json.base64) {
+                    const mimeType = (json.mimetype || json.mediaType || 'audio/ogg').split(';')[0].trim();
+                    console.log(`[AudioProcessor] user=${userId} — [1] OK — mimeType: ${mimeType}, base64 len: ${json.base64.length}`);
+                    return { base64: json.base64, mimeType };
+                }
+                console.warn(`[AudioProcessor] user=${userId} — [1] OK mas sem campo base64. Keys: ${Object.keys(json).join(', ')}`);
+            }
+        } catch (err: any) {
+            console.error(`[AudioProcessor] user=${userId} — [1] Erro de rede:`, err?.message || err);
         }
-
-        const json: any = await resp.json();
-        console.log(`[AudioProcessor] user=${userId} — Resposta downloadMedia keys:`, Object.keys(json));
-
-        if (!json.base64) {
-            console.error(`[AudioProcessor] user=${userId} — downloadMedia sem campo base64. Resposta:`, JSON.stringify(json));
-            return null;
-        }
-
-        const mimeType: string = (json.mimetype || json.mediaType || 'audio/ogg').split(';')[0].trim();
-        console.log(`[AudioProcessor] user=${userId} — Áudio descriptografado OK — mimeType: ${mimeType}, base64 length: ${json.base64.length}`);
-        return { base64: json.base64, mimeType };
-    } catch (err: any) {
-        console.error(`[AudioProcessor] user=${userId} — Erro ao chamar Evolution downloadMedia:`, err);
-        return null;
     }
+
+    // ── Tentativa 2: POST /chat/getBase64FromMediaMessage/{instance} ──────────
+    // Body: { key, message } — formato alternativo de algumas versões da Evolution
+    {
+        const url = `${base}/chat/getBase64FromMediaMessage/${enc}`;
+        const body = { key: msgData?.key || {}, message: msgData?.message || {} };
+        console.log(`[AudioProcessor] user=${userId} — [2] POST ${url}`);
+        try {
+            const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+            const text = await resp.text();
+            console.log(`[AudioProcessor] user=${userId} — [2] HTTP ${resp.status}: ${text.slice(0, 400)}`);
+            if (resp.ok) {
+                const json = JSON.parse(text);
+                if (json.base64) {
+                    const mimeType = (json.mimetype || json.mediaType || 'audio/ogg').split(';')[0].trim();
+                    console.log(`[AudioProcessor] user=${userId} — [2] OK — mimeType: ${mimeType}, base64 len: ${json.base64.length}`);
+                    return { base64: json.base64, mimeType };
+                }
+                console.warn(`[AudioProcessor] user=${userId} — [2] OK mas sem campo base64. Keys: ${Object.keys(json).join(', ')}`);
+            }
+        } catch (err: any) {
+            console.error(`[AudioProcessor] user=${userId} — [2] Erro de rede:`, err?.message || err);
+        }
+    }
+
+    console.error(`[AudioProcessor] user=${userId} — Ambas as tentativas falharam. Áudio não descriptografado.`);
+    return null;
 }
 
 async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBuildResult> {
