@@ -171,7 +171,8 @@ function aliasKey(kind, value) {
 }
 
 function extractBsuidCandidate(payload = {}) {
-    const data = payload.data || {};
+    const rawData = payload.data || {};
+    const data = Array.isArray(rawData) ? (rawData[0] || {}) : rawData;
     const key = data.key || {};
     return normalizeBsuid(
         payload.bsuid ||
@@ -275,7 +276,8 @@ function ensureWebhookLogDir() {
 }
 
 function extractMessageText(payload = {}) {
-    const data = payload.data || payload;
+    const rawData = payload.data || payload;
+    const data = Array.isArray(rawData) ? (rawData[0] || {}) : rawData;
     const message = data.message || {};
 
     const text = (
@@ -312,7 +314,9 @@ function extractMessageText(payload = {}) {
 }
 
 function normalizeEvolutionEvent(payload = {}, routeEvent = null) {
-    const data = payload.data || {};
+    // Evolution API v2 envia payload.data como array em messages.upsert
+    const rawData = payload.data || {};
+    const data = Array.isArray(rawData) ? (rawData[0] || {}) : rawData;
     const key = data.key || {};
     const message = data.message || {};
     const remoteJid = normalizeRemoteJid(key.remoteJid || data.remoteJid || data.from || payload.sender || '');
