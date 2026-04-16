@@ -902,36 +902,14 @@ app.post('/webhook/whatsapp-entrada', webhookRateLimit, async (req, res) => {
         });
         console.log(`[EvolutionWebhook] [${normalizedEvent.correlationId}] Event ${normalizedEvent.event} recebido de ${maskIdentifier(normalizedEvent.remoteJid)} -> ${filePath}`);
 
-        // Processamento assíncrono de áudio via Gemini
-        let audioResult = null;
-        if (normalizedEvent.messageType === 'audioMessage') {
-            audioResult = await processAudioMessage(normalizedEvent);
-            if (audioResult) {
-                try {
-                    await db.collection('message_outbox').add({
-                        correlationId: normalizedEvent.correlationId,
-                        inboxId: enqueueResult.inboxId,
-                        userId: normalizedEvent.storageUserId || normalizedEvent.userId,
-                        remoteJid: normalizedEvent.remoteJid,
-                        text: audioResult.message,
-                        itemsAdded: audioResult.added,
-                        source: 'audio_processor',
-                        status: 'pending',
-                        createdAt: serverTimestamp(),
-                        createdAtIso: nowIso(),
-                    });
-                } catch (outboxErr) {
-                    console.error('[AudioProcessor] Erro ao salvar confirmação no outbox:', outboxErr.message);
-                }
-            }
-        }
-
+        // Áudio é processado exclusivamente pelo EvolutionInboxWorker via
+        // Evolution API /message/downloadMedia — não fazemos fetch inline aqui
+        // pois mmg.whatsapp.net serve o arquivo .enc encriptado.
         res.status(200).json({
             ok: true,
             event: normalizedEvent.event,
             inboxId: enqueueResult.inboxId,
             correlationId: normalizedEvent.correlationId,
-            ...(audioResult ? { audioProcessed: true, itemsAdded: audioResult.added.length, confirmation: audioResult.message } : {}),
         });
     } catch (err) {
         console.error('[EvolutionWebhook] Error handling webhook:', err);
@@ -1013,36 +991,13 @@ app.post('/webhook/whatsapp-entrada/:event', webhookRateLimit, async (req, res) 
         });
         console.log(`[EvolutionWebhook] [${normalizedEvent.correlationId}] Event ${normalizedEvent.event} recebido de ${maskIdentifier(normalizedEvent.remoteJid)} -> ${filePath}`);
 
-        // Processamento assíncrono de áudio via Gemini
-        let audioResult = null;
-        if (normalizedEvent.messageType === 'audioMessage') {
-            audioResult = await processAudioMessage(normalizedEvent);
-            if (audioResult) {
-                try {
-                    await db.collection('message_outbox').add({
-                        correlationId: normalizedEvent.correlationId,
-                        inboxId: enqueueResult.inboxId,
-                        userId: normalizedEvent.storageUserId || normalizedEvent.userId,
-                        remoteJid: normalizedEvent.remoteJid,
-                        text: audioResult.message,
-                        itemsAdded: audioResult.added,
-                        source: 'audio_processor',
-                        status: 'pending',
-                        createdAt: serverTimestamp(),
-                        createdAtIso: nowIso(),
-                    });
-                } catch (outboxErr) {
-                    console.error('[AudioProcessor] Erro ao salvar confirmação no outbox:', outboxErr.message);
-                }
-            }
-        }
-
+        // Áudio é processado exclusivamente pelo EvolutionInboxWorker via
+        // Evolution API /message/downloadMedia — não fazemos fetch inline aqui.
         res.status(200).json({
             ok: true,
             event: normalizedEvent.event,
             inboxId: enqueueResult.inboxId,
             correlationId: normalizedEvent.correlationId,
-            ...(audioResult ? { audioProcessed: true, itemsAdded: audioResult.added.length, confirmation: audioResult.message } : {}),
         });
     } catch (err) {
         console.error('[EvolutionWebhook] Error handling event webhook:', err);

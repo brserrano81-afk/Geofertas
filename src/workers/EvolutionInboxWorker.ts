@@ -515,6 +515,17 @@ async function downloadAudioViaEvolution(
     if (apiKey) headers[apiKeyHeader] = apiKey;
     else console.warn(`[AudioProcessor] user=${userId} — EVOLUTION_API_KEY não configurada (req sem auth)`);
 
+    // MIME type canônico: usa o campo do próprio audioMessage (ex: "audio/ogg; codecs=opus")
+    // O Content-Type do servidor de download (mmg.whatsapp.net) retorna
+    // "application/octet-stream" e NÃO deve ser usado.
+    const knownMimeType = (
+        msgData?.message?.audioMessage?.mimetype ||
+        msgData?.message?.ptt?.mimetype ||
+        msgData?.message?.voice?.mimetype ||
+        ''
+    ).split(';')[0].trim() || 'audio/ogg';
+    console.log(`[AudioProcessor] user=${userId} — MIME type do audioMessage: ${knownMimeType}`);
+
     // ── Tentativa 1: POST /message/downloadMedia/{instance} ───────────────────
     // Body: o objeto data do webhook (contém key + message + messageType)
     {
@@ -527,7 +538,9 @@ async function downloadAudioViaEvolution(
             if (resp.ok) {
                 const json = JSON.parse(text);
                 if (json.base64) {
-                    const mimeType = (json.mimetype || json.mediaType || 'audio/ogg').split(';')[0].trim();
+                    // Prefere o mimetype da resposta; cai no do audioMessage se vier genérico
+                    const rawMime = (json.mimetype || json.mediaType || '').split(';')[0].trim();
+                    const mimeType = (rawMime && rawMime !== 'application/octet-stream') ? rawMime : knownMimeType;
                     console.log(`[AudioProcessor] user=${userId} — [1] OK — mimeType: ${mimeType}, base64 len: ${json.base64.length}`);
                     return { base64: json.base64, mimeType };
                 }
@@ -551,7 +564,8 @@ async function downloadAudioViaEvolution(
             if (resp.ok) {
                 const json = JSON.parse(text);
                 if (json.base64) {
-                    const mimeType = (json.mimetype || json.mediaType || 'audio/ogg').split(';')[0].trim();
+                    const rawMime = (json.mimetype || json.mediaType || '').split(';')[0].trim();
+                    const mimeType = (rawMime && rawMime !== 'application/octet-stream') ? rawMime : knownMimeType;
                     console.log(`[AudioProcessor] user=${userId} — [2] OK — mimeType: ${mimeType}, base64 len: ${json.base64.length}`);
                     return { base64: json.base64, mimeType };
                 }
