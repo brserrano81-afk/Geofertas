@@ -552,10 +552,13 @@ async function downloadAudioViaEvolution(
     }
 
     // ── Tentativa 2: POST /chat/getBase64FromMediaMessage/{instance} ──────────
-    // Body: { key, message } — formato alternativo de algumas versões da Evolution
+    // A Evolution v2 exige a mensagem original completa em { message: { ...msgData } }.
+    // Enviar apenas { key, message } causa o erro "Cannot read properties of
+    // undefined (reading 'ephemeralMessage')" porque o handler espera o envelope
+    // completo do evento de webhook.
     {
         const url = `${base}/chat/getBase64FromMediaMessage/${enc}`;
-        const body = { key: msgData?.key || {}, message: msgData?.message || {} };
+        const body = { message: msgData };
         console.log(`[AudioProcessor] user=${userId} — [2] POST ${url}`);
         try {
             const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
@@ -593,19 +596,55 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
     }
 
     // ── Obtenção do áudio descriptografado ───────────────────────────────────
-    // Prioridade 1: base64 já presente no inbox (Evolution configurada para
-    //               enviar base64 no webhook).
-    // Prioridade 2: chamar /message/downloadMedia/{instance} da Evolution API,
-    //               que cuida do download + descriptografia da mediaKey.
+    // Prioridade 1: mediaBase64 salvo diretamente no inbox (campo data.base64
+    //               do webhook — Evolution com "Send Base64" habilitado).
+    // Prioridade 2: base64 dentro do rawMessageJson em posições alternativas
+    //               que a Evolution v2 pode usar: data.base64, message.base64,
+    //               message.audioMessage.base64.
+    // Prioridade 3: chamar /message/downloadMedia/{instance} da Evolution API.
     //               NÃO fazemos fetch direto na mmg.whatsapp.net — o arquivo
-    //               é criptografado (.enc) e inutilizável sem descriptografia.
+    //               é criptografado (.enc) e inutilizável sem a mediaKey.
     let audioBase64: string;
-    let mimeType = 'audio/ogg'; // padrão WhatsApp
+    let mimeType = 'audio/ogg';
+
+    // Tenta extrair base64 do rawMessageJson antes de qualquer requisição
+    let rawBase64FromJson: string | null = null;
+    let rawMimeFromJson: string | null = null;
+    if (message.rawMessageJson) {
+        try {
+            const parsed = JSON.parse(message.rawMessageJson);
+            const d: any = Array.isArray(parsed) ? (parsed[0] || {}) : parsed;
+            rawBase64FromJson =
+                d?.base64 ||
+                d?.message?.base64 ||
+                d?.message?.audioMessage?.base64 ||
+                d?.message?.ptt?.base64 ||
+                null;
+            if (rawBase64FromJson) {
+                rawMimeFromJson = (
+                    d?.message?.audioMessage?.mimetype ||
+                    d?.message?.ptt?.mimetype ||
+                    d?.mimetype ||
+                    ''
+                ).split(';')[0].trim() || 'audio/ogg';
+                console.log(`[AudioProcessor] user=${message.userId} — base64 encontrado no rawMessageJson (fonte: rawMessageJson)`);
+            }
+        } catch {
+            // ignorado — rawMessageJson inválido será tratado depois
+        }
+    }
 
     if (message.mediaBase64) {
-        console.log(`[AudioProcessor] user=${message.userId} — Usando mediaBase64 do webhook diretamente`);
+        console.log(`[AudioProcessor] user=${message.userId} — [fonte: mediaBase64 do inbox]`);
         audioBase64 = message.mediaBase64;
+        // MIME type: tenta extrair do rawMessageJson se disponível
+        mimeType = rawMimeFromJson || mimeType;
+    } else if (rawBase64FromJson) {
+        console.log(`[AudioProcessor] user=${message.userId} — [fonte: base64 dentro do rawMessageJson]`);
+        audioBase64 = rawBase64FromJson;
+        mimeType = rawMimeFromJson || mimeType;
     } else if (message.rawMessageJson) {
+        console.log(`[AudioProcessor] user=${message.userId} — [fonte: Evolution download API]`);
         const downloaded = await downloadAudioViaEvolution(message.rawMessageJson, message.userId);
         if (!downloaded) {
             return {
@@ -618,7 +657,7 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
         audioBase64 = downloaded.base64;
         mimeType = downloaded.mimeType;
     } else {
-        console.error(`[AudioProcessor] user=${message.userId} — Sem mediaBase64 nem rawMessageJson no inbox`);
+        console.error(`[AudioProcessor] user=${message.userId} — Sem base64 nem rawMessageJson no inbox`);
         return {
             text: 'Recebi seu áudio, mas não consegui acessá-lo. Pode tentar de novo?',
             shouldSend: true,

@@ -534,7 +534,14 @@ async function enqueueInboundMessage(normalizedEvent) {
             fromMe: normalizedEvent.fromMe,
             direction: normalizedEvent.direction,
             messageId: key.id || null,
-            mediaBase64: data.base64 || null,
+            // Evolution v2 com "Send Base64" ativado pode enviar o base64 em
+            // campos diferentes dependendo da versão: data.base64 (mais comum),
+            // data.message.base64, ou data.message.audioMessage.base64.
+            mediaBase64: data.base64 ||
+                data.message?.base64 ||
+                data.message?.audioMessage?.base64 ||
+                data.message?.ptt?.base64 ||
+                null,
             mediaUrl: data.url || data.message?.audioMessage?.url || data.message?.ptt?.url || null,
             // rawMessageJson: objeto 'data' do webhook serializado para que o worker
             // possa chamar /message/downloadMedia/{instance} e descriptografar a mídia.
