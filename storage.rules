@@ -1,0 +1,38 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Auxiliar: Identifica administradores da organização
+    function isAdmin() {
+      return request.auth != null && (
+        request.auth.token.admin == true || 
+        request.auth.token.email.matches('.*@economizafacil\\.ia\\.br$')
+      );
+    }
+
+    // --- Fotos de Cupons e Tabloides (Dados de Consumo) ---
+    // Proteção: Somente Administradores e o Backend (Admin SDK) podem ler/escrever.
+    // O Backend usa Admin SDK, que ignora estas regras. No site, apenas Admins veem as fotos.
+    match /receipts/{userId}/{file} {
+      allow read, write: if isAdmin();
+    }
+
+    // --- Imagens Públicas de Produtos/Ofertas ---
+    // Carregamento para a Landing Page e App Web.
+    match /offers/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // --- Avatares e Perfil (se necessário no futuro) ---
+    match /profiles/{userId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // --- Fallback Global de Segurança ---
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

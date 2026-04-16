@@ -1,106 +1,45 @@
 rules_version = '2';
-
-// Firestore Security Rules — Economiza Fácil
-// Revisão: 2026-04-15
-//
-// Modelo de acesso:
-//   - Leitura/escrita das coleções operacionais (inbox, outbox, events) é feita
-//     exclusivamente pelo backend via Admin SDK (service account) — acesso direto
-//     do cliente é bloqueado.
-//   - Dados públicos (offers, markets, categories) são legíveis sem autenticação
-//     para alimentar a landing page e o app web.
-//   - Dados de usuário (users, canonical_identities) requerem auth ou são
-//     bloqueados para o cliente (backend usa Admin SDK que ignora estas regras).
-//   - Coleções de analytics não são acessíveis pelo cliente.
-
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // --- Dados públicos de catálogo (landing page + app web) ---
-    match /offers/{id} {
-      allow read: if true;
-      allow write: if false; // somente backend/admin SDK
+    
+    // Auxiliar: Verifica se é um administrador logado
+    // Um admin é definido pelo email da organização ou claim personalizada 'admin'
+    function isAdmin() {
+      return request.auth != null && (
+        request.auth.token.admin == true || 
+        request.auth.token.email.matches('.*@economizafacil\\.ia\\.br$')
+      );
     }
 
-    match /markets/{id} {
-      allow read: if true;
-      allow write: if false;
-    }
+    // --- Dados Públicos de Catálogo (Landing Page + Web App) ---
+    // Acesso de leitura aberto para o público. Escrita restrita apenas a Admins.
+    match /offers/{id}      { allow read: if true; allow write: if isAdmin(); }
+    match /markets/{id}     { allow read: if true; allow write: if isAdmin(); }
+    match /categories/{id}  { allow read: if true; allow write: if isAdmin(); }
+    match /networks/{id}    { allow read: if true; allow write: if isAdmin(); }
 
-    match /categories/{id} {
-      allow read: if true;
-      allow write: if false;
-    }
-
-    match /networks/{id} {
-      allow read: if true;
-      allow write: if false;
-    }
-
-    // --- Dados de usuário: apenas o próprio usuário autenticado ---
+    // --- Dados de Usuário (WhatsApp First) ---
+    // Estratégia "Cofre": Clientes não logam via Web, apenas usam o robô.
+    // Bloqueamos acesso via Client SDK. O Admin SDK (Backend) continuará funcionando normalmente.
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-
-      match /lists/{listId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-      }
-
-      match /purchases/{purchaseId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-      }
-
-      match /interactions/{interactionId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if isAdmin();
+      
+      match /{allSubcollections=**} {
+        allow read, write: if isAdmin();
       }
     }
 
-    // --- Pipeline operacional: bloqueado para cliente ---
-    // Backend usa Admin SDK (service account) — essas regras não se aplicam a ele.
-    // Qualquer tentativa de acesso direto via SDK do cliente é negada.
-    match /message_inbox/{id} {
-      allow read, write: if false;
-    }
+    // --- Pipeline Operacional e Integração ---
+    // Bloqueio total no client-side. Exclusivo para Backend/Admin SDK.
+    match /message_inbox/{id}      { allow read, write: if false; }
+    match /message_outbox/{id}     { allow read, write: if false; }
+    match /integration_events/{id} { allow read, write: if false; }
+    
+    // --- Fila de Moderação e Auditoria ---
+    match /offer_queue/{id}        { allow read, write: if isAdmin(); }
+    match /campaigns/{id}          { allow read, write: if isAdmin(); }
 
-    match /message_outbox/{id} {
-      allow read, write: if false;
-    }
-
-    match /integration_events/{id} {
-      allow read, write: if false;
-    }
-
-    // --- Identidade canônica: bloqueado para cliente ---
-    match /canonical_identities/{id} {
-      allow read, write: if false;
-    }
-
-    match /identity_aliases/{id} {
-      allow read, write: if false;
-    }
-
-    // --- Analytics: bloqueado para cliente ---
-    match /analytics_events/{id} {
-      allow read, write: if false;
-    }
-
-    match /user_aggregates/{id} {
-      allow read, write: if false;
-    }
-
-    // --- Painel admin: gerenciado via Admin SDK, bloqueado para cliente ---
-    match /campaigns/{id} {
-      allow read, write: if false;
-    }
-
-    match /offer_queue/{id} {
-      allow read, write: if false;
-    }
-
-    match /offers_archive/{id} {
-      allow read, write: if false;
-    }
-
-    // --- Fallback: negar tudo que não foi explicitamente listado ---
+    // --- Fallback de Segurança: Negar tudo que não foi explicitamente permitido ---
     match /{document=**} {
       allow read, write: if false;
     }
