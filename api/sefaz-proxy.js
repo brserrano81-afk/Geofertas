@@ -504,7 +504,9 @@ async function enqueueInboundMessage(normalizedEvent) {
         return { inboxId: null, duplicate: false, ignoredReason: validation.reason };
     }
 
-    const data = normalizedEvent.raw?.data || {};
+    // Evolution API v2 envia payload.data como array — extrair o primeiro elemento
+    const rawData = normalizedEvent.raw?.data || {};
+    const data = Array.isArray(rawData) ? (rawData[0] || {}) : rawData;
     const key = data.key || {};
 
     try {

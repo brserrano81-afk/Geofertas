@@ -502,11 +502,16 @@ async function downloadAudioViaEvolution(
 
     let rawMessageData: unknown;
     try {
-        rawMessageData = JSON.parse(rawMessageJson);
+        const parsed = JSON.parse(rawMessageJson);
+        // Garante que nunca enviamos um array para a Evolution API —
+        // caso o rawMessageJson tenha sido salvo com payload.data bruto (array)
+        rawMessageData = Array.isArray(parsed) ? (parsed[0] || {}) : parsed;
     } catch (err) {
         console.error(`[AudioProcessor] user=${userId} — Falha ao parsear rawMessageJson:`, err);
         return null;
     }
+
+    console.log(`[AudioProcessor] user=${userId} — rawMessageData keys:`, Object.keys(rawMessageData as object));
 
     const downloadUrl = `${baseUrl.replace(/\/+$/, '')}/message/downloadMedia/${encodeURIComponent(instance)}`;
     const apiKey = process.env.EVOLUTION_API_KEY || process.env.EVOLUTION_APIKEY || '';
