@@ -29,6 +29,16 @@ if (isServer) {
 
         if (!admin.apps.length) {
             const getServiceAccount = () => {
+                // Prioridade 1: variáveis individuais (nova forma — sem limite de tamanho no Railway)
+                const projectId = process.env.FIREBASE_PROJECT_ID;
+                const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+                const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+
+                if (projectId && clientEmail && privateKey) {
+                    return { projectId, clientEmail, privateKey };
+                }
+
+                // Prioridade 2: JSON completo (legado)
                 const envJson = process.env.FIREBASE_SERVICE_ACCOUNT;
                 if (envJson) {
                     try {
@@ -38,6 +48,7 @@ if (isServer) {
                     }
                 }
 
+                // Prioridade 3: arquivo local (desenvolvimento)
                 const saPath = path.join(process.cwd(), 'service-account.json');
                 if (fs.existsSync(saPath)) {
                     try {
@@ -46,15 +57,17 @@ if (isServer) {
                         console.error('[firebase-admin] Falha ao ler service-account.json local');
                     }
                 }
+
                 return undefined;
             };
 
             const sa = getServiceAccount();
             const config: any = {};
-            
+
             if (sa) {
                 config.credential = admin.credential.cert(sa);
-                config.storageBucket = process.env.FIREBASE_STORAGE_BUCKET || `${sa.project_id}.appspot.com`;
+                config.storageBucket = process.env.FIREBASE_STORAGE_BUCKET
+                    || (sa.project_id ? `${sa.project_id}.appspot.com` : undefined);
             } else {
                 config.credential = admin.credential.applicationDefault();
                 config.storageBucket = process.env.FIREBASE_STORAGE_BUCKET;

@@ -89,14 +89,27 @@ function readEnv(...names) {
 }
 
 function getServiceAccount(rootDir) {
+    // Prioridade 1: variáveis individuais (nova forma — sem limite de tamanho no Railway)
+    const projectId = process.env.FIREBASE_PROJECT_ID;
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+
+    if (projectId && clientEmail && privateKey) {
+        return { projectId, clientEmail, privateKey };
+    }
+
+    // Prioridade 2: JSON completo (legado)
     const envJson = process.env.FIREBASE_SERVICE_ACCOUNT;
     if (envJson) {
         try { return JSON.parse(envJson); } catch (err) {}
     }
+
+    // Prioridade 3: arquivo local (desenvolvimento)
     const saPath = path.join(rootDir, 'service-account.json');
     if (fs.existsSync(saPath)) {
         try { return JSON.parse(fs.readFileSync(saPath, 'utf8')); } catch (err) {}
     }
+
     return undefined;
 }
 
