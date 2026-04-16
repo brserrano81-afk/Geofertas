@@ -8,11 +8,9 @@ interface Props {
 export default function RegionConsumptionMap({ data }: Props) {
     return (
         <HorizontalBarChart
-            title="Regiões com maior consumo"
-            badge="compras por bairro/região"
+            title=""
             data={data}
-            color="#0a5a50"
-            emptyMessage="Nenhuma região identificada ainda. Dados aparecem quando usuários compartilham bairro."
+            emptyMessage="Nenhuma região identificada ainda."
         />
     );
 }

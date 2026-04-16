@@ -1,5 +1,6 @@
 // Componente base reutilizado por TopCategories, TopProducts, TopRegions e MarketRanking
 import type { RankedItem } from '../../services/admin/AnalyticsService';
+import { adminColors } from '../../pages/admin/adminStyles';
 
 interface Props {
     title: string;
@@ -13,25 +14,25 @@ export default function HorizontalBarChart({
     title,
     badge,
     data,
-    color = '#0f7b6c',
+    color = adminColors.primary,
     emptyMessage = 'Sem dados suficientes ainda.',
 }: Props) {
     const max = data.length > 0 ? Math.max(...data.map((d) => d.count)) : 1;
 
     return (
-        <div style={{ display: 'grid', gap: 14 }}>
+        <div style={{ display: 'grid', gap: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: '#15322d' }}>
-                    {title}
-                </h3>
+                {/* O título agora é passado pelo pai para melhor controle de layout */}
                 {badge && (
                     <span style={{
-                        background: 'rgba(15,123,108,0.10)',
-                        color: '#0f6d61',
-                        borderRadius: 999,
-                        fontSize: 11,
+                        background: `${adminColors.primary}12`,
+                        color: adminColors.primary,
+                        borderRadius: 9,
+                        fontSize: 10,
                         fontWeight: 800,
-                        padding: '2px 9px',
+                        padding: '2px 8px',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em'
                     }}>
                         {badge}
                     </span>
@@ -39,36 +40,36 @@ export default function HorizontalBarChart({
             </div>
 
             {data.length === 0 ? (
-                <p style={{ margin: 0, color: 'rgba(21,50,45,0.5)', fontSize: 13 }}>
+                <p style={{ margin: 0, color: adminColors.textSecondary, fontSize: 13 }}>
                     {emptyMessage}
                 </p>
             ) : (
-                <div style={{ display: 'grid', gap: 9 }}>
+                <div style={{ display: 'grid', gap: 12 }}>
                     {data.map((item, i) => {
                         const pct = max > 0 ? (item.count / max) * 100 : 0;
                         return (
-                            <div key={item.label} style={{ display: 'grid', gap: 4 }}>
+                            <div key={item.label} style={{ display: 'grid', gap: 6 }}>
                                 <div style={{
                                     display: 'flex',
                                     justifyContent: 'space-between',
-                                    fontSize: 12,
-                                    fontWeight: 700,
-                                    color: '#17332f',
+                                    fontSize: 13,
+                                    fontWeight: 600,
+                                    color: adminColors.text,
                                 }}>
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                                        <span style={{ color: '#0f7b6c', fontWeight: 900, minWidth: 18 }}>
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <span style={{ color: adminColors.primary, fontWeight: 800, minWidth: 20 }}>
                                             {i + 1}.
                                         </span>
                                         {item.label || '—'}
                                     </span>
-                                    <span style={{ color: 'rgba(23,51,47,0.6)', fontVariantNumeric: 'tabular-nums' }}>
+                                    <span style={{ color: adminColors.textSecondary, fontVariantNumeric: 'tabular-nums' }}>
                                         {item.count.toLocaleString('pt-BR')}
                                     </span>
                                 </div>
                                 <div style={{
-                                    height: 8,
+                                    height: 6,
                                     borderRadius: 999,
-                                    background: 'rgba(15,123,108,0.10)',
+                                    background: `${adminColors.primary}08`,
                                     overflow: 'hidden',
                                 }}>
                                     <div style={{
@@ -77,8 +78,8 @@ export default function HorizontalBarChart({
                                         borderRadius: 999,
                                         background: i === 0
                                             ? color
-                                            : `rgba(15,123,108,${0.85 - i * 0.08})`,
-                                        transition: 'width 0.6s ease',
+                                            : `${adminColors.primary}${Math.round(255 * (0.8 - i * 0.1)).toString(16).padStart(2, '0')}`,
+                                        transition: 'width 0.8s cubic-bezier(0.4, 0, 0.2, 1)',
                                     }} />
                                 </div>
                             </div>

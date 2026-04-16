@@ -8,11 +8,9 @@ interface Props {
 export default function TopCategoriesChart({ data }: Props) {
     return (
         <HorizontalBarChart
-            title="Top categorias"
-            badge="compras registradas"
+            title=""
             data={data}
-            color="#0b6b5e"
-            emptyMessage="Nenhuma compra registrada ainda."
+            emptyMessage="Nenhuma categoria registrada ainda."
         />
     );
 }

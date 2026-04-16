@@ -1,3 +1,5 @@
+import { adminColors } from '../../pages/admin/adminStyles';
+
 interface Props {
     avgTicket: number;
     avgBasketSize: number;
@@ -5,82 +7,74 @@ interface Props {
     totalPurchases: number;
 }
 
-function formatCurrency(v: number) {
-    return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-
-interface KpiCardProps {
-    label: string;
-    value: string;
-    sub?: string;
-    tone?: 'green' | 'neutral' | 'amber';
-}
-
-function KpiCard({ label, value, sub, tone = 'neutral' }: KpiCardProps) {
-    const colors = {
-        green: { bg: 'rgba(15,123,108,0.08)', fg: '#0f6d61', num: '#0a5a50' },
-        neutral: { bg: 'rgba(17,52,47,0.05)', fg: '#17332f', num: '#12302b' },
-        amber: { bg: 'rgba(184,128,16,0.08)', fg: '#9c6c0c', num: '#7a520a' },
-    }[tone];
+export default function TicketMedioChart({
+    avgTicket,
+    avgBasketSize,
+    avgSavings,
+    totalPurchases,
+}: Props) {
+    const savingsPct = avgTicket > 0 ? (avgSavings / (avgTicket + avgSavings)) * 100 : 0;
 
     return (
-        <div style={{
-            background: colors.bg,
-            borderRadius: 16,
-            padding: '18px 20px',
-            display: 'grid',
-            gap: 6,
-        }}>
-            <span style={{ fontSize: 11, fontWeight: 800, color: colors.fg, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                {label}
-            </span>
-            <span style={{ fontSize: 28, fontWeight: 900, color: colors.num, lineHeight: 1 }}>
-                {value}
-            </span>
-            {sub && (
-                <span style={{ fontSize: 12, color: 'rgba(23,51,47,0.56)' }}>
-                    {sub}
-                </span>
-            )}
-        </div>
-    );
-}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 40, alignItems: 'center' }}>
+            <div style={{ display: 'grid', gap: 20 }}>
+                <div style={{ display: 'grid', gap: 8 }}>
+                    <div style={{ fontSize: 13, color: adminColors.textSecondary, fontWeight: 500 }}>Ticket Médio por Compra</div>
+                    <div style={{ fontSize: 36, fontWeight: 800, color: adminColors.text }}>
+                        R$ {avgTicket.toFixed(2).replace('.', ',')}
+                    </div>
+                </div>
 
-export default function TicketMedioChart({ avgTicket, avgBasketSize, avgSavings, totalPurchases }: Props) {
-    return (
-        <div style={{ display: 'grid', gap: 14 }}>
-            <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: '#15322d' }}>
-                KPIs de compra
-            </h3>
-            <div style={{
-                display: 'grid',
-                gap: 12,
-                gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                <div style={{ display: 'grid', gap: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+                        <span style={{ color: adminColors.textSecondary }}>Itens por Carrinho</span>
+                        <span style={{ fontWeight: 700 }}>{avgBasketSize.toFixed(1)} itens</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+                        <span style={{ color: adminColors.textSecondary }}>Compras Analisadas</span>
+                        <span style={{ fontWeight: 700 }}>{totalPurchases.toLocaleString('pt-BR')}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div style={{ 
+                background: `${adminColors.primary}08`, 
+                borderRadius: 16, 
+                padding: '24px',
+                border: `1px solid ${adminColors.primary}15`,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 16
             }}>
-                <KpiCard
-                    label="Ticket médio"
-                    value={formatCurrency(avgTicket)}
-                    sub="média dos usuários ativos"
-                    tone="green"
-                />
-                <KpiCard
-                    label="Cesta média"
-                    value={`${avgBasketSize.toFixed(1)} itens`}
-                    sub="por compra registrada"
-                    tone="neutral"
-                />
-                <KpiCard
-                    label="Economia média"
-                    value={formatCurrency(avgSavings)}
-                    sub="por usuário no período"
-                    tone="amber"
-                />
-                <KpiCard
-                    label="Compras registradas"
-                    value={totalPurchases.toLocaleString('pt-BR')}
-                    sub="total acumulado"
-                    tone="neutral"
-                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: adminColors.primary }}>Economia Estimada</div>
+                    <div style={{ 
+                        fontSize: 18, 
+                        fontWeight: 800, 
+                        color: adminColors.success 
+                    }}>
+                        {savingsPct.toFixed(1)}%
+                    </div>
+                </div>
+
+                <div style={{
+                    height: 10,
+                    background: '#fff',
+                    borderRadius: 999,
+                    overflow: 'hidden'
+                }}>
+                    <div style={{
+                        height: '100%',
+                        width: `${savingsPct}%`,
+                        background: adminColors.primary,
+                        borderRadius: 999
+                    }} />
+                </div>
+
+                <p style={{ margin: 0, fontSize: 12, color: adminColors.textSecondary, lineHeight: 1.5 }}>
+                    Representa a diferença entre o preço médio e o menor preço encontrado 
+                    nos mercados da região para os mesmos itens.
+                </p>
             </div>
         </div>
     );

@@ -1,20 +1,29 @@
 import { useEffect, useState } from "react";
+import { 
+  CheckCircle, 
+  XCircle, 
+  Clock, 
+  Image as ImageIcon, 
+  User, 
+  MapPin, 
+  Edit3,
+  Search,
+  AlertCircle,
+  X
+} from "lucide-react";
+
 import {
   offerQueueService,
   type OfferQueueItem,
 } from "../../services/admin/OfferQueueService";
 import { adminMvpService, type MarketRecord } from "../../services/admin/AdminMvpService";
-import AdminNav from "./AdminNav";
 import {
   adminBadgeStyle,
   adminButtonStyle,
-  adminDangerButtonStyle,
+  adminColors,
   adminInputStyle,
   adminPanelStyle,
-  adminSecondaryButtonStyle,
   adminShellStyle,
-  adminTopbarStyle,
-  adminActionsRowStyle,
 } from "./adminStyles";
 
 export default function AdminQueue() {
@@ -23,8 +32,9 @@ export default function AdminQueue() {
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState("");
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
 
-  // Estado para edição rápida no modal
+  // Estado para edição rápida no painel lateral
   const [editingItem, setEditingItem] = useState<OfferQueueItem | null>(null);
 
   async function loadData() {
@@ -48,11 +58,15 @@ export default function AdminQueue() {
     loadData();
   }, []);
 
+  const filteredItems = items.filter(item => 
+    item.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    item.marketName.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   async function handleApprove(item: OfferQueueItem) {
     setProcessingId(item.id);
     setFeedback("");
     try {
-      // Tenta encontrar o mercado pelo nome se não tiver marketId (extraído por IA)
       let marketId = (item as any).marketId;
       if (!marketId && markets.length > 0) {
         const found = markets.find(m => 
@@ -62,10 +76,7 @@ export default function AdminQueue() {
         if (found) marketId = found.id;
       }
 
-      await offerQueueService.approve(item.id, item, "admin", {
-          // Garante que o marketId correto seja passado se encontrado
-          marketId
-      } as any);
+      await offerQueueService.approve(item.id, item, "admin", { marketId } as any);
       setFeedback("Item aprovado e publicado!");
       await loadData();
     } catch (error) {
@@ -78,7 +89,7 @@ export default function AdminQueue() {
 
   async function handleReject(itemId: string) {
     const reason = window.prompt("Motivo da rejeição (opcional):");
-    if (reason === null) return; // cancelado
+    if (reason === null) return;
 
     setProcessingId(itemId);
     setFeedback("");
@@ -95,165 +106,249 @@ export default function AdminQueue() {
   }
 
   function formatCurrency(val: number) {
-      return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
   }
 
   return (
     <div style={adminShellStyle}>
-      <section style={adminPanelStyle}>
-        <div style={{ display: "grid", gap: 16 }}>
-          <div style={adminTopbarStyle}>
-            <div style={{ display: "grid", gap: 8 }}>
-              <span style={adminBadgeStyle("amber")}>Ingestão</span>
-              <h1 style={{ margin: 0, color: "#17332f" }}>Fila de Moderação</h1>
-              <p style={{ margin: 0, color: "rgba(23,51,47,0.74)", lineHeight: 1.7 }}>
-                Itens extraídos automaticamente de fotos enviadas por usuários. 
-                Revise, ajuste os dados e publique na base oficial.
-              </p>
-            </div>
-          </div>
-          <AdminNav />
+      {/* ── Header ─────────────────────────────────────────── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800 }}>Fila de Moderação</h1>
+          <p style={{ margin: '4px 0 0', color: adminColors.textSecondary, fontSize: 15 }}>
+            Revise e valide os itens extraídos por IA das fotos dos usuários.
+          </p>
         </div>
-      </section>
-
-      <section style={adminPanelStyle}>
-        <div style={{ display: "grid", gap: 14 }}>
-          <div style={adminTopbarStyle}>
-            <h2 style={{ margin: 0, color: "#17332f" }}>Itens Pendentes</h2>
-            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                {feedback && <span style={{ color: "#0f6d61", fontWeight: 700 }}>{feedback}</span>}
-                <span style={adminBadgeStyle("neutral")}>
-                  {loading ? "Carregando..." : `${items.length} pendentes`}
-                </span>
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gap: 12 }}>
-            {items.map((item) => (
-              <article
-                key={item.id}
-                style={{
-                  padding: 20,
-                  borderRadius: 18,
-                  background: "white",
-                  border: "1px solid rgba(15,53,47,0.08)",
-                  display: "grid",
-                  gap: 12,
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.02)"
-                }}
-              >
-                <div style={adminTopbarStyle}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <span style={{ fontWeight: 900, fontSize: 18, color: "#15322d" }}>{item.productName}</span>
-                        <span style={adminBadgeStyle(item.imageSource === 'tabloid' ? 'amber' : 'green')}>
-                            {item.imageSource === 'tabloid' ? 'Tabloide' : item.imageSource === 'price_tag' ? 'Etiqueta' : 'Ingestão'}
-                        </span>
-                    </div>
-                    <div style={{ marginTop: 8, color: "rgba(21,50,45,0.72)", lineHeight: 1.6 }}>
-                      <strong style={{ color: "#0f7b6c" }}>{item.marketName}</strong>
-                      {item.brand && ` · ${item.brand}`}
-                      {item.unit && ` · ${item.unit}`}
-                      {item.category && ` · ${item.category}`}
-                    </div>
-                  </div>
-
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontWeight: 900, fontSize: 22, color: "#0f6d61" }}>{formatCurrency(item.price)}</div>
-                    <div style={{ fontSize: 12, color: "rgba(0,0,0,0.45)", marginTop: 4 }}>
-                        Enviado por: {item.submittedBy}
-                    </div>
-                  </div>
-                </div>
-
-                <div style={adminActionsRowStyle}>
-                  <button 
-                    type="button" 
-                    style={adminButtonStyle} 
-                    onClick={() => handleApprove(item)}
-                    disabled={!!processingId}
-                  >
-                    {processingId === item.id ? "Aprovando..." : "Aprovar e Publicar"}
-                  </button>
-                  <button 
-                    type="button" 
-                    style={adminSecondaryButtonStyle} 
-                    onClick={() => setEditingItem(item)} // TODO: Implementar modal de edição rápida
-                    disabled={!!processingId}
-                  >
-                    Ajustar Dados
-                  </button>
-                  <button 
-                    type="button" 
-                    style={adminDangerButtonStyle} 
-                    onClick={() => handleReject(item.id)}
-                    disabled={!!processingId}
-                  >
-                    Rejeitar
-                  </button>
-                </div>
-              </article>
-            ))}
-
-            {!items.length && !loading ? (
-              <div style={{ 
-                  padding: "40px 20px", 
-                  textAlign: "center", 
-                  color: "rgba(23,51,47,0.5)",
-                  background: "rgba(17,52,47,0.03)",
-                  borderRadius: 18,
-                  border: "1px dashed rgba(17,52,47,0.1)"
-              }}>
-                <div style={{ fontSize: 40, marginBottom: 12 }}>🌴</div>
-                Nada para moderar por aqui. Bom descanso!
-              </div>
-            ) : null}
-          </div>
+        <div style={adminBadgeStyle('amber')}>
+           <Clock size={14} style={{ marginRight: 6 }} />
+           {items.length} itens pendentes
         </div>
-      </section>
+      </div>
 
-      {/* Basic Modal Overlay for Editing (Quick implementation) */}
-      {editingItem && (
-        <div style={{
-          position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-          background: "rgba(0,0,0,0.5)", display: "flex", 
-          alignItems: "center", justifyContent: "center", zIndex: 1000,
-          padding: 20
+      {feedback && (
+        <div style={{ 
+          ...adminBadgeStyle(feedback.includes('Erro') ? "red" : "green"), 
+          padding: '12px 20px',
+          width: 'fit-content'
         }}>
-           <div style={{ ...adminPanelStyle, width: "100%", maxWidth: 500, display: "grid", gap: 16 }}>
-              <h3 style={{ margin: 0 }}>Ajustar Item da Fila</h3>
-              <div style={{ display: "grid", gap: 12 }}>
-                  <label style={{ fontSize: 12, fontWeight: 700 }}>Produto</label>
-                  <input style={adminInputStyle} value={editingItem.productName} 
-                         onChange={e => setEditingItem({...editingItem, productName: e.target.value})} />
-                  
-                  <label style={{ fontSize: 12, fontWeight: 700 }}>Mercado (Texto Extraído)</label>
-                  <input style={adminInputStyle} value={editingItem.marketName} 
-                         onChange={e => setEditingItem({...editingItem, marketName: e.target.value})} />
-
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                      <div>
-                        <label style={{ fontSize: 12, fontWeight: 700 }}>Preço</label>
-                        <input type="number" step="0.01" style={adminInputStyle} value={editingItem.price} 
-                             onChange={e => setEditingItem({...editingItem, price: Number(e.target.value)})} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 12, fontWeight: 700 }}>Unidade</label>
-                        <input style={adminInputStyle} value={editingItem.unit || ""} 
-                             onChange={e => setEditingItem({...editingItem, unit: e.target.value})} />
-                      </div>
-                  </div>
-              </div>
-              <div style={adminActionsRowStyle}>
-                  <button style={adminButtonStyle} onClick={() => {
-                      setItems(items.map(i => i.id === editingItem.id ? editingItem : i));
-                      setEditingItem(null);
-                  }}>Confirmar Alterações Temporárias</button>
-                  <button style={adminSecondaryButtonStyle} onClick={() => setEditingItem(null)}>Cancelar</button>
-              </div>
-           </div>
+          {feedback}
         </div>
       )}
+
+      {/* ── List & Filters ───────────────────────────────────── */}
+      <section style={adminPanelStyle}>
+        <div style={{ position: 'relative', marginBottom: 24, maxWidth: 400 }}>
+          <Search size={18} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: adminColors.neutral }} />
+          <input 
+            style={{ ...adminInputStyle, paddingLeft: 40 }} 
+            placeholder="Buscar na fila..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+
+        <div style={{ display: 'grid', gap: 16 }}>
+          {loading ? (
+            <div style={{ padding: 40, textAlign: 'center', color: adminColors.textSecondary }}>Carregando fila...</div>
+          ) : filteredItems.map((item) => (
+            <article
+              key={item.id}
+              style={{
+                padding: '20px',
+                borderRadius: 16,
+                background: '#F9FAFB',
+                border: `1px solid ${adminColors.border}`,
+                display: 'flex',
+                gap: 24,
+                position: 'relative',
+                overflow: 'hidden'
+              }}
+            >
+              {/* Photo Placeholder/Preview */}
+              <div style={{
+                width: 120,
+                height: 120,
+                borderRadius: 12,
+                background: '#E5E7EB',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#9CA3AF',
+                flexShrink: 0
+              }}>
+                <ImageIcon size={32} />
+              </div>
+
+              {/* Data */}
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: adminColors.text }}>{item.productName}</h3>
+                  <span style={adminBadgeStyle(item.imageSource === 'tabloid' ? 'amber' : 'purple')}>
+                    {item.imageSource === 'tabloid' ? 'Tabloide' : 'Etiqueta/Foto'}
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: adminColors.textSecondary, textTransform: 'uppercase' }}>Mercado (IA)</label>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: adminColors.text, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <MapPin size={14} color={adminColors.primary} />
+                      {item.marketName}
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: adminColors.textSecondary, textTransform: 'uppercase' }}>Preço</label>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: adminColors.primary }}>{formatCurrency(item.price)}</div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: adminColors.textSecondary, textTransform: 'uppercase' }}>Enviado por</label>
+                    <div style={{ fontSize: 14, color: adminColors.textSecondary }}>{item.submittedBy}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, justifyContent: 'center' }}>
+                <button 
+                  onClick={() => handleApprove(item)}
+                  disabled={!!processingId}
+                  style={{ ...adminButtonStyle, minHeight: 40, width: 160 }}
+                >
+                  <CheckCircle size={18} style={{ marginRight: 8 }} />
+                  Aprovar
+                </button>
+                <button 
+                   onClick={() => setEditingItem(item)}
+                   disabled={!!processingId}
+                   style={{ ...adminInputStyle, height: 40, width: 160, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                >
+                  <Edit3 size={18} />
+                  Ajustar
+                </button>
+                <button 
+                   onClick={() => handleReject(item.id)}
+                   disabled={!!processingId}
+                   style={{ background: 'transparent', border: 'none', color: adminColors.error, fontSize: 13, fontWeight: 700, cursor: 'pointer', textAlign: 'center' }}
+                >
+                  Rejeitar
+                </button>
+              </div>
+            </article>
+          ))}
+
+          {!filteredItems.length && !loading && (
+             <div style={{ padding: 60, textAlign: 'center', color: adminColors.textSecondary, background: `${adminColors.primary}05`, borderRadius: 16, border: `1px dashed ${adminColors.border}` }}>
+                <AlertCircle size={40} style={{ marginBottom: 12, opacity: 0.3 }} />
+                <div style={{ fontSize: 18, fontWeight: 700 }}>Nada na fila!</div>
+                <div style={{ fontSize: 14 }}>Tudo limpo por enquanto.</div>
+             </div>
+          )}
+        </div>
+      </section>
+
+      {/* ── Adjustment Side Panel ──────────────────────────── */}
+      {editingItem && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          right: 0,
+          width: 500,
+          height: '100vh',
+          background: '#fff',
+          boxShadow: '-10px 0 40px rgba(0,0,0,0.1)',
+          zIndex: 100,
+          display: 'flex',
+          flexDirection: 'column',
+          animation: 'slideIn 0.3s ease-out'
+        }}>
+          <div style={{ padding: '24px 32px', borderBottom: `1px solid ${adminColors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>Ajustar Dados Extraídos</h2>
+            <button onClick={() => setEditingItem(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: adminColors.textSecondary }}>
+              <X size={24} />
+            </button>
+          </div>
+
+          <div style={{ padding: 32, display: 'grid', gap: 24, flex: 1, overflowY: 'auto' }}>
+            <div style={{ display: 'grid', gap: 8 }}>
+              <label style={{ fontSize: 13, fontWeight: 700, color: adminColors.text }}>Produto</label>
+              <input
+                style={adminInputStyle}
+                value={editingItem.productName}
+                onChange={e => setEditingItem({ ...editingItem, productName: e.target.value })}
+              />
+            </div>
+
+            <div style={{ display: 'grid', gap: 8 }}>
+              <label style={{ fontSize: 13, fontWeight: 700, color: adminColors.text }}>Mercado (Texto Extraído)</label>
+              <input
+                style={adminInputStyle}
+                value={editingItem.marketName}
+                onChange={e => setEditingItem({ ...editingItem, marketName: e.target.value })}
+              />
+              <span style={{ fontSize: 11, color: adminColors.textSecondary }}>O sistema tentará encontrar um mercado correspondente na aprovação.</span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <div style={{ display: 'grid', gap: 8 }}>
+                    <label style={{ fontSize: 13, fontWeight: 700, color: adminColors.text }}>Preço (R$)</label>
+                    <input
+                        type="number"
+                        step="0.01"
+                        style={adminInputStyle}
+                        value={editingItem.price}
+                        onChange={e => setEditingItem({ ...editingItem, price: Number(e.target.value) })}
+                    />
+                </div>
+                <div style={{ display: 'grid', gap: 8 }}>
+                    <label style={{ fontSize: 13, fontWeight: 700, color: adminColors.text }}>Unidade</label>
+                    <input
+                        style={adminInputStyle}
+                        value={editingItem.unit || ""}
+                        onChange={e => setEditingItem({ ...editingItem, unit: e.target.value })}
+                    />
+                </div>
+            </div>
+
+            <div style={{ display: 'grid', gap: 8 }}>
+                <label style={{ fontSize: 13, fontWeight: 700, color: adminColors.text }}>Categoria</label>
+                <input
+                    style={adminInputStyle}
+                    value={editingItem.category || ""}
+                    onChange={e => setEditingItem({ ...editingItem, category: e.target.value })}
+                />
+            </div>
+
+            <div style={{ marginTop: 'auto', paddingTop: 32, display: 'flex', gap: 12 }}>
+              <button 
+                onClick={() => {
+                  setItems(items.map(i => i.id === editingItem.id ? editingItem : i));
+                  setEditingItem(null);
+                }}
+                style={{ ...adminButtonStyle, flex: 1 }}
+              >
+                Confirmar Ajustes
+              </button>
+              <button onClick={() => setEditingItem(null)} style={{ ...adminInputStyle, width: 'auto', padding: '0 24px' }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingItem && (
+        <div 
+          onClick={() => setEditingItem(null)}
+          style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(15,17,23,0.4)', zIndex: 90 }} 
+        />
+      )}
+
+      <style>{`
+        @keyframes slideIn {
+          from { transform: translateX(100%); }
+          to { transform: translateX(0); }
+        }
+      `}</style>
     </div>
   );
 }

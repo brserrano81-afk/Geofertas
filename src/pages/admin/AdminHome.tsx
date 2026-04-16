@@ -1,15 +1,23 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { 
+  Store, 
+  Tag, 
+  Clock, 
+  Star, 
+  Plus, 
+  ArrowRight,
+  ShoppingCart,
+  Zap
+} from "lucide-react";
 
 import { adminMvpService, type DashboardMetrics } from "../../services/admin/AdminMvpService";
-import AdminNav from "./AdminNav";
 import {
   adminBadgeStyle,
   adminButtonStyle,
-  adminCardGridStyle,
   adminPanelStyle,
   adminShellStyle,
-  adminTopbarStyle,
+  adminColors,
 } from "./adminStyles";
 
 const emptyMetrics: DashboardMetrics = {
@@ -19,6 +27,35 @@ const emptyMetrics: DashboardMetrics = {
   featuredOffers: 0,
   recentEntries: [],
 };
+
+function StatCard({ label, value, icon: Icon, color }: { label: string, value: number | string, icon: any, color: string }) {
+  return (
+    <article style={{
+      ...adminPanelStyle,
+      display: 'flex',
+      alignItems: 'center',
+      gap: 16,
+      padding: '20px'
+    }}>
+      <div style={{
+        width: 44,
+        height: 44,
+        borderRadius: 10,
+        background: `${color}15`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: color
+      }}>
+        <Icon size={22} />
+      </div>
+      <div>
+        <div style={{ fontSize: 13, color: adminColors.textSecondary, fontWeight: 500, marginBottom: 2 }}>{label}</div>
+        <div style={{ fontSize: 22, fontWeight: 800, color: adminColors.text }}>{value}</div>
+      </div>
+    </article>
+  );
+}
 
 export default function AdminHome() {
   const [metrics, setMetrics] = useState<DashboardMetrics>(emptyMetrics);
@@ -36,70 +73,53 @@ export default function AdminHome() {
       .finally(() => setLoading(false));
   }, []);
 
-  const statCards = [
-    { label: "Total de mercados", value: metrics.totalMarkets, tone: "neutral" as const },
-    { label: "Ofertas ativas", value: metrics.activeOffers, tone: "green" as const },
-    { label: "Ofertas vencidas", value: metrics.expiredOffers, tone: "amber" as const },
-    { label: "Ofertas em destaque", value: metrics.featuredOffers, tone: "green" as const },
-  ];
-
   return (
     <div style={adminShellStyle}>
-      <section style={adminPanelStyle}>
-        <div style={{ display: "grid", gap: 16 }}>
-          <div style={adminTopbarStyle}>
-            <div style={{ display: "grid", gap: 8, maxWidth: 760 }}>
-              <span style={adminBadgeStyle("green")}>Admin MVP</span>
-              <h1 style={{ margin: 0, fontSize: "clamp(2rem, 4vw, 3rem)", color: "#15322d" }}>
-                Painel administrativo operacional do Economiza Facil
-              </h1>
-              <p style={{ margin: 0, lineHeight: 1.7, color: "rgba(21,50,45,0.76)" }}>
-                Use este painel para alimentar a landing com mercados, ofertas e campanhas
-                reais direto no Firestore, sem backend extra nesta fase.
-              </p>
-            </div>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <Link to="/admin/offers" style={adminButtonStyle}>
-                Nova oferta
-              </Link>
-            </div>
-          </div>
-
-          <AdminNav />
+      {/* ── Header ─────────────────────────────────────────── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 8 }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800 }}>Dashboard Operacional</h1>
+          <p style={{ margin: '4px 0 0', color: adminColors.textSecondary, fontSize: 15 }}>
+            Bem-vindo ao centro de comando do Economiza Facil.
+          </p>
         </div>
+        <Link to="/admin/offers" style={{ ...adminButtonStyle, gap: 8 }}>
+          <Plus size={18} />
+          Nova Oferta
+        </Link>
+      </div>
+
+      {error ? (
+        <div style={{ ...adminBadgeStyle("red"), padding: '12px 20px' }}>{error}</div>
+      ) : null}
+
+      {/* ── Stats Grid ──────────────────────────────────────── */}
+      <section style={{
+        display: "grid",
+        gap: 20,
+        gridTemplateColumns: "repeat(4, 1fr)",
+      }}>
+        <StatCard label="Total de Mercados" value={loading ? "..." : metrics.totalMarkets} icon={Store} color={adminColors.primary} />
+        <StatCard label="Ofertas Ativas" value={loading ? "..." : metrics.activeOffers} icon={Tag} color="#10B981" />
+        <StatCard label="Ofertas Vencidas" value={loading ? "..." : metrics.expiredOffers} icon={Clock} color="#EF4444" />
+        <StatCard label="Destaques" value={loading ? "..." : metrics.featuredOffers} icon={Star} color="#F59E0B" />
       </section>
 
-      <section style={adminCardGridStyle}>
-        {statCards.map((card) => (
-          <article key={card.label} style={adminPanelStyle}>
-            <div style={{ display: "grid", gap: 10 }}>
-              <span style={adminBadgeStyle(card.tone)}>{card.label}</span>
-              <div style={{ fontSize: 34, fontWeight: 900, color: "#12332d" }}>
-                {loading ? "..." : card.value}
-              </div>
-            </div>
-          </article>
-        ))}
-      </section>
-
-      <section style={adminPanelStyle}>
-        <div style={{ display: "grid", gap: 14 }}>
-          <div style={adminTopbarStyle}>
-            <div>
-              <h2 style={{ margin: 0, color: "#17332f" }}>Ultimos cadastros</h2>
-              <p style={{ margin: "6px 0 0", color: "rgba(23,51,47,0.72)" }}>
-                Visao rapida do que entrou mais recentemente no Firestore.
-              </p>
-            </div>
+      {/* ── Bottom Content ─────────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 24 }}>
+        
+        {/* Recent Entries */}
+        <section style={adminPanelStyle}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Últimos Cadastros</h2>
+            <Link to="/admin/offers" style={{ color: adminColors.primary, fontSize: 13, fontWeight: 700, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+              Ver todos <ArrowRight size={14} />
+            </Link>
           </div>
-
-          {error ? (
-            <div style={{ ...adminBadgeStyle("red"), width: "fit-content" }}>{error}</div>
-          ) : null}
 
           {!metrics.recentEntries.length && !loading ? (
-            <div style={{ color: "rgba(23,51,47,0.68)" }}>
-              Ainda nao existem registros recentes para mostrar.
+            <div style={{ color: adminColors.textSecondary, padding: '20px 0', textAlign: 'center' }}>
+              Ainda não existem registros recentes.
             </div>
           ) : (
             <div style={{ display: "grid", gap: 12 }}>
@@ -107,34 +127,75 @@ export default function AdminHome() {
                 <article
                   key={`${entry.type}-${entry.id}`}
                   style={{
-                    padding: 16,
-                    borderRadius: 18,
-                    background: "white",
-                    border: "1px solid rgba(15,53,47,0.08)",
-                    display: "grid",
-                    gap: 8,
+                    padding: '12px 16px',
+                    borderRadius: 12,
+                    background: '#F9FAFB',
+                    border: `1px solid ${adminColors.border}`,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center"
                   }}
                 >
-                  <div style={adminTopbarStyle}>
-                    <div>
-                      <div style={{ fontWeight: 900, color: "#17332f" }}>{entry.title}</div>
-                      <div style={{ color: "rgba(23,51,47,0.72)", marginTop: 4 }}>{entry.subtitle}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ 
+                      width: 36, 
+                      height: 36, 
+                      borderRadius: 8, 
+                      background: entry.type === 'oferta' ? '#ECFDF5' : '#F3F4F6', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center',
+                      color: entry.type === 'oferta' ? '#10B981' : '#6B7280'
+                    }}>
+                      {entry.type === 'oferta' ? <ShoppingCart size={18} /> : <Store size={18} />}
                     </div>
-                    <div style={{ textAlign: "right" }}>
-                      <span style={adminBadgeStyle(entry.type === "oferta" ? "green" : "neutral")}>
-                        {entry.type}
-                      </span>
-                      <div style={{ marginTop: 6, color: "rgba(23,51,47,0.64)", fontSize: 13 }}>
-                        {entry.createdAtLabel}
-                      </div>
+                    <div>
+                      <div style={{ fontWeight: 700, color: adminColors.text, fontSize: 14 }}>{entry.title}</div>
+                      <div style={{ color: adminColors.textSecondary, fontSize: 12, marginTop: 2 }}>{entry.subtitle}</div>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={adminBadgeStyle(entry.type === "oferta" ? "green" : "neutral")}>
+                      {entry.type}
+                    </span>
+                    <div style={{ color: adminColors.textSecondary, fontSize: 11 }}>
+                      {entry.createdAtLabel}
                     </div>
                   </div>
                 </article>
               ))}
             </div>
           )}
-        </div>
-      </section>
+        </section>
+
+        {/* Quick Tips / Info */}
+        <section style={{ display: 'grid', gap: 24 }}>
+          <div style={{ ...adminPanelStyle, background: adminColors.sidebarBg, color: '#fff', border: 'none' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              <div style={{ color: adminColors.primary }}><Zap size={24} fill={adminColors.primary} /></div>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Dica Rápida</h3>
+            </div>
+            <p style={{ margin: 0, fontSize: 13, color: '#9CA3AF', lineHeight: 1.6 }}>
+              O sistema de ofertas é atualizado em tempo real na landing page. Lembre-se de revisar a validade dos produtos antes de publicá-los como destaque.
+            </p>
+          </div>
+
+          <div style={{ ...adminPanelStyle, background: `${adminColors.primary}05`, border: `1px dashed ${adminColors.primary}33` }}>
+            <h3 style={{ margin: '0 0 12px 0', fontSize: 15, fontWeight: 700 }}>Status do Sistema</h3>
+            <div style={{ display: 'grid', gap: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 13, color: adminColors.textSecondary }}>Integração WhatsApp</span>
+                <span style={adminBadgeStyle('green')}>Online</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 13, color: adminColors.textSecondary }}>Processamento IA</span>
+                <span style={adminBadgeStyle('green')}>Estável</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
     </div>
   );
 }

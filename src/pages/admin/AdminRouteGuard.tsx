@@ -2,6 +2,8 @@ import { Navigate, Outlet, useLocation } from "react-router-dom";
 
 import { isAdminAuthenticated, isAdminConfigured } from "./adminAuth";
 
+import AdminLayout from "./AdminLayout";
+
 export default function AdminRouteGuard() {
   const location = useLocation();
 
@@ -56,5 +58,9 @@ export default function AdminRouteGuard() {
     return <Navigate to="/admin/login" replace state={{ from: location }} />;
   }
 
-  return <Outlet />;
+  return (
+    <AdminLayout>
+      <Outlet />
+    </AdminLayout>
+  );
 }

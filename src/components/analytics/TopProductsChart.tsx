@@ -8,11 +8,9 @@ interface Props {
 export default function TopProductsChart({ data }: Props) {
     return (
         <HorizontalBarChart
-            title="Produtos mais consultados"
-            badge="consultas de preço"
+            title=""
             data={data}
-            color="#0f7b6c"
-            emptyMessage="Nenhuma consulta de preço registrada ainda."
+            emptyMessage="Nenhum produto consultado ainda."
         />
     );
 }

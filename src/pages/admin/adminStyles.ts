@@ -1,6 +1,29 @@
+/**
+ * Admin UI Design System (Optsolv Model - Royal Purple Theme)
+ * Centralized styles for the Economiza Fácil Admin Panel.
+ */
+
+export const adminColors = {
+  primary: "#6D28D9", // Royal Purple
+  primaryLight: "#EDE9FE",
+  primaryText: "#FFFFFF",
+  sidebarBg: "#0F1117", // Dark Navy
+  sidebarActive: "rgba(109, 40, 217, 0.25)",
+  background: "#F9FAFB",
+  surface: "#FFFFFF",
+  text: "#111827",
+  textSecondary: "#6B7280",
+  border: "#E5E7EB",
+  success: "#10B981",
+  error: "#EF4444",
+  warning: "#F59E0B",
+  neutral: "#9CA3AF",
+};
+
 export const adminShellStyle = {
   display: "grid",
-  gap: 18,
+  gap: 24,
+  color: adminColors.text,
 };
 
 export const adminTopbarStyle = {
@@ -8,118 +31,122 @@ export const adminTopbarStyle = {
   justifyContent: "space-between",
   alignItems: "center",
   gap: 12,
-  flexWrap: "wrap" as const,
+  padding: "16px 24px",
+  background: adminColors.surface,
+  borderBottom: `1px solid ${adminColors.border}`,
+  minHeight: 64,
+  boxSizing: "border-box" as const,
 };
 
 export const adminPanelStyle = {
-  background: "rgba(255,255,255,0.92)",
-  border: "1px solid rgba(15, 53, 47, 0.08)",
-  borderRadius: 22,
-  boxShadow: "0 18px 40px rgba(12,63,56,0.08)",
-  padding: "22px",
+  background: adminColors.surface,
+  border: `1px solid ${adminColors.border}`,
+  borderRadius: 12,
+  boxShadow: "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)",
+  padding: "24px",
+  transition: "box-shadow 0.2s ease",
 };
 
 export const adminGridStyle = {
   display: "grid",
-  gap: 14,
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 20,
+  gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
 };
 
-export const adminCardGridStyle = {
-  display: "grid",
-  gap: 14,
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+export const adminKPIStyle = {
+  ...adminPanelStyle,
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 8,
 };
 
 export const adminInputStyle = {
   width: "100%",
-  borderRadius: 14,
-  border: "1px solid rgba(15,53,47,0.14)",
+  borderRadius: 8,
+  border: `1px solid ${adminColors.border}`,
   background: "white",
-  padding: "12px 14px",
+  padding: "10px 14px",
   fontSize: 14,
-  color: "#16322e",
+  color: adminColors.text,
   outline: "none",
   boxSizing: "border-box" as const,
-};
-
-export const adminTextAreaStyle = {
-  ...adminInputStyle,
-  minHeight: 108,
-  resize: "vertical" as const,
-  lineHeight: 1.5,
+  transition: "border-color 0.2s, box-shadow 0.2s",
+  ":focus": {
+    borderColor: adminColors.primary,
+    boxShadow: `0 0 0 3px ${adminColors.primaryLight}`,
+  },
 };
 
 export const adminButtonStyle = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  minHeight: 46,
-  padding: "0 16px",
-  borderRadius: 14,
+  minHeight: 40,
+  padding: "0 20px",
+  borderRadius: 8,
   border: "none",
-  background: "#0f7b6c",
+  background: adminColors.primary,
   color: "white",
-  fontWeight: 800,
+  fontWeight: 600,
+  fontSize: 14,
   cursor: "pointer",
   textDecoration: "none",
+  transition: "filter 0.2s",
 };
 
 export const adminSecondaryButtonStyle = {
   ...adminButtonStyle,
-  background: "rgba(15,123,108,0.12)",
-  color: "#0f6d61",
-  border: "1px solid rgba(15,123,108,0.14)",
+  background: adminColors.primaryLight,
+  color: adminColors.primary,
+  border: `1px solid ${adminColors.primary}33`,
 };
 
 export const adminDangerButtonStyle = {
   ...adminButtonStyle,
-  background: "rgba(158, 40, 40, 0.10)",
-  color: "#8d2a2a",
-  border: "1px solid rgba(158, 40, 40, 0.16)",
+  background: "#FEE2E2",
+  color: adminColors.error,
+  border: `1px solid ${adminColors.error}33`,
 };
 
-export const adminGhostLinkStyle = {
-  color: "#0f6d61",
-  textDecoration: "none",
-  fontWeight: 800,
-};
-
-export const adminBadgeStyle = (tone: "green" | "red" | "amber" | "neutral" = "neutral") => {
+export const adminBadgeStyle = (tone: "green" | "red" | "amber" | "neutral" | "purple" = "neutral") => {
   const variants = {
     green: {
-      background: "rgba(15,123,108,0.12)",
-      color: "#0f6d61",
+      background: "#D1FAE5",
+      color: "#065F46",
     },
     red: {
-      background: "rgba(158, 40, 40, 0.10)",
-      color: "#8d2a2a",
+      background: "#FEE2E2",
+      color: "#991B1B",
     },
     amber: {
-      background: "rgba(184, 128, 16, 0.12)",
-      color: "#9c6c0c",
+      background: "#FEF3C7",
+      color: "#92400E",
     },
     neutral: {
-      background: "rgba(17,52,47,0.08)",
-      color: "#11342f",
+      background: "#F3F4F6",
+      color: "#374151",
+    },
+    purple: {
+      background: adminColors.primaryLight,
+      color: adminColors.primary,
     },
   }[tone];
 
   return {
     display: "inline-flex",
     alignItems: "center",
-    minHeight: 30,
-    padding: "0 10px",
-    borderRadius: 999,
+    height: 24,
+    padding: "0 8px",
+    borderRadius: 6,
     fontSize: 12,
-    fontWeight: 800,
+    fontWeight: 600,
     ...variants,
   };
 };
 
-export const adminActionsRowStyle = {
-  display: "flex",
-  gap: 10,
-  flexWrap: "wrap" as const,
-  alignItems: "center",
+export const adminGhostLinkStyle = {
+  color: adminColors.primary,
+  textDecoration: "none",
+  fontWeight: 600,
+  fontSize: 14,
 };

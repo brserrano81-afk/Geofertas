@@ -8,11 +8,9 @@ interface Props {
 export default function MarketRankingChart({ data }: Props) {
     return (
         <HorizontalBarChart
-            title="Mercados mais consultados"
-            badge="por volume de eventos"
+            title=""
             data={data}
-            color="#136b5f"
-            emptyMessage="Nenhum mercado identificado nos eventos ainda."
+            emptyMessage="Nenhum mercado identificado ainda."
         />
     );
 }
