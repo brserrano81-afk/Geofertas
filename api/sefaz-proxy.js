@@ -305,7 +305,30 @@ function normalizeEvolutionEvent(payload = {}, routeEvent = null) {
     const event = routeEvent || payload.event || payload.type || 'unknown';
 
     // Mapeamento robusto de tipo de mensagem
-    let messageType = data.messageType || Object.keys(message)[0] || payload.type || 'unknown';
+    // Object.keys(message)[0] é frágil — messageContextInfo costuma ser a primeira chave
+    // no Evolution API v2, mascarando o tipo real. Buscamos na ordem de prioridade.
+    const KNOWN_MESSAGE_TYPES = [
+        'conversation',
+        'extendedTextMessage',
+        'imageMessage',
+        'videoMessage',
+        'audioMessage',
+        'documentMessage',
+        'stickerMessage',
+        'reactionMessage',
+        'locationMessage',
+        'liveLocationMessage',
+        'contactMessage',
+        'contactsArrayMessage',
+        'ptt',
+        'voice',
+        'listMessage',
+        'buttonsMessage',
+        'templateMessage',
+        'pollCreationMessage',
+    ];
+    const detectedType = KNOWN_MESSAGE_TYPES.find((t) => message[t] !== undefined);
+    let messageType = data.messageType || detectedType || payload.type || 'unknown';
 
     // Normalização forçada para áudio (Evolution v1/v2 variam chaves)
     if (message.audioMessage || message.ptt || message.voice || data.audio || (data.media && data.media.audio)) {
@@ -363,8 +386,8 @@ function shouldEnqueueInboundMessage(normalizedEvent) {
         return true;
     }
 
-    // Task 3: 'unknown' só entra se tiver texto real extraído
-    return normalizedEvent.messageType === 'unknown' && Boolean(normalizedEvent.textPreview);
+    // Fallback: qualquer tipo entra se conseguimos extrair texto real (cobre tipos novos da Evolution)
+    return Boolean(normalizedEvent.textPreview);
 }
 
 function validateNormalizedEvent(normalizedEvent) {
