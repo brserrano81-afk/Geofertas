@@ -652,6 +652,175 @@ app.get('/proxy', async (req, res) => {
     }
 });
 
+// --- Processamento de áudio via Gemini 1.5 Flash ---
+
+function extractAudioMediaUrl(normalizedEvent) {
+    const rawData = normalizedEvent.raw?.data || {};
+    const data = Array.isArray(rawData) ? (rawData[0] || {}) : rawData;
+    const message = data.message || {};
+
+    // Log diagnóstico: mostra todos os campos disponíveis para localizar a URL
+    console.log('[AudioProcessor] extractAudioMediaUrl — data keys:', Object.keys(data));
+    console.log('[AudioProcessor] extractAudioMediaUrl — message keys:', Object.keys(message));
+    console.log('[AudioProcessor] extractAudioMediaUrl — data.url:', data.url);
+    console.log('[AudioProcessor] extractAudioMediaUrl — data.mediaUrl:', data.mediaUrl);
+    console.log('[AudioProcessor] extractAudioMediaUrl — message.audioMessage:', JSON.stringify(message.audioMessage ?? null));
+    console.log('[AudioProcessor] extractAudioMediaUrl — message.ptt:', JSON.stringify(message.ptt ?? null));
+
+    const resolved = (
+        message.audioMessage?.url ||
+        message.ptt?.url ||
+        message.voice?.url ||
+        data.mediaUrl ||
+        data.url ||
+        null
+    );
+
+    console.log('[AudioProcessor] extractAudioMediaUrl — URL resolvida:', resolved ?? '(nenhuma)');
+    return resolved;
+}
+
+async function processAudioMessage(normalizedEvent) {
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    if (!GEMINI_API_KEY) {
+        console.error('[AudioProcessor] GEMINI_API_KEY não configurada — defina a variável de ambiente');
+        return null;
+    }
+
+    const mediaUrl = extractAudioMediaUrl(normalizedEvent);
+    if (!mediaUrl) {
+        console.error('[AudioProcessor] Nenhuma URL de mídia encontrada — áudio ignorado');
+        return null;
+    }
+
+    // Baixa o arquivo de áudio
+    let audioBase64;
+    let mimeType = 'audio/ogg'; // padrão WhatsApp
+    try {
+        console.log('[AudioProcessor] Baixando áudio de:', mediaUrl);
+        const audioResp = await fetch(mediaUrl);
+        if (!audioResp.ok) {
+            const body = await audioResp.text().catch(() => '');
+            console.error(`[AudioProcessor] Falha ao baixar áudio: HTTP ${audioResp.status} — body: ${body}`);
+            return null;
+        }
+        const contentType = audioResp.headers.get('content-type');
+        if (contentType) mimeType = contentType.split(';')[0].trim();
+        const buffer = await audioResp.arrayBuffer();
+        audioBase64 = Buffer.from(buffer).toString('base64');
+        console.log(`[AudioProcessor] Áudio baixado OK — mimeType: ${mimeType}, tamanho: ${buffer.byteLength} bytes`);
+    } catch (err) {
+        console.error('[AudioProcessor] Erro ao baixar áudio:', err);
+        return null;
+    }
+
+    // Envia para o Gemini 1.5 Flash
+    const systemPrompt = 'Você é o assistente do Economiza Fácil. Ouça este áudio e extraia os produtos e quantidades citados. Retorne APENAS um JSON no formato: {"produtos": [{"nome": "item", "qtd": "valor"}]}. Se não houver produtos, retorne um JSON vazio.';
+
+    const geminiPayload = {
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents: [{
+            role: 'user',
+            parts: [{ inline_data: { mime_type: mimeType, data: audioBase64 } }],
+        }],
+        generationConfig: { responseMimeType: 'application/json' },
+    };
+
+    let geminiResponseJson;
+    try {
+        console.log('[AudioProcessor] Chamando Gemini 1.5 Flash...');
+        const geminiResp = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(geminiPayload),
+            },
+        );
+        if (!geminiResp.ok) {
+            const errText = await geminiResp.text();
+            console.error(`[AudioProcessor] Gemini API erro HTTP ${geminiResp.status}:`, errText);
+            return null;
+        }
+        geminiResponseJson = await geminiResp.json();
+        console.log('[AudioProcessor] Resposta bruta do Gemini:', JSON.stringify(geminiResponseJson));
+    } catch (err) {
+        console.error('[AudioProcessor] Erro na chamada ao Gemini:', err);
+        return null;
+    }
+
+    // Parseia resposta do Gemini
+    let produtos = [];
+    try {
+        const rawText = geminiResponseJson?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+        console.log('[AudioProcessor] Texto bruto do Gemini para parse:', rawText);
+        const parsed = JSON.parse(rawText);
+        produtos = Array.isArray(parsed.produtos) ? parsed.produtos : [];
+    } catch (err) {
+        console.error('[AudioProcessor] Falha ao parsear JSON do Gemini:', err);
+        return null;
+    }
+
+    if (!produtos.length) {
+        return { added: [], message: 'Não identifiquei produtos no áudio. Pode repetir?' };
+    }
+
+    const newItems = produtos
+        .map((p, i) => ({
+            id: `audio_${Date.now()}_${i}`,
+            name: String(p.nome || '').trim(),
+            quantity: p.qtd ? (parseFloat(String(p.qtd).replace(',', '.')) || 1) : 1,
+        }))
+        .filter((item) => item.name);
+
+    if (!newItems.length) {
+        return { added: [], message: 'Não consegui identificar itens válidos no áudio.' };
+    }
+
+    // Adiciona itens à lista ativa do usuário no Firestore
+    const userId = normalizedEvent.storageUserId || normalizedEvent.userId;
+    if (!userId) {
+        console.error('[AudioProcessor] userId ausente — não foi possível salvar os itens');
+        return null;
+    }
+
+    try {
+        const listsRef = db.collection('users').doc(userId).collection('lists');
+        const activeSnap = await listsRef.where('status', '==', 'active').limit(1).get();
+
+        if (!activeSnap.empty) {
+            const activeDoc = activeSnap.docs[0];
+            const existingItems = activeDoc.data().items || [];
+            await activeDoc.ref.update({
+                items: [...existingItems, ...newItems],
+                updatedAt: serverTimestamp(),
+            });
+        } else {
+            await listsRef.add({
+                items: newItems,
+                status: 'active',
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            });
+        }
+
+        const itemLines = newItems
+            .map((i) => `• ${i.name}${i.quantity !== 1 ? ` (${i.quantity})` : ''}`)
+            .join('\n');
+
+        const confirmationText = `✅ Adicionei à sua lista:\n${itemLines}\n\nDigite *minha lista* para ver tudo! 🛒`;
+
+        console.log(`[AudioProcessor] ${newItems.length} item(ns) adicionado(s) à lista de ${maskIdentifier(normalizedEvent.remoteJid)}`);
+
+        return { added: newItems, message: confirmationText };
+    } catch (err) {
+        console.error('[AudioProcessor] Erro ao salvar itens no Firestore:', err);
+        return null;
+    }
+}
+
+// -------------------------------------------------------
+
 app.post('/webhook/whatsapp-entrada', webhookRateLimit, async (req, res) => {
     const normalizedEvent = normalizeEvolutionEvent(req.body);
     const identity = await resolveCanonicalIdentity(normalizedEvent);
@@ -725,7 +894,38 @@ app.post('/webhook/whatsapp-entrada', webhookRateLimit, async (req, res) => {
             inboxId: enqueueResult.inboxId,
         });
         console.log(`[EvolutionWebhook] [${normalizedEvent.correlationId}] Event ${normalizedEvent.event} recebido de ${maskIdentifier(normalizedEvent.remoteJid)} -> ${filePath}`);
-        res.status(200).json({ ok: true, event: normalizedEvent.event, inboxId: enqueueResult.inboxId, correlationId: normalizedEvent.correlationId });
+
+        // Processamento assíncrono de áudio via Gemini
+        let audioResult = null;
+        if (normalizedEvent.messageType === 'audioMessage') {
+            audioResult = await processAudioMessage(normalizedEvent);
+            if (audioResult) {
+                try {
+                    await db.collection('message_outbox').add({
+                        correlationId: normalizedEvent.correlationId,
+                        inboxId: enqueueResult.inboxId,
+                        userId: normalizedEvent.storageUserId || normalizedEvent.userId,
+                        remoteJid: normalizedEvent.remoteJid,
+                        text: audioResult.message,
+                        itemsAdded: audioResult.added,
+                        source: 'audio_processor',
+                        status: 'pending',
+                        createdAt: serverTimestamp(),
+                        createdAtIso: nowIso(),
+                    });
+                } catch (outboxErr) {
+                    console.error('[AudioProcessor] Erro ao salvar confirmação no outbox:', outboxErr.message);
+                }
+            }
+        }
+
+        res.status(200).json({
+            ok: true,
+            event: normalizedEvent.event,
+            inboxId: enqueueResult.inboxId,
+            correlationId: normalizedEvent.correlationId,
+            ...(audioResult ? { audioProcessed: true, itemsAdded: audioResult.added.length, confirmation: audioResult.message } : {}),
+        });
     } catch (err) {
         console.error('[EvolutionWebhook] Error handling webhook:', err);
         res.status(500).json({ ok: false, error: err.message });
@@ -805,7 +1005,38 @@ app.post('/webhook/whatsapp-entrada/:event', webhookRateLimit, async (req, res) 
             inboxId: enqueueResult.inboxId,
         });
         console.log(`[EvolutionWebhook] [${normalizedEvent.correlationId}] Event ${normalizedEvent.event} recebido de ${maskIdentifier(normalizedEvent.remoteJid)} -> ${filePath}`);
-        res.status(200).json({ ok: true, event: normalizedEvent.event, inboxId: enqueueResult.inboxId, correlationId: normalizedEvent.correlationId });
+
+        // Processamento assíncrono de áudio via Gemini
+        let audioResult = null;
+        if (normalizedEvent.messageType === 'audioMessage') {
+            audioResult = await processAudioMessage(normalizedEvent);
+            if (audioResult) {
+                try {
+                    await db.collection('message_outbox').add({
+                        correlationId: normalizedEvent.correlationId,
+                        inboxId: enqueueResult.inboxId,
+                        userId: normalizedEvent.storageUserId || normalizedEvent.userId,
+                        remoteJid: normalizedEvent.remoteJid,
+                        text: audioResult.message,
+                        itemsAdded: audioResult.added,
+                        source: 'audio_processor',
+                        status: 'pending',
+                        createdAt: serverTimestamp(),
+                        createdAtIso: nowIso(),
+                    });
+                } catch (outboxErr) {
+                    console.error('[AudioProcessor] Erro ao salvar confirmação no outbox:', outboxErr.message);
+                }
+            }
+        }
+
+        res.status(200).json({
+            ok: true,
+            event: normalizedEvent.event,
+            inboxId: enqueueResult.inboxId,
+            correlationId: normalizedEvent.correlationId,
+            ...(audioResult ? { audioProcessed: true, itemsAdded: audioResult.added.length, confirmation: audioResult.message } : {}),
+        });
     } catch (err) {
         console.error('[EvolutionWebhook] Error handling event webhook:', err);
         res.status(500).json({ ok: false, error: err.message });

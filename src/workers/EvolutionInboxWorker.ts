@@ -3,7 +3,6 @@ import { adminDb as db, admin } from '../lib/firebase-admin';
 const serverTimestamp = admin.firestore.FieldValue.serverTimestamp;
 import { chatService } from '../services/ChatService';
 import { isMasterAdmin, masterAdminService } from '../services/MasterAdminService';
-import { transcriptionService } from '../services/TranscriptionService';
 import { maskIdentifier } from '../utils/maskSensitiveData';
 
 dotenv.config();
@@ -479,33 +478,194 @@ async function sendTextViaEvolution(remoteJid: string, text: string) {
     );
 }
 
-async function buildResponse(rawMessage: InboxMessage): Promise<ResponseBuildResult> {
-    let message = rawMessage;
+async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBuildResult> {
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    if (!GEMINI_API_KEY) {
+        console.error(`[AudioProcessor] user=${message.userId} — GEMINI_API_KEY não configurada`);
+        return {
+            text: 'Ainda não consigo processar áudio por aqui. Pode me mandar em texto?',
+            shouldSend: true,
+            usedFallback: true,
+            reason: 'audio_gemini_key_missing',
+        };
+    }
 
-    // ── Interceptador de Áudio ────────────────────────────────────────────────
-    // Se a mensagem for áudio com payload binário, tenta transcrever via Whisper.
-    // Em caso de sucesso, normaliza para o fluxo de texto.
-    // Em caso de falha, retorna fallback imediatamente sem propagar o erro.
-    if (message.messageType === 'audioMessage' && message.mediaBase64) {
-        try {
-            const transcribedText = await transcriptionService.transcribeAudio(
-                Buffer.from(message.mediaBase64, 'base64'),
-            );
-            if (transcribedText) {
-                console.log(`[TRANSCRIPTION_OK] user=${message.userId} chars=${transcribedText.length}`);
-                message = { ...message, text: transcribedText };
-            } else {
-                console.warn(`[TRANSCRIPTION_EMPTY] user=${message.userId} — Whisper retornou texto vazio`);
-            }
-        } catch (err: any) {
-            console.warn(`[FALLBACK_TRIGGERED] user=${message.userId} reason=transcription_failed err=${err?.message}`);
+    const mediaUrl = message.mediaUrl;
+    if (!mediaUrl) {
+        console.error(`[AudioProcessor] user=${message.userId} — mediaUrl ausente na InboxMessage`);
+        return {
+            text: 'Recebi seu áudio, mas não consegui acessá-lo. Pode tentar de novo?',
+            shouldSend: true,
+            usedFallback: true,
+            reason: 'audio_no_media_url',
+        };
+    }
+
+    // Baixa o arquivo de áudio
+    let audioBase64: string;
+    let mimeType = 'audio/ogg'; // padrão WhatsApp
+    try {
+        console.log(`[AudioProcessor] user=${message.userId} — Baixando áudio de: ${mediaUrl}`);
+        const audioResp = await fetch(mediaUrl);
+        if (!audioResp.ok) {
+            const body = await audioResp.text().catch(() => '');
+            console.error(`[AudioProcessor] user=${message.userId} — Falha HTTP ${audioResp.status} ao baixar áudio: ${body}`);
             return {
-                text: 'Ainda não consigo processar áudio por aqui. Pode me mandar em texto ou foto?',
+                text: 'Recebi seu áudio, mas não consegui acessá-lo. Pode tentar de novo?',
                 shouldSend: true,
                 usedFallback: true,
-                reason: 'audio_transcription_failed',
+                reason: 'audio_download_failed',
             };
         }
+        const contentType = audioResp.headers.get('content-type');
+        if (contentType) mimeType = contentType.split(';')[0].trim();
+        const buffer = await audioResp.arrayBuffer();
+        audioBase64 = Buffer.from(buffer).toString('base64');
+        console.log(`[AudioProcessor] user=${message.userId} — Áudio baixado OK — mimeType: ${mimeType}, tamanho: ${buffer.byteLength} bytes`);
+    } catch (err: any) {
+        console.error(`[AudioProcessor] user=${message.userId} — Erro ao baixar áudio:`, err);
+        return {
+            text: 'Recebi seu áudio, mas não consegui acessá-lo. Pode tentar de novo?',
+            shouldSend: true,
+            usedFallback: true,
+            reason: 'audio_download_error',
+        };
+    }
+
+    // Envia para o Gemini 1.5 Flash
+    const systemPrompt = 'Você é o assistente do Economiza Fácil. Ouça este áudio e extraia os produtos e quantidades citados. Retorne APENAS um JSON no formato: {"produtos": [{"nome": "item", "qtd": "valor"}]}. Se não houver produtos, retorne um JSON vazio.';
+
+    const geminiPayload = {
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: 'user', parts: [{ inline_data: { mime_type: mimeType, data: audioBase64 } }] }],
+        generationConfig: { responseMimeType: 'application/json' },
+    };
+
+    let geminiJson: any;
+    try {
+        console.log(`[AudioProcessor] user=${message.userId} — Chamando Gemini 1.5 Flash...`);
+        const geminiResp = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(geminiPayload) },
+        );
+        if (!geminiResp.ok) {
+            const errText = await geminiResp.text();
+            console.error(`[AudioProcessor] user=${message.userId} — Gemini API erro HTTP ${geminiResp.status}:`, errText);
+            return {
+                text: 'Tive um problema ao processar seu áudio. Pode repetir em texto?',
+                shouldSend: true,
+                usedFallback: true,
+                reason: 'audio_gemini_api_error',
+            };
+        }
+        geminiJson = await geminiResp.json();
+        console.log(`[AudioProcessor] user=${message.userId} — Resposta bruta Gemini:`, JSON.stringify(geminiJson));
+    } catch (err: any) {
+        console.error(`[AudioProcessor] user=${message.userId} — Erro na chamada Gemini:`, err);
+        return {
+            text: 'Tive um problema ao processar seu áudio. Pode repetir em texto?',
+            shouldSend: true,
+            usedFallback: true,
+            reason: 'audio_gemini_fetch_error',
+        };
+    }
+
+    // Parseia resposta
+    let produtos: Array<{ nome: string; qtd: string }> = [];
+    try {
+        const rawText: string = geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+        console.log(`[AudioProcessor] user=${message.userId} — Texto bruto Gemini:`, rawText);
+        const parsed = JSON.parse(rawText);
+        produtos = Array.isArray(parsed.produtos) ? parsed.produtos : [];
+    } catch (err: any) {
+        console.error(`[AudioProcessor] user=${message.userId} — Falha ao parsear JSON do Gemini:`, err);
+        return {
+            text: 'Entendi seu áudio mas não identifiquei produtos. Pode me mandar em texto?',
+            shouldSend: true,
+            usedFallback: true,
+            reason: 'audio_gemini_parse_error',
+        };
+    }
+
+    if (!produtos.length) {
+        return {
+            text: 'Ouvi seu áudio mas não identifiquei produtos. Pode repetir ou mandar em texto?',
+            shouldSend: true,
+            usedFallback: false,
+            reason: 'audio_no_products',
+        };
+    }
+
+    const newItems = produtos
+        .map((p, i) => ({
+            id: `audio_${Date.now()}_${i}`,
+            name: String(p.nome || '').trim(),
+            quantity: p.qtd ? (parseFloat(String(p.qtd).replace(',', '.')) || 1) : 1,
+        }))
+        .filter((item) => item.name);
+
+    if (!newItems.length) {
+        return {
+            text: 'Ouvi seu áudio mas não identifiquei produtos válidos. Pode tentar de novo?',
+            shouldSend: true,
+            usedFallback: false,
+            reason: 'audio_invalid_products',
+        };
+    }
+
+    // Salva na lista ativa do usuário no Firestore
+    const userId = message.storageUserId || message.userId;
+    try {
+        const listsRef = db.collection('users').doc(userId).collection('lists');
+        const activeSnap = await listsRef.where('status', '==', 'active').limit(1).get();
+
+        if (!activeSnap.empty) {
+            const activeDoc = activeSnap.docs[0];
+            const existingItems: unknown[] = activeDoc.data().items || [];
+            await activeDoc.ref.update({
+                items: [...existingItems, ...newItems],
+                updatedAt: serverTimestamp(),
+            });
+        } else {
+            await listsRef.add({
+                items: newItems,
+                status: 'active',
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            });
+        }
+    } catch (err: any) {
+        console.error(`[AudioProcessor] user=${message.userId} — Erro ao salvar itens no Firestore:`, err);
+        return {
+            text: 'Identifiquei os produtos mas não consegui salvar na sua lista. Tente novamente.',
+            shouldSend: true,
+            usedFallback: true,
+            reason: 'audio_firestore_error',
+        };
+    }
+
+    const itemLines = newItems
+        .map((i) => `• ${i.name}${i.quantity !== 1 ? ` (${i.quantity})` : ''}`)
+        .join('\n');
+
+    console.log(`[AudioProcessor] user=${message.userId} — ${newItems.length} item(ns) adicionado(s) à lista`);
+
+    return {
+        text: `✅ Adicionei à sua lista:\n${itemLines}\n\nDigite *minha lista* para ver tudo! 🛒`,
+        shouldSend: true,
+        usedFallback: false,
+        reason: 'audio_processed_gemini',
+    };
+}
+
+async function buildResponse(rawMessage: InboxMessage): Promise<ResponseBuildResult> {
+    const message = rawMessage;
+
+    // ── Áudio: processa via Gemini 1.5 Flash ─────────────────────────────────
+    // Evolution API v2 envia mediaUrl (não mediaBase64). O processamento Gemini
+    // faz download, transcrição e já persiste os itens na lista do usuário.
+    if (message.messageType === 'audioMessage') {
+        return processAudioWithGemini(message);
     }
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -533,22 +693,6 @@ async function buildResponse(rawMessage: InboxMessage): Promise<ResponseBuildRes
             usedFallback: true,
             reason: 'invalid_media',
         };
-    }
-
-    // Branch explícito para áudio (Task 4)
-    if (message.messageType === 'audioMessage') {
-        const audioText = String(message.text || '').trim();
-        // Se não houver texto (transcrição) ou for apenas o placeholder [audio]
-        if (!audioText || audioText === '[audio]') {
-            console.log(`[FALLBACK_TRIGGERED] user=${message.userId} reason=audio_no_transcription`);
-            return {
-                text: 'Ainda não consigo processar áudio por aqui. Pode me mandar em texto ou foto?',
-                shouldSend: true,
-                usedFallback: true,
-                reason: 'audio_no_transcription',
-            };
-        }
-        // Se houver texto (transcrição da Evolution), segue fluxo normal de texto
     }
 
     const text = String(message.text || '').trim();
