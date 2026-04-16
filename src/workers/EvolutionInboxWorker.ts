@@ -667,8 +667,27 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
     }
     // ─────────────────────────────────────────────────────────────────────────
 
-    // Envia para o Gemini 1.5 Flash
-    const systemPrompt = 'Você é o assistente do Economiza Fácil. Ouça este áudio e extraia os produtos e quantidades citados. Retorne APENAS um JSON no formato: {"produtos": [{"nome": "item", "qtd": "valor"}]}. Se não houver produtos, retorne um JSON vazio.';
+    // ── Classificador de intenção + extração de produtos via Gemini ─────────────
+    const systemPrompt = `Você é o assistente de voz do Economiza Fácil, um app de comparação de preços de supermercado.
+
+Ouça o áudio e retorne APENAS um JSON com dois campos:
+
+1. "intent": classifique a intenção do usuário em uma dessas opções:
+   - "ADD_LIST"    → usuário quer adicionar produtos à lista de compras
+                     (ex: "coloca arroz", "preciso de feijão", "anota leite e ovos")
+   - "CHECK_PRICE" → usuário quer saber preço, oferta ou comparar mercados
+                     (ex: "quanto tá o arroz?", "onde o café tá mais barato?", "qual o preço do leite?")
+
+2. "produtos": lista de produtos mencionados, independente da intenção.
+   Formato: [{"nome": "nome do produto", "qtd": "quantidade ou vazio"}]
+   Se nenhum produto for identificado, retorne lista vazia.
+
+Exemplos:
+- "coloca 2 kg de arroz na lista" → {"intent":"ADD_LIST","produtos":[{"nome":"arroz","qtd":"2"}]}
+- "quanto tá o feijão?" → {"intent":"CHECK_PRICE","produtos":[{"nome":"feijão","qtd":""}]}
+- "preciso de leite, ovos e manteiga" → {"intent":"ADD_LIST","produtos":[{"nome":"leite","qtd":""},{"nome":"ovos","qtd":""},{"nome":"manteiga","qtd":""}]}
+
+Retorne SOMENTE o JSON, sem texto adicional.`;
 
     const geminiPayload = {
         system_instruction: { parts: [{ text: systemPrompt }] },
@@ -678,7 +697,7 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
 
     let geminiJson: any;
     try {
-        console.log(`[AudioProcessor] user=${message.userId} — Chamando Gemini 1.5 Flash...`);
+        console.log(`[AudioProcessor] user=${message.userId} — Chamando Gemini 2.5 Flash...`);
         const geminiResp = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
             { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(geminiPayload) },
@@ -694,7 +713,6 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
             };
         }
         geminiJson = await geminiResp.json();
-        console.log(`[AudioProcessor] user=${message.userId} — Resposta bruta Gemini:`, JSON.stringify(geminiJson));
     } catch (err: any) {
         console.error(`[AudioProcessor] user=${message.userId} — Erro na chamada Gemini:`, err);
         return {
@@ -705,22 +723,26 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
         };
     }
 
-    // Parseia resposta
+    // Parseia resposta com intent + produtos
+    let intent: string = 'ADD_LIST';
     let produtos: Array<{ nome: string; qtd: string }> = [];
     try {
         const rawText: string = geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-        console.log(`[AudioProcessor] user=${message.userId} — Texto bruto Gemini:`, rawText);
+        console.log(`[AudioProcessor] user=${message.userId} — Gemini respondeu:`, rawText);
         const parsed = JSON.parse(rawText);
+        intent = String(parsed.intent || 'ADD_LIST').toUpperCase();
         produtos = Array.isArray(parsed.produtos) ? parsed.produtos : [];
     } catch (err: any) {
         console.error(`[AudioProcessor] user=${message.userId} — Falha ao parsear JSON do Gemini:`, err);
         return {
-            text: 'Entendi seu áudio mas não identifiquei produtos. Pode me mandar em texto?',
+            text: 'Entendi seu áudio mas não identifiquei o que você precisa. Pode me mandar em texto?',
             shouldSend: true,
             usedFallback: true,
             reason: 'audio_gemini_parse_error',
         };
     }
+
+    console.log(`[AudioProcessor] user=${message.userId} — intent: ${intent}, produtos: ${produtos.length}`);
 
     if (!produtos.length) {
         return {
@@ -731,7 +753,7 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
         };
     }
 
-    const newItems = produtos
+    const parsedItems = produtos
         .map((p, i) => ({
             id: `audio_${Date.now()}_${i}`,
             name: String(p.nome || '').trim(),
@@ -739,7 +761,7 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
         }))
         .filter((item) => item.name);
 
-    if (!newItems.length) {
+    if (!parsedItems.length) {
         return {
             text: 'Ouvi seu áudio mas não identifiquei produtos válidos. Pode tentar de novo?',
             shouldSend: true,
@@ -748,7 +770,20 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
         };
     }
 
-    // Salva na lista ativa do usuário no Firestore
+    // ── CHECK_PRICE: informa que vai buscar ofertas, sem salvar na lista ────────
+    if (intent === 'CHECK_PRICE') {
+        const itemNames = parsedItems.map((i) => i.name).join(', ');
+        console.log(`[AudioProcessor] user=${message.userId} — CHECK_PRICE para: ${itemNames}`);
+        return {
+            text: `🔍 Entendi que você quer saber o preço de: *${itemNames}*.\n\nVou buscar as ofertas!`,
+            shouldSend: true,
+            usedFallback: false,
+            reason: 'audio_check_price',
+        };
+    }
+
+    // ── ADD_LIST: salva na lista ativa do usuário no Firestore ──────────────────
+    const newItems = parsedItems;
     const userId = message.storageUserId || message.userId;
     try {
         const listsRef = db.collection('users').doc(userId).collection('lists');
