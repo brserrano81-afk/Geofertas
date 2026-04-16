@@ -13,6 +13,7 @@ export interface UserPreferences {
     transportMode?: string;
     consumption?: number;
     busTicket?: number;
+    fuelPrice?: number;
     optimizationPreference?: 'economizar' | 'perto' | 'equilibrar';
     neighborhood?: string;
     userLocation?: {
@@ -40,6 +41,7 @@ class UserPreferencesService {
                         transportMode: String(data.transportMode || nestedPreferences.transportMode || '').trim() || undefined,
                         consumption: Number(data.consumption || nestedPreferences.consumption || 0) || undefined,
                         busTicket: Number(data.busTicket || nestedPreferences.busTicket || 0) || undefined,
+                        fuelPrice: Number(data.fuelPrice || nestedPreferences.fuelPrice || 0) || undefined,
                         optimizationPreference: (data.optimizationPreference || nestedPreferences.optimizationPreference || undefined) as UserPreferences['optimizationPreference'],
                         neighborhood: String(data.neighborhood || nestedPreferences.neighborhood || '').trim() || undefined,
                         userLocation: this.parseUserLocation(data.userLocation || nestedPreferences.userLocation),
@@ -59,6 +61,7 @@ class UserPreferencesService {
                     transportMode: String(data.transportMode || nestedPreferences.transportMode || '').trim() || undefined,
                     consumption: Number(data.consumption || nestedPreferences.consumption || 0) || undefined,
                     busTicket: Number(data.busTicket || nestedPreferences.busTicket || 0) || undefined,
+                    fuelPrice: Number(data.fuelPrice || nestedPreferences.fuelPrice || 0) || undefined,
                     optimizationPreference: (data.optimizationPreference || nestedPreferences.optimizationPreference || undefined) as UserPreferences['optimizationPreference'],
                     neighborhood: String(data.neighborhood || nestedPreferences.neighborhood || '').trim() || undefined,
                     userLocation: this.parseUserLocation(data.userLocation || nestedPreferences.userLocation),

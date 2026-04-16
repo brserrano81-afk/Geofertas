@@ -12,6 +12,7 @@ import { geoDecisionEngine } from './GeoDecisionEngine';
 import { normalizeCatalogText, productCatalogService } from './ProductCatalogService';
 import { offerHygieneService } from './OfferHygieneService';
 import { categoryMetadataService } from './CategoryMetadataService';
+import { seasonalityService } from './SeasonalityService';
 import { analyticsEventWriter, sanitizeMarketRegion } from '../workers/AnalyticsEventWriter';
 import type { ShoppingItemOfferCandidate, ShoppingListItem } from '../types/shopping';
 
@@ -315,7 +316,17 @@ class OfferEngine {
                     ? Math.max(0, priciest.offer.price - cheapest.offer.price)
                     : 0;
 
-                return `☕ ${productName.toUpperCase()} — comparação de marcas\n\n${brandLines.join('\n')}\n\n💡 Trocando para ${cheapest?.label || 'a opção mais barata'}:\nR$ ${savings.toFixed(2).replace('.', ',')} por unidade\n\nQuer que eu troque na sua lista? 🛒`;
+                const annualSavings = savings * 12;
+                const annualFormatted = annualSavings.toFixed(2).replace('.', ',');
+
+                let result = `☕ ${productName.toUpperCase()} — comparação de marcas\n\n${brandLines.join('\n')}\n\n💡 Trocando para **${cheapest?.label || 'a opção mais barata'}**:\n📉 Economia de **R$ ${savings.toFixed(2).replace('.', ',')}** por unidade\n💰 **R$ ${annualFormatted} de economia por ano!** 🚀\n\nQuer que eu troque na sua lista? 🛒`;
+
+                const seasonalityTip = seasonalityService.formatTrendMessage(productName);
+                if (seasonalityTip) {
+                    result = `${result}\n\n${seasonalityTip}`;
+                }
+
+                return result;
             }
 
             const distinctBrands = new Set<string>();
@@ -410,17 +421,37 @@ class OfferEngine {
             const lineIcons = ['🟢', '🟡', '🔴'];
             const lines = top3.map((result, index) => {
                 const icon = lineIcons[index] || '•';
+                const distText = result.distance !== undefined ? ` _(${result.distance} km)_` : '';
                 const label = result.brandName?.trim()
-                    ? `${titleCase(result.brandName)} (${result.marketName})`
-                    : result.marketName;
-                return `${icon} ${formatCurrency(result.price)} - ${label}`;
+                    ? `${titleCase(result.brandName)} (**${result.marketName}**)`
+                    : `**${result.marketName}**`;
+                return `${icon} ${formatCurrency(result.price)} - ${label}${distText}`;
             });
 
             const economy = top3.length > 1
                 ? Math.max(0, top3[top3.length - 1].price - top3[0].price)
                 : 0;
 
-            return `${this.formatProductHeader(productName)}\n\n${lines.join('\n')}\n\n💰 Você economiza: ${formatCurrency(economy)}\n\nQuer saber se vale ir de carro? 🚗`;
+            const annualSavings = economy * 12;
+            const annualFormatted = annualSavings.toFixed(2).replace('.', ',');
+
+            let result = `${this.formatProductHeader(productName)}\n\n${lines.join('\n')}\n\n💰 Você economiza: **${formatCurrency(economy)}** por unidade\n🎉 **Economia de R$ ${annualFormatted} por ano!** 🚀`;
+
+            if (userLocation) {
+                const best = top3[0];
+                if (best && best.transportCost !== undefined && best.transportCost > 0) {
+                    result += `\n\n⛽ _Custo de ida e volta (combustível): R$ ${best.transportCost.toFixed(2).replace('.', ',')}_`;
+                }
+            }
+
+            result += `\n\nQuer saber se vale ir de carro? 🚗`;
+
+            const seasonalityTip = seasonalityService.formatTrendMessage(productName);
+            if (seasonalityTip) {
+                result = `${result}\n\n${seasonalityTip}`;
+            }
+
+            return result;
         } catch (err) {
             console.error('[OfferEngine] Firestore error:', err);
             return `Erro ao buscar ofertas para ${productName}. Tente novamente.`;

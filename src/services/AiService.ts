@@ -15,7 +15,7 @@ export type Intent =
     | 'calcular_total_lista' | 'melhor_mercado_para_lista' | 'compartilhar_lista'
     | 'processar_comprovante_compra' | 'confirmar_registro' | 'cancelar_compra' | 'finalizar_compra'
     | 'compartilhar_localizacao' | 'find_nearby_markets'
-    | 'definir_transporte' | 'definir_consumo'
+    | 'definir_transporte' | 'definir_consumo' | 'definir_combustivel'
     | 'definir_preferencia_usuario' | 'ver_perfil_usuario'
     | 'ofertas_mercado' | 'get_market_offers'
     | 'ofertas_da_semana' | 'buscar_categoria'
@@ -32,6 +32,7 @@ export interface NlpResult {
         unit?: string;
         amount?: number;
         days?: number;
+        targetPhone?: string;
     }>;
     confidence: number;
 }
@@ -63,8 +64,8 @@ REGRAS ABSOLUTAS:
 
 Responda APENAS com JSON valido:
 {
-  "intent": "SEARCH_PRODUCT|CREATE_LIST|ADD_TO_LIST|REMOVE_FROM_LIST|SHOW_LIST|CLEAR_LIST|SHARE_LIST|CALCULATE_LIST|EXTRACT_RECEIPT|CONFIRM_PURCHASE|CANCEL_PURCHASE|GREETING|HELP|SET_LOCATION|SET_TRANSPORT|SET_CONSUMPTION|SET_PREFERENCE|SHOW_PROFILE|MARKET_OFFERS|WEEKLY_OFFERS|CATEGORY_SEARCH|PRICE_HISTORY|REGISTER_EXPENSE|EXPENSE_ANALYSIS|VIEW_PURCHASE_HISTORY|VIEW_RECENT_EXPENSES|VIEW_LAST_PURCHASE|VIEW_CONSUMPTION_PATTERN|FIND_NEARBY_MARKETS|CANCEL_OR_EXIT|UNKNOWN",
-  "entities": [{"value": "nome_do_produto", "quantity": 1, "unit": "kg"}],
+  "intent": "SEARCH_PRODUCT|CREATE_LIST|ADD_TO_LIST|REMOVE_FROM_LIST|SHOW_LIST|CLEAR_LIST|SHARE_LIST|CALCULATE_LIST|EXTRACT_RECEIPT|CONFIRM_PURCHASE|CANCEL_PURCHASE|GREETING|HELP|SET_LOCATION|SET_TRANSPORT|SET_CONSUMPTION|SET_FUEL_PRICE|SET_PREFERENCE|SHOW_PROFILE|MARKET_OFFERS|WEEKLY_OFFERS|CATEGORY_SEARCH|PRICE_HISTORY|REGISTER_EXPENSE|EXPENSE_ANALYSIS|VIEW_PURCHASE_HISTORY|VIEW_RECENT_EXPENSES|VIEW_LAST_PURCHASE|VIEW_CONSUMPTION_PATTERN|FIND_NEARBY_MARKETS|CANCEL_OR_EXIT|UNKNOWN",
+  "entities": [{"value": "nome_do_produto", "quantity": 1, "unit": "kg", "targetPhone": "5527999887766"}],
   "isBatch": false,
   "confidence": 0.95
 }
@@ -98,6 +99,7 @@ const NLP_TO_INTENT: Record<string, Intent> = {
     'SET_LOCATION': 'compartilhar_localizacao',
     'SET_TRANSPORT': 'definir_transporte',
     'SET_CONSUMPTION': 'definir_consumo',
+    'SET_FUEL_PRICE': 'definir_combustivel',
     'SET_PREFERENCE': 'definir_preferencia_usuario',
     'SHOW_PROFILE': 'ver_perfil_usuario',
     'MARKET_OFFERS': 'ofertas_mercado',

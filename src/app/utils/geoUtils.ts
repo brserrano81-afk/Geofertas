@@ -8,7 +8,7 @@ export interface TransportCostOption {
     time: string;
 }
 
-const FUEL_PRICE = 6.19;
+export const DEFAULT_FUEL_PRICE = 6.19;
 
 export function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
     const toRad = (value: number) => (value * Math.PI) / 180;
@@ -40,7 +40,8 @@ export function calculateTransportCost(
     }
 
     const liters = roundTripKm / Math.max(consumption, 1);
-    return Number((liters * FUEL_PRICE).toFixed(2));
+    const fuelPrice = (globalThis as any).CURRENT_FUEL_PRICE || DEFAULT_FUEL_PRICE;
+    return Number((liters * fuelPrice).toFixed(2));
 }
 
 export function calculateAllTransportCosts(
