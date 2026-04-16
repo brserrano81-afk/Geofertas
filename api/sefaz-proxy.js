@@ -533,7 +533,12 @@ async function enqueueInboundMessage(normalizedEvent) {
             direction: normalizedEvent.direction,
             messageId: key.id || null,
             mediaBase64: data.base64 || null,
-            mediaUrl: data.url || null,
+            mediaUrl: data.url || data.message?.audioMessage?.url || data.message?.ptt?.url || null,
+            // rawMessageJson: objeto 'data' do webhook serializado para que o worker
+            // possa chamar /message/downloadMedia/{instance} e descriptografar a mídia.
+            rawMessageJson: normalizedEvent.messageType === 'audioMessage'
+                ? JSON.stringify(data)
+                : null,
             status: 'pending',
             receivedAtIso: normalizedEvent.receivedAtIso,
             createdAt: serverTimestamp(),

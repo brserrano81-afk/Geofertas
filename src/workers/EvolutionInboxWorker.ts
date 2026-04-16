@@ -19,6 +19,8 @@ interface InboxMessage {
     text?: string;
     mediaBase64?: string | null;
     mediaUrl?: string | null;
+    /** Objeto 'data' do webhook serializado — usado para chamar /message/downloadMedia/{instance} */
+    rawMessageJson?: string | null;
     status?: string;
     event?: string;
     source?: string;
@@ -478,6 +480,73 @@ async function sendTextViaEvolution(remoteJid: string, text: string) {
     );
 }
 
+/**
+ * Chama o endpoint /message/downloadMedia/{instance} da Evolution API para
+ * baixar e descriptografar a mídia. A Evolution cuida da descriptografia com
+ * a mediaKey — o fetch direto na mmg.whatsapp.net retornaria o arquivo .enc
+ * inutilizável.
+ *
+ * Retorna { base64, mimeType } ou null em caso de falha.
+ */
+async function downloadAudioViaEvolution(
+    rawMessageJson: string,
+    userId: string,
+): Promise<{ base64: string; mimeType: string } | null> {
+    const instance = getEvolutionInstance();
+    const baseUrl = process.env.EVOLUTION_API_BASE_URL?.trim();
+
+    if (!instance || !baseUrl) {
+        console.error(`[AudioProcessor] user=${userId} — EVOLUTION_API_BASE_URL ou EVOLUTION_SEND_INSTANCE não configurados`);
+        return null;
+    }
+
+    let rawMessageData: unknown;
+    try {
+        rawMessageData = JSON.parse(rawMessageJson);
+    } catch (err) {
+        console.error(`[AudioProcessor] user=${userId} — Falha ao parsear rawMessageJson:`, err);
+        return null;
+    }
+
+    const downloadUrl = `${baseUrl.replace(/\/+$/, '')}/message/downloadMedia/${encodeURIComponent(instance)}`;
+    const apiKey = process.env.EVOLUTION_API_KEY || process.env.EVOLUTION_APIKEY || '';
+    const apiKeyHeader = process.env.EVOLUTION_API_KEY_HEADER || 'apikey';
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (apiKey) headers[apiKeyHeader] = apiKey;
+
+    console.log(`[AudioProcessor] user=${userId} — Chamando Evolution downloadMedia: ${downloadUrl}`);
+
+    try {
+        const resp = await fetch(downloadUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(rawMessageData),
+        });
+
+        if (!resp.ok) {
+            const errText = await resp.text().catch(() => '');
+            console.error(`[AudioProcessor] user=${userId} — Evolution downloadMedia HTTP ${resp.status}: ${errText}`);
+            return null;
+        }
+
+        const json: any = await resp.json();
+        console.log(`[AudioProcessor] user=${userId} — Resposta downloadMedia keys:`, Object.keys(json));
+
+        if (!json.base64) {
+            console.error(`[AudioProcessor] user=${userId} — downloadMedia sem campo base64. Resposta:`, JSON.stringify(json));
+            return null;
+        }
+
+        const mimeType: string = (json.mimetype || json.mediaType || 'audio/ogg').split(';')[0].trim();
+        console.log(`[AudioProcessor] user=${userId} — Áudio descriptografado OK — mimeType: ${mimeType}, base64 length: ${json.base64.length}`);
+        return { base64: json.base64, mimeType };
+    } catch (err: any) {
+        console.error(`[AudioProcessor] user=${userId} — Erro ao chamar Evolution downloadMedia:`, err);
+        return null;
+    }
+}
+
 async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBuildResult> {
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
     if (!GEMINI_API_KEY) {
@@ -490,26 +559,22 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
         };
     }
 
-    const mediaUrl = message.mediaUrl;
-    if (!mediaUrl) {
-        console.error(`[AudioProcessor] user=${message.userId} — mediaUrl ausente na InboxMessage`);
-        return {
-            text: 'Recebi seu áudio, mas não consegui acessá-lo. Pode tentar de novo?',
-            shouldSend: true,
-            usedFallback: true,
-            reason: 'audio_no_media_url',
-        };
-    }
-
-    // Baixa o arquivo de áudio
+    // ── Obtenção do áudio descriptografado ───────────────────────────────────
+    // Prioridade 1: base64 já presente no inbox (Evolution configurada para
+    //               enviar base64 no webhook).
+    // Prioridade 2: chamar /message/downloadMedia/{instance} da Evolution API,
+    //               que cuida do download + descriptografia da mediaKey.
+    //               NÃO fazemos fetch direto na mmg.whatsapp.net — o arquivo
+    //               é criptografado (.enc) e inutilizável sem descriptografia.
     let audioBase64: string;
     let mimeType = 'audio/ogg'; // padrão WhatsApp
-    try {
-        console.log(`[AudioProcessor] user=${message.userId} — Baixando áudio de: ${mediaUrl}`);
-        const audioResp = await fetch(mediaUrl);
-        if (!audioResp.ok) {
-            const body = await audioResp.text().catch(() => '');
-            console.error(`[AudioProcessor] user=${message.userId} — Falha HTTP ${audioResp.status} ao baixar áudio: ${body}`);
+
+    if (message.mediaBase64) {
+        console.log(`[AudioProcessor] user=${message.userId} — Usando mediaBase64 do webhook diretamente`);
+        audioBase64 = message.mediaBase64;
+    } else if (message.rawMessageJson) {
+        const downloaded = await downloadAudioViaEvolution(message.rawMessageJson, message.userId);
+        if (!downloaded) {
             return {
                 text: 'Recebi seu áudio, mas não consegui acessá-lo. Pode tentar de novo?',
                 shouldSend: true,
@@ -517,20 +582,18 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
                 reason: 'audio_download_failed',
             };
         }
-        const contentType = audioResp.headers.get('content-type');
-        if (contentType) mimeType = contentType.split(';')[0].trim();
-        const buffer = await audioResp.arrayBuffer();
-        audioBase64 = Buffer.from(buffer).toString('base64');
-        console.log(`[AudioProcessor] user=${message.userId} — Áudio baixado OK — mimeType: ${mimeType}, tamanho: ${buffer.byteLength} bytes`);
-    } catch (err: any) {
-        console.error(`[AudioProcessor] user=${message.userId} — Erro ao baixar áudio:`, err);
+        audioBase64 = downloaded.base64;
+        mimeType = downloaded.mimeType;
+    } else {
+        console.error(`[AudioProcessor] user=${message.userId} — Sem mediaBase64 nem rawMessageJson no inbox`);
         return {
             text: 'Recebi seu áudio, mas não consegui acessá-lo. Pode tentar de novo?',
             shouldSend: true,
             usedFallback: true,
-            reason: 'audio_download_error',
+            reason: 'audio_no_source',
         };
     }
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Envia para o Gemini 1.5 Flash
     const systemPrompt = 'Você é o assistente do Economiza Fácil. Ouça este áudio e extraia os produtos e quantidades citados. Retorne APENAS um JSON no formato: {"produtos": [{"nome": "item", "qtd": "valor"}]}. Se não houver produtos, retorne um JSON vazio.';
