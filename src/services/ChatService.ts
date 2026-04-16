@@ -467,7 +467,7 @@ class ChatSession {
         // VERIFICAÃ‡ÃƒO DE ERRO NA API DA OPENAI:
         if (interpretation.nlpResult?.entities[0]?.value === 'API_ERROR') {
             console.error(`[ChatService] NLP Error Bubble-up: API Falhou silenciosamente.`);
-            return { text: "Estou com uma instabilidade no meu cÃ©rebro de IA agora, tente de novo em um segundo." };
+            return { text: "Estou com uma instabilidade no meu cérebro de IA agora, tente de novo em um segundo." };
         }
 
         // ANTI-AMNÃ‰SIA: Se o estado nÃ£o Ã© IDLE e o NLP falhou em achar algo forte,
