@@ -279,11 +279,26 @@ function extractMessageText(payload = {}) {
     const message = data.message || {};
 
     const text = (
+        // Texto simples (Evolution v1 e v2)
         message.conversation ||
+        // Texto com formatação / reply
         message.extendedTextMessage?.text ||
+        // Mídia com legenda
         message.imageMessage?.caption ||
         message.videoMessage?.caption ||
         message.documentMessage?.caption ||
+        // Lista interativa — título ou descrição
+        message.listMessage?.description ||
+        message.listMessage?.title ||
+        // Botões
+        message.buttonsMessage?.contentText ||
+        // Template
+        message.templateMessage?.hydratedTemplate?.hydratedContentText ||
+        // Interactive
+        message.interactiveMessage?.body?.text ||
+        // Campos raiz do payload (alguns webhooks da Evolution v2 elevam o texto)
+        data.body ||
+        data.caption ||
         data.text ||
         ''
     );
@@ -303,6 +318,12 @@ function normalizeEvolutionEvent(payload = {}, routeEvent = null) {
     const remoteJid = normalizeRemoteJid(key.remoteJid || data.remoteJid || data.from || payload.sender || '');
     const fromMe = Boolean(key.fromMe ?? data.fromMe);
     const event = routeEvent || payload.event || payload.type || 'unknown';
+
+    // DEBUG — remover após identificar estrutura real do payload Evolution v2
+    console.log('[DEBUG WEBHOOK] Raw Message Keys:', Object.keys(message));
+    console.log('[DEBUG WEBHOOK] Full Message Content:', JSON.stringify(message, null, 2));
+    console.log('[DEBUG WEBHOOK] data.messageType:', data.messageType);
+    console.log('[DEBUG WEBHOOK] data keys:', Object.keys(data));
 
     // Mapeamento robusto de tipo de mensagem
     // Object.keys(message)[0] é frágil — messageContextInfo costuma ser a primeira chave
@@ -326,6 +347,13 @@ function normalizeEvolutionEvent(payload = {}, routeEvent = null) {
         'buttonsMessage',
         'templateMessage',
         'pollCreationMessage',
+        'protocolMessage',
+        'ephemeralMessage',
+        'viewOnceMessage',
+        'viewOnceMessageV2',
+        'interactiveMessage',
+        'orderMessage',
+        'productMessage',
     ];
     const detectedType = KNOWN_MESSAGE_TYPES.find((t) => message[t] !== undefined);
     let messageType = data.messageType || detectedType || payload.type || 'unknown';
