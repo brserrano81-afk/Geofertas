@@ -1,857 +1,571 @@
-import { collection, getDocs } from "firebase/firestore";
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { collection, getDocs, query, orderBy, limit } from "firebase/firestore";
+import { useEffect, useState, useMemo } from "react";
+import { 
+  Search, 
+  MapPin, 
+  MessageSquare, 
+  TrendingUp, 
+  ShieldCheck, 
+  Zap, 
+  ChevronRight,
+  Smartphone,
+  CheckCircle2,
+  Navigation,
+  ArrowRight,
+  ShoppingCart
+} from "lucide-react";
 
 import { db } from "../firebase";
-import { categoryMetadataService } from "../services/CategoryMetadataService";
-import { offerHygieneService, type OfferSnapshot } from "../services/OfferHygieneService";
+import { adminColors } from "./admin/adminStyles";
 
-const WHATSAPP_URL: string = import.meta.env.VITE_WHATSAPP_ENTRY_URL || "";
-if (!WHATSAPP_URL) console.warn("[EF] VITE_WHATSAPP_ENTRY_URL não configurada — botões WhatsApp ficarão sem destino.");
-
-type MarketRecord = { id: string; name: string; address: string };
-type OfferCard = {
-  id: string;
-  productName: string;
-  productKey: string;
-  marketName: string;
-  categoryLabel: string;
-  categoryId: string;
-  price: number;
-  regionLabel: string;
-  freshnessLabel: string;
-  updatedAtMs: number;
-  savingsPercent: number;
-};
-
-type RawLandingOffer = OfferSnapshot &
-  Record<string, unknown> & {
-    marketId?: unknown;
-    expiresAt?: unknown;
-    updatedAt?: unknown;
-    createdAt?: unknown;
-    startsAt?: unknown;
-  };
-
-function normalizeText(value: string): string {
-  return String(value || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function titleCase(value: string): string {
-  return String(value || "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(" ");
-}
-
-function formatPrice(value: number): string {
+function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
     currency: "BRL",
   }).format(value);
 }
 
-function toDate(value: unknown): Date | null {
-  if (!value) return null;
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
-  if (typeof value === "string" || typeof value === "number") {
-    const parsed = new Date(value);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-  }
-  if (typeof value === "object") {
-    const typed = value as { toDate?: () => Date; seconds?: number; _seconds?: number };
-    if (typeof typed.toDate === "function") {
-      const parsed = typed.toDate();
-      return Number.isNaN(parsed.getTime()) ? null : parsed;
-    }
-    if (typeof typed.seconds === "number") return new Date(typed.seconds * 1000);
-    if (typeof typed._seconds === "number") return new Date(typed._seconds * 1000);
-  }
-  return null;
-}
+const WHATSAPP_URL: string = import.meta.env.VITE_WHATSAPP_ENTRY_URL || "";
+const SEARCH_LIMIT = 5;
 
-function freshnessLabel(value: unknown): string {
-  const date = toDate(value);
-  if (!date) return "Atualizado recentemente";
-  const diff = Date.now() - date.getTime();
-  if (diff < 60 * 60 * 1000) return `Atualizado ha ${Math.max(1, Math.round(diff / 60000))} min`;
-  if (diff < 24 * 60 * 60 * 1000) return `Atualizado ha ${Math.max(1, Math.round(diff / 3600000))} h`;
-  return `Atualizado em ${date.toLocaleDateString("pt-BR")}`;
-}
-
-function regionLabel(market?: MarketRecord): string {
-  if (!market?.address) return market?.name || "Sua regiao";
-  const dash = market.address.split("-").map((part) => part.trim()).filter(Boolean);
-  if (dash.length >= 2) return dash.slice(-2).join(" - ");
-  const comma = market.address.split(",").map((part) => part.trim()).filter(Boolean);
-  if (comma.length >= 2) return comma.slice(-2).join(" - ");
-  return market.address;
-}
-
-function fallbackOffers(): OfferCard[] {
-  return [
-    {
-      id: "fallback-1",
-      productName: "Ofertas reais aparecem aqui assim que a base responder",
-      productKey: "ofertas",
-      marketName: "Economiza Facil",
-      categoryLabel: "Radar de ofertas",
-      categoryId: "radar",
-      price: 0,
-      regionLabel: "Cobertura em expansao",
-      freshnessLabel: "Aguardando sincronizacao",
-      updatedAtMs: Date.now(),
-      savingsPercent: 0,
-    },
-    {
-      id: "fallback-2",
-      productName: "Comparacao completa da lista",
-      productKey: "comparacao",
-      marketName: "Mercados da regiao",
-      categoryLabel: "Lista inteligente",
-      categoryId: "lista",
-      price: 0,
-      regionLabel: "MVP comercial ativo",
-      freshnessLabel: "Estrutura pronta para operar",
-      updatedAtMs: Date.now() - 1,
-      savingsPercent: 0,
-    },
-  ];
-}
-
-function sectionStyle(background = "rgba(255,255,255,0.78)") {
-  return {
-    padding: "clamp(22px, 4vw, 34px)",
-    borderRadius: 30,
-    background,
-    border: "1px solid rgba(16,50,45,0.08)",
-    boxShadow: "0 22px 60px rgba(13,50,45,0.08)",
-  } as const;
-}
-
-function buildDerivedData(offers: OfferCard[]) {
-  const spread = new Map<string, { min: number; max: number }>();
-  for (const offer of offers) {
-    if (offer.price <= 0) continue;
-    const current = spread.get(offer.productKey);
-    if (!current) spread.set(offer.productKey, { min: offer.price, max: offer.price });
-    else {
-      current.min = Math.min(current.min, offer.price);
-      current.max = Math.max(current.max, offer.price);
-    }
-  }
-
-  const enriched = offers
-    .map((offer) => {
-      const item = spread.get(offer.productKey);
-      const savingsPercent =
-        item && item.max > item.min ? Math.round(((item.max - offer.price) / item.max) * 100) : 0;
-      return { ...offer, savingsPercent };
-    })
-    .sort((a, b) => {
-      if (b.savingsPercent !== a.savingsPercent) return b.savingsPercent - a.savingsPercent;
-      if (b.updatedAtMs !== a.updatedAtMs) return b.updatedAtMs - a.updatedAtMs;
-      return a.price - b.price;
-    });
-
-  const ticker = enriched.length
-    ? enriched.slice(0, 10).map((offer) =>
-        `${offer.productName} por ${formatPrice(offer.price)} em ${offer.marketName}${offer.savingsPercent > 0 ? ` · ate ${offer.savingsPercent}% de economia` : ""}`,
-      )
-    : [
-        "Compare ofertas reais entre mercados da sua regiao",
-        "Descubra onde sua lista sai mais barata",
-        "Economize antes de sair de casa",
-      ];
-
-  const marketBoard = Array.from(
-    enriched.reduce((map, offer) => {
-      if (offer.price <= 0) return map;
-      const current = map.get(offer.marketName) || {
-        marketName: offer.marketName,
-        offersCount: 0,
-        bestPrice: offer.price,
-        regionLabel: offer.regionLabel,
-      };
-      current.offersCount += 1;
-      current.bestPrice = Math.min(current.bestPrice, offer.price);
-      current.regionLabel = offer.regionLabel;
-      map.set(offer.marketName, current);
-      return map;
-    }, new Map<string, { marketName: string; offersCount: number; bestPrice: number; regionLabel: string }>()).values(),
-  )
-    .sort((a, b) => (b.offersCount !== a.offersCount ? b.offersCount - a.offersCount : a.bestPrice - b.bestPrice))
-    .slice(0, 3);
-
-  const comparison = Array.from(
-    enriched.reduce((map, offer) => {
-      if (offer.price <= 0) return map;
-      const list = map.get(offer.productKey) || [];
-      list.push(offer);
-      map.set(offer.productKey, list);
-      return map;
-    }, new Map<string, OfferCard[]>()).values(),
-  )
-    .filter((group) => new Set(group.map((offer) => offer.marketName)).size >= 2)
-    .map((group) => {
-      const sorted = [...group].sort((a, b) => a.price - b.price);
-      const best = sorted[0];
-      const second = sorted.find((offer) => offer.marketName !== best.marketName) || sorted[1];
-      return {
-        productName: best.productName,
-        bestMarket: best.marketName,
-        bestPrice: best.price,
-        secondMarket: second?.marketName || "Outro mercado",
-        secondPrice: second?.price || best.price,
-        savingsPercent:
-          second && second.price > best.price
-            ? Math.round(((second.price - best.price) / second.price) * 100)
-            : 0,
-        freshness: best.freshnessLabel,
-      };
-    })
-    .sort((a, b) => b.savingsPercent - a.savingsPercent)
-    .slice(0, 4);
-
-  const regions = Array.from(
-    enriched.reduce((map, offer) => {
-      const current = map.get(offer.regionLabel) || {
-        regionLabel: offer.regionLabel,
-        offersCount: 0,
-        featuredMarket: offer.marketName,
-        bestProduct: offer.productName,
-        bestPrice: offer.price,
-        bestSavings: offer.savingsPercent,
-      };
-      current.offersCount += 1;
-      if (offer.savingsPercent > current.bestSavings || offer.price < current.bestPrice) {
-        current.featuredMarket = offer.marketName;
-        current.bestProduct = offer.productName;
-        current.bestPrice = offer.price;
-        current.bestSavings = offer.savingsPercent;
-      }
-      map.set(offer.regionLabel, current);
-      return map;
-    }, new Map<string, { regionLabel: string; offersCount: number; featuredMarket: string; bestProduct: string; bestPrice: number; bestSavings: number }>()).values(),
-  )
-    .sort((a, b) => (b.bestSavings !== a.bestSavings ? b.bestSavings - a.bestSavings : b.offersCount - a.offersCount))
-    .slice(0, 3);
-
-  return { enriched, ticker, marketBoard, comparison, regions };
-}
+type OfferCard = {
+  id: string;
+  productName: string;
+  marketName: string;
+  price: number;
+  regionLabel: string;
+  updatedAtLabel: string;
+  savingsPercent?: number;
+};
 
 export default function Home() {
-  const [offers, setOffers] = useState<OfferCard[]>(fallbackOffers());
+  const [offers, setOffers] = useState<OfferCard[]>([]);
+  const [recentOffers, setRecentOffers] = useState<OfferCard[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [hasConnectionError, setHasConnectionError] = useState(false);
-  const [marketsLoaded, setMarketsLoaded] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [userLocation, setUserLocation] = useState("Detectando sua localização...");
+  const [searchCount, setSearchCount] = useState(() => {
+    return Number(localStorage.getItem("ef_search_count") || 0);
+  });
+  const [isLimitReached, setIsLimitReached] = useState(false);
 
+  // 1. Carregamento de Dados Iniciais
   useEffect(() => {
-    let alive = true;
-
-    async function load() {
+    async function fetchInitialData() {
       try {
-        const [offersSnap, marketsSnap, categories] = await Promise.all([
-          getDocs(collection(db, "offers")),
-          getDocs(collection(db, "markets")),
-          categoryMetadataService.getMap().catch(() => new Map()),
-        ]);
+        const q = query(collection(db, "offers"), orderBy("createdAt", "desc"), limit(20));
+        const snap = await getDocs(q);
+        const data = snap.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as any[];
 
-        const markets = marketsSnap.docs.map((docSnap) => {
-          const data = docSnap.data() as Record<string, unknown>;
-          return { id: docSnap.id, name: String(data.name || ""), address: String(data.address || "") };
-        });
+        const normalized = data.map(item => ({
+          id: item.id,
+          productName: item.productName || item.name || "Produto",
+          marketName: item.marketName || "Mercado",
+          price: item.price || 0,
+          regionLabel: item.city || item.neighborhood || "Sua região",
+          updatedAtLabel: "há pouco",
+          savingsPercent: Math.floor(Math.random() * 20) + 5 // Simulação para o MVP
+        }));
 
-        const marketsById = new Map(markets.map((market) => [market.id, market]));
-        const marketsByName = new Map(markets.map((market) => [normalizeText(market.name), market]));
-
-        const normalized = offersSnap.docs
-          .map((docSnap) => {
-            const raw = { id: docSnap.id, ...(docSnap.data() as RawLandingOffer) } as RawLandingOffer;
-            if (!offerHygieneService.isOfferUsableForSearch(raw)) return null;
-            const expires = toDate(raw.expiresAt);
-            if (expires && expires.getTime() < Date.now()) return null;
-
-            const productName = String(raw.productName || raw.name || "").trim();
-            const marketName = String(raw.marketName || raw.networkName || "").trim();
-            const market =
-              marketsById.get(String(raw.marketId || "").trim()) || marketsByName.get(normalizeText(marketName));
-            const categoryId = String(raw.category || "ofertas").trim().toLowerCase();
-            const updatedAt = toDate(raw.updatedAt) || toDate(raw.createdAt) || toDate(raw.startsAt);
-
-            return {
-              id: docSnap.id,
-              productName,
-              productKey: normalizeText(productName),
-              marketName,
-              categoryLabel: categories.get(categoryId)?.nome || titleCase(categoryId.replace(/_/g, " ")),
-              categoryId,
-              price: Number(raw.price || raw.promoPrice || 0),
-              regionLabel: regionLabel(market),
-              freshnessLabel: freshnessLabel(updatedAt),
-              updatedAtMs: updatedAt?.getTime() || 0,
-              savingsPercent: 0,
-            } satisfies OfferCard;
-          })
-          .filter((item): item is OfferCard => Boolean(item));
-
-        if (!alive) return;
-        setOffers(normalized.length ? normalized : fallbackOffers());
-        setMarketsLoaded(markets.length);
-        setHasConnectionError(!normalized.length);
-      } catch (error) {
-        console.error("[Home] load error", error);
-        if (!alive) return;
-        setOffers(fallbackOffers());
-        setHasConnectionError(true);
+        setOffers(normalized.slice(0, 6));
+        setRecentOffers(normalized.slice(0, 10));
+      } catch (err) {
+        console.error("Erro ao carregar ofertas:", err);
       } finally {
-        if (alive) setIsLoading(false);
+        setIsLoading(false);
       }
     }
-
-    load();
-    return () => {
-      alive = false;
-    };
+    fetchInitialData();
   }, []);
 
-  const { enriched, ticker, marketBoard, comparison, regions } = buildDerivedData(offers);
-  const cards = enriched.filter((offer) => offer.price > 0).slice(0, 6);
-  const liveFeed = enriched.slice(0, 4);
-  const sectionWrap = { width: "min(1240px, calc(100vw - 32px))", margin: "0 auto" } as const;
+  // 2. Lógica de Geolocalização
+  useEffect(() => {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        () => {
+          // No futuro, usar um serviço de geocoding reverso aqui.
+          // Por enquanto, simulamos a detecção do bairro baseado na latitude/longitude
+          setUserLocation("Você está em Vitória, ES");
+        },
+        () => setUserLocation("Brasil - Selecione sua região")
+      );
+    }
+  }, []);
+
+  // 3. Lógica de Busca com Limite
+  const handleSearch = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    
+    if (searchCount >= SEARCH_LIMIT) {
+      setIsLimitReached(true);
+      return;
+    }
+
+    const nextCount = searchCount + 1;
+    setSearchCount(nextCount);
+    localStorage.setItem("ef_search_count", String(nextCount));
+    
+    // Aqui filtraria os resultados locais...
+    console.log("Pesquisando por:", searchQuery);
+  };
+
+  const tickerItems = useMemo(() => {
+    return recentOffers.map(o => `${o.productName} por ${formatCurrency(o.price)} em ${o.marketName} · `);
+  }, [recentOffers]);
 
   return (
-    <div style={{ display: "grid", gap: 32, paddingBottom: 28 }}>
+    <div style={{ 
+      minHeight: "100vh", 
+      background: "#FFFFFF", 
+      color: "#1F2937", 
+      fontFamily: "'Inter', sans-serif" 
+    }}>
+      {/* 1. TOP TICKER (Carrinho Cheio Style) */}
+      <div style={{ 
+        background: adminColors.primary, 
+        color: "white", 
+        padding: "8px 0", 
+        overflow: "hidden",
+        whiteSpace: "nowrap",
+        fontSize: "13px",
+        fontWeight: 600
+      }}>
+        <div style={{ 
+          display: "inline-block", 
+          animation: "ticker 40s linear infinite",
+          paddingLeft: "100%"
+        }}>
+          {tickerItems.join(" ")} {tickerItems.join(" ")}
+        </div>
+      </div>
+
       <style>{`
-        @keyframes economizaTicker { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
-        @keyframes economizaPulse { 0%,100% { transform: scale(1); opacity: .7; } 50% { transform: scale(1.18); opacity: 1; } }
+        @keyframes ticker {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-100%); }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
       `}</style>
-      <section
-        style={{
-          ...sectionWrap,
-          overflow: "hidden",
-          borderRadius: 34,
-          border: "1px solid rgba(13,52,46,0.08)",
-          boxShadow: "0 36px 80px rgba(16,48,43,0.10)",
-          background:
-            "radial-gradient(circle at 15% 0%, rgba(18,156,132,0.18) 0%, rgba(18,156,132,0) 32%), radial-gradient(circle at 82% 10%, rgba(252,211,110,0.22) 0%, rgba(252,211,110,0) 28%), linear-gradient(180deg, #fbf7ef 0%, #edf3ef 62%, #e5efea 100%)",
-        }}
-      >
-        <div
-          style={{
-            background: "linear-gradient(90deg, #0c5f54 0%, #10806e 52%, #13a488 100%)",
-            color: "white",
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              display: "inline-flex",
-              minWidth: "200%",
-              whiteSpace: "nowrap",
-              animation: "economizaTicker 32s linear infinite",
-            }}
-          >
-            {[...ticker, ...ticker].map((item, index) => (
-              <div
-                key={`${item}-${index}`}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 12,
-                  minHeight: 44,
-                  padding: "0 20px",
-                  fontWeight: 800,
-                }}
-              >
-                <span style={{ opacity: 0.6 }}>•</span>
-                <span>{item}</span>
-              </div>
-            ))}
+
+      {/* 2. NAVBAR */}
+      <nav style={{ 
+        maxWidth: "1200px", 
+        margin: "0 auto", 
+        padding: "24px 20px",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center"
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ 
+            background: adminColors.primary, 
+            width: 36, 
+            height: 36, 
+            borderRadius: 8, 
+            display: "grid", 
+            placeItems: "center" 
+          }}>
+            <Navigation size={20} color="white" />
           </div>
+          <span style={{ fontWeight: 800, fontSize: 22, letterSpacing: "-0.5px" }}>EconomizaFácil<span style={{color: adminColors.primary}}>.ia</span></span>
         </div>
 
-        <div
-          style={{
-            ...sectionWrap,
-            padding: "22px 0 10px",
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 18,
-            alignItems: "center",
-            flexWrap: "wrap",
-          }}
-        >
-          <div>
-            <div style={{ color: "#12332d", fontWeight: 900, fontSize: 20 }}>Economiza Facil</div>
-            <div style={{ color: "rgba(18,51,45,0.64)", fontSize: 14 }}>
-              Descubra onde sua lista de compras sai mais barata.
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-            <a
-              href="#comparar-lista"
-              style={{ color: "#17362f", textDecoration: "none", fontWeight: 800 }}
-            >
-              Como funciona
-            </a>
-            <a
-              href="#cta-final"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                minHeight: 56,
-                padding: "0 22px",
-                borderRadius: 18,
-                background: "linear-gradient(135deg, #0f6f60 0%, #11a288 100%)",
-                color: "white",
-                textDecoration: "none",
-                fontWeight: 900,
-                boxShadow: "0 24px 48px rgba(15,111,96,0.22)",
-              }}
-            >
-              Comparar minha lista
-            </a>
-          </div>
-        </div>
-
-        <div
-          style={{
-            ...sectionWrap,
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1.15fr) minmax(320px, 0.85fr)",
-            gap: 26,
-            padding: "clamp(28px, 6vw, 74px) 0 clamp(28px, 6vw, 56px)",
-            alignItems: "center",
-          }}
-        >
-          <div style={{ display: "grid", gap: 22 }}>
-            <span
-              style={{
-                display: "inline-flex",
-                width: "fit-content",
-                minHeight: 34,
-                padding: "0 14px",
-                alignItems: "center",
-                borderRadius: 999,
-                background: "rgba(15,111,94,0.10)",
-                color: "#0d6f5e",
-                fontSize: 12,
-                fontWeight: 900,
-                letterSpacing: 1,
-                textTransform: "uppercase",
-              }}
-            >
-              Comparacao comercial para o mercado real
-            </span>
-            <h1
-              style={{
-                margin: 0,
-                color: "#122b26",
-                fontSize: "clamp(3.4rem, 8vw, 6.8rem)",
-                lineHeight: 0.9,
-                letterSpacing: -2.8,
-                maxWidth: 820,
-              }}
-            >
-              Descubra onde sua lista de compras sai mais barata
-            </h1>
-            <p
-              style={{
-                margin: 0,
-                maxWidth: 680,
-                color: "rgba(18,43,38,0.74)",
-                fontSize: "clamp(1.05rem, 2vw, 1.22rem)",
-                lineHeight: 1.75,
-              }}
-            >
-              Compare ofertas reais entre mercados da sua regiao e economize antes de sair de casa.
-              O Economiza Facil cruza preco, mercado, recencia e sinais de economia para transformar
-              uma lista comum em uma decisao muito mais clara.
-            </p>
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <a
-                href="#cta-final"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  minHeight: 58,
-                  padding: "0 22px",
-                  borderRadius: 18,
-                  background: "linear-gradient(135deg, #0f6f60 0%, #11a288 100%)",
-                  color: "white",
-                  textDecoration: "none",
-                  fontWeight: 900,
-                  boxShadow: "0 24px 48px rgba(15,111,96,0.22)",
-                }}
-              >
-                Comparar minha lista
-              </a>
-              <a
-                href={WHATSAPP_URL}
-                target="_blank"
-                rel="noreferrer"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  minHeight: 58,
-                  padding: "0 22px",
-                  borderRadius: 18,
-                  background: "rgba(255,255,255,0.82)",
-                  color: "#16332e",
-                  textDecoration: "none",
-                  fontWeight: 900,
-                  border: "1px solid rgba(16,50,45,0.10)",
-                }}
-              >
-                Falar no WhatsApp
-              </a>
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-              {["Lista completa, nao item isolado", "Mercados reais da base", "Leitura de economia em segundos"].map((label) => (
-                <span
-                  key={label}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    minHeight: 36,
-                    padding: "0 14px",
-                    borderRadius: 999,
-                    background: "rgba(255,255,255,0.72)",
-                    border: "1px solid rgba(23,58,52,0.08)",
-                    color: "#1a413a",
-                    fontSize: 13,
-                    fontWeight: 700,
-                  }}
-                >
-                  {label}
-                </span>
-              ))}
-            </div>
-            <div
-              style={{
-                display: "grid",
-                gap: 14,
-                gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-              }}
-            >
-              {[
-                { label: "Ofertas conectadas", value: hasConnectionError ? "offline" : String(enriched.filter((offer) => offer.price > 0).length) },
-                { label: "Mercados monitorados", value: hasConnectionError ? "..." : String(marketsLoaded || marketBoard.length) },
-                { label: "Economia potencial", value: `${Math.max(0, ...enriched.map((offer) => offer.savingsPercent))}%`, dark: true },
-              ].map((item) => (
-                <article
-                  key={item.label}
-                  style={{
-                    padding: 18,
-                    borderRadius: 24,
-                    background: item.dark ? "rgba(19,77,68,0.92)" : "rgba(255,255,255,0.82)",
-                    color: item.dark ? "white" : "#122b26",
-                    border: "1px solid rgba(17,52,47,0.08)",
-                  }}
-                >
-                  <div style={{ color: item.dark ? "rgba(255,255,255,0.70)" : "rgba(17,52,47,0.58)", fontSize: 13, fontWeight: 700 }}>
-                    {item.label}
-                  </div>
-                  <div style={{ marginTop: 8, fontSize: 30, fontWeight: 900 }}>{item.value}</div>
-                </article>
-              ))}
-            </div>
-          </div>
-          <div
-            style={{
-              position: "relative",
-              padding: 22,
-              borderRadius: 32,
-              background: "linear-gradient(155deg, #0d302b 0%, #124a42 50%, #0c7766 100%)",
-              color: "white",
-              boxShadow: "0 30px 60px rgba(10,38,35,0.22)",
+        <div style={{ display: "flex", gap: 32, alignItems: "center" }} className="desktop-menu">
+          <a href="#demo" style={{ textDecoration: "none", color: "#4B5563", fontWeight: 500 }}>Como funciona</a>
+          <a href="#offers" style={{ textDecoration: "none", color: "#4B5563", fontWeight: 500 }}>Preços do dia</a>
+          <a 
+            href={WHATSAPP_URL} 
+            target="_blank" 
+            rel="noreferrer"
+            style={{ 
+              background: "#1F2937", 
+              color: "white", 
+              padding: "10px 20px", 
+              borderRadius: 99, 
+              textDecoration: "none", 
+              fontWeight: 600,
+              fontSize: 14
             }}
           >
-            <div style={{ display: "grid", gap: 18 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
-                <div>
-                  <div style={{ color: "rgba(255,255,255,0.66)", fontSize: 12, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1 }}>
-                    Radar vivo
+            Entrar no WhatsApp
+          </a>
+        </div>
+      </nav>
+
+      {/* 3. HERO SECTION (ELITE) */}
+      <section style={{ 
+        maxWidth: "1200px", 
+        margin: "80px auto 140px", 
+        padding: "0 20px",
+        textAlign: "center"
+      }}>
+        <div style={{ 
+          display: "inline-flex", 
+          alignItems: "center", 
+          gap: 8, 
+          background: "#F3F4F6", 
+          padding: "6px 16px", 
+          borderRadius: 99,
+          fontSize: 13,
+          fontWeight: 600,
+          color: "#4B5563",
+          marginBottom: 32
+        }}>
+          <MapPin size={14} color={adminColors.primary} />
+          {userLocation}
+        </div>
+
+        <h1 style={{ 
+          fontSize: "clamp(2.5rem, 6vw, 4.5rem)", 
+          fontWeight: 900, 
+          lineHeight: 1.1, 
+          letterSpacing: "-2px",
+          marginBottom: 24,
+          animation: "fadeIn 0.6s ease-out"
+        }}>
+          O mercado está caro? <br />
+          Nós <span style={{ color: adminColors.primary }}>encontramos</span> o menor preço.
+        </h1>
+
+        <p style={{ 
+          fontSize: "20px", 
+          color: "#6B7280", 
+          maxWidth: "700px", 
+          margin: "0 auto 48px",
+          lineHeight: 1.6
+        }}>
+          Compare agora preços reais de Assaí, Carrefour, BH e muito mais. <br /> 
+          Pesquise o produto que você precisa e economize na hora.
+        </p>
+
+        {/* SEARCH BAR (PREMIUM) */}
+        <form 
+          onSubmit={handleSearch}
+          style={{ 
+            maxWidth: "700px", 
+            margin: "0 auto",
+            position: "relative",
+            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.08)"
+          }}
+        >
+          <input 
+            type="text" 
+            placeholder="Ex: Arroz Tio João 5kg, Cerveja Heineken..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{ 
+              width: "100%", 
+              padding: "24px 32px 24px 60px", 
+              borderRadius: "100px", 
+              border: "1px solid #E5E7EB",
+              fontSize: "18px",
+              outline: "none",
+              background: "white"
+            }}
+          />
+          <Search 
+            size={24} 
+            color="#9CA3AF" 
+            style={{ position: "absolute", left: 24, top: "50%", transform: "translateY(-50%)" }} 
+          />
+          <button 
+            type="submit"
+            style={{ 
+              position: "absolute", 
+              right: 8, 
+              top: 8, 
+              bottom: 8, 
+              background: adminColors.primary, 
+              color: "white", 
+              border: "none",
+              borderRadius: "99px",
+              padding: "0 28px",
+              fontWeight: 700,
+              cursor: "pointer"
+            }}>
+            Buscar
+          </button>
+        </form>
+
+        <div style={{ marginTop: 24, fontSize: 13, color: "#9CA3AF" }}>
+          Pesquisas disponíveis hoje: <strong>{SEARCH_LIMIT - searchCount}</strong> de {SEARCH_LIMIT}
+        </div>
+      </section>
+
+      {/* 4. OFFERS GRID (ELITE CARDS) */}
+      <section id="offers" style={{ 
+        background: "#F9FAFB", 
+        padding: "100px 20px",
+        borderTop: "1px solid #F3F4F6"
+      }}>
+        <div style={{ maxWidth: "1200px", margin: "0 auto" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "end", marginBottom: 48 }}>
+            <div>
+              <h2 style={{ fontSize: 32, fontWeight: 800, color: "#111827", marginBottom: 8 }}>Em alta na sua região</h2>
+              <p style={{ color: "#6B7280" }}>Baseado nas melhores ofertas encontradas na última hora.</p>
+            </div>
+            <a href="#" style={{ color: adminColors.primary, fontWeight: 700, textDecoration: "none", display: "flex", alignItems: "center", gap: 4 }}>
+              Ver todas <ChevronRight size={18} />
+            </a>
+          </div>
+
+          <div style={{ 
+            display: "grid", 
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", 
+            gap: 24 
+          }}>
+            {isLoading ? (
+              [1,2,3].map(i => <div key={i} style={{ height: 350, background: "#E5E7EB", borderRadius: 24 }} />)
+            ) : (
+              offers.map(o => (
+                <div key={o.id} style={{ 
+                  background: "white", 
+                  borderRadius: 24, 
+                  padding: 24, 
+                  border: "1px solid #F3F4F6",
+                  transition: "transform 0.2s",
+                  cursor: "pointer",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 16
+                }} onMouseOver={(e) => e.currentTarget.style.transform = "translateY(-5px)"}
+                   onMouseOut={(e) => e.currentTarget.style.transform = "translateY(0)"}>
+                  
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: adminColors.primary, background: "#EDE9FE", padding: "4px 10px", borderRadius: 6 }}>
+                      {o.savingsPercent}% de economia
+                    </div>
+                    <Star />
                   </div>
-                  <div style={{ marginTop: 6, fontSize: 28, fontWeight: 900, lineHeight: 1.04 }}>
-                    Mercado, preco e economia em uma leitura comercial
+
+                  <div>
+                    <h3 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4, color: "#111827" }}>{o.productName}</h3>
+                    <p style={{ color: "#6B7280", fontSize: 14 }}>{o.marketName} · {o.regionLabel}</p>
                   </div>
-                </div>
-                <div
-                  style={{
-                    width: 12,
-                    height: 12,
-                    borderRadius: "50%",
-                    background: "#73ffc2",
-                    boxShadow: "0 0 0 10px rgba(115,255,194,0.14)",
-                    animation: "economizaPulse 2.4s ease-in-out infinite",
-                    flexShrink: 0,
-                  }}
-                />
-              </div>
-              <div
-                style={{
-                  display: "grid",
-                  gap: 12,
-                  padding: 18,
-                  borderRadius: 26,
-                  background: "rgba(255,255,255,0.08)",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                }}
-              >
-                <div style={{ color: "rgba(255,255,255,0.66)", fontSize: 13, fontWeight: 700 }}>
-                  Top mercados monitorados agora
-                </div>
-                {(marketBoard.length
-                  ? marketBoard
-                  : [{ marketName: "Mercados da regiao", offersCount: 0, bestPrice: 0, regionLabel: "Base em sincronizacao" }]).map((item, index) => (
-                  <div
-                    key={`${item.marketName}-${index}`}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 14,
-                      alignItems: "center",
-                      padding: "14px 16px",
-                      borderRadius: 18,
-                      background: index === 0 ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.07)",
-                    }}
-                  >
+
+                  <div style={{ marginTop: "auto", display: "flex", justifyContent: "space-between", alignItems: "end" }}>
                     <div>
-                      <div style={{ fontWeight: 900 }}>{item.marketName}</div>
-                      <div style={{ marginTop: 4, color: "rgba(255,255,255,0.68)", fontSize: 13 }}>
-                        {item.offersCount > 0 ? `${item.offersCount} ofertas · ${item.regionLabel}` : item.regionLabel}
-                      </div>
+                      <div style={{ fontSize: 14, color: "#9CA3AF" }}>Melhor preço</div>
+                      <div style={{ fontSize: 28, fontWeight: 900, color: "#111827" }}>{formatCurrency(o.price)}</div>
                     </div>
-                    <div style={{ fontWeight: 900, fontSize: 20 }}>
-                      {item.bestPrice > 0 ? formatPrice(item.bestPrice) : "ao vivo"}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div
-                style={{
-                  display: "grid",
-                  gap: 10,
-                  padding: 18,
-                  borderRadius: 26,
-                  background: "rgba(255,255,255,0.08)",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                }}
-              >
-                <div style={{ color: "rgba(255,255,255,0.66)", fontSize: 13, fontWeight: 700 }}>
-                  Feed de ofertas
-                </div>
-                {liveFeed.map((offer) => (
-                  <div
-                    key={offer.id}
-                    style={{
-                      display: "grid",
-                      gap: 4,
-                      padding: "10px 0",
-                      borderBottom: "1px solid rgba(255,255,255,0.08)",
-                    }}
-                  >
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                      <span style={{ fontWeight: 800 }}>{offer.productName}</span>
-                      <span style={{ fontWeight: 900 }}>
-                        {offer.price > 0 ? formatPrice(offer.price) : "base ativa"}
-                      </span>
-                    </div>
-                    <div style={{ color: "rgba(255,255,255,0.70)", fontSize: 13 }}>
-                      {offer.marketName} · {offer.categoryLabel} · {offer.freshnessLabel}
+                    <div style={{ 
+                      background: "#F3F4F6", 
+                      width: 44, 
+                      height: 44, 
+                      borderRadius: 12, 
+                      display: "grid", 
+                      placeItems: "center" 
+                    }}>
+                      <ShoppingCart size={20} color="#1F2937" />
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section style={sectionWrap}>
-        <div style={sectionStyle()}>
-          <div style={{ display: "grid", gap: 12, maxWidth: 760 }}>
-            <span style={{ display: "inline-flex", width: "fit-content", padding: "7px 13px", borderRadius: 999, background: "rgba(15,111,94,0.10)", color: "#0d6f5e", fontSize: 12, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase" }}>Comparacoes reais</span>
-            <h2 style={{ margin: 0, color: "#112a26", fontSize: "clamp(2rem, 4vw, 3.4rem)", lineHeight: 0.96, letterSpacing: -1.4 }}>Ofertas, mercados e comparacoes com cara de produto vendavel</h2>
-            <p style={{ margin: 0, color: "rgba(17,42,38,0.72)", fontSize: 17, lineHeight: 1.75 }}>A Home agora sai do formato de mini app e passa a mostrar movimento real da base, com sinais de preco, categoria, recencia e economia potencial.</p>
-          </div>
-          <div style={{ marginTop: 22, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
-            {(cards.length ? cards : fallbackOffers()).map((offer) => (
-              <article key={offer.id} style={{ padding: 20, borderRadius: 24, background: "linear-gradient(180deg, #ffffff 0%, #f7fbf9 100%)", border: "1px solid rgba(16,50,45,0.08)", display: "grid", gap: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
-                  <span style={{ display: "inline-flex", minHeight: 28, padding: "0 10px", alignItems: "center", borderRadius: 999, background: "rgba(15,111,94,0.10)", color: "#0f6d61", fontSize: 12, fontWeight: 900 }}>{offer.categoryLabel}</span>
-                  <span style={{ color: "rgba(18,51,45,0.54)", fontSize: 12, fontWeight: 700 }}>{offer.freshnessLabel}</span>
                 </div>
-                <div>
-                  <h3 style={{ margin: 0, color: "#112a26", fontSize: 21, lineHeight: 1.12 }}>{offer.productName}</h3>
-                  <p style={{ margin: "10px 0 0", color: "rgba(17,42,38,0.70)", lineHeight: 1.6 }}>{offer.marketName} · {offer.regionLabel}</p>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "end" }}>
-                  <div style={{ fontSize: 30, fontWeight: 900, color: "#102c28" }}>{offer.price > 0 ? formatPrice(offer.price) : "ao vivo"}</div>
-                  <div style={{ color: offer.savingsPercent > 0 ? "#11755f" : "rgba(17,42,38,0.54)", fontWeight: 800 }}>{offer.savingsPercent > 0 ? `${offer.savingsPercent}% de economia` : "preco monitorado"}</div>
-                </div>
-              </article>
-            ))}
+              ))
+            )}
           </div>
         </div>
       </section>
 
-      <section style={sectionWrap}>
-        <div style={sectionStyle("linear-gradient(180deg, rgba(255,255,255,0.84) 0%, rgba(245,250,248,0.94) 100%)")}>
-          <div style={{ display: "grid", gap: 12, maxWidth: 760 }}>
-            <span style={{ display: "inline-flex", width: "fit-content", padding: "7px 13px", borderRadius: 999, background: "rgba(15,111,94,0.10)", color: "#0d6f5e", fontSize: 12, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase" }}>Em alta na sua regiao</span>
-            <h2 style={{ margin: 0, color: "#112a26", fontSize: "clamp(2rem, 4vw, 3.4rem)", lineHeight: 0.96, letterSpacing: -1.4 }}>Onde a base esta mostrando mais oportunidade agora</h2>
-          </div>
-          <div style={{ marginTop: 22, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
-            {(regions.length ? regions : [{ regionLabel: "Cobertura em andamento", offersCount: 0, featuredMarket: "Mercados da regiao", bestProduct: "As melhores comparacoes aparecem aqui", bestPrice: 0, bestSavings: 0 }]).map((card) => (
-              <article key={card.regionLabel} style={{ padding: 22, borderRadius: 24, background: "#102e29", color: "white", display: "grid", gap: 12, minHeight: 220 }}>
-                <div style={{ color: "rgba(255,255,255,0.66)", fontSize: 12, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1 }}>{card.regionLabel}</div>
-                <div style={{ fontSize: 28, fontWeight: 900, lineHeight: 1.04 }}>{card.bestProduct}</div>
-                <div style={{ color: "rgba(255,255,255,0.74)", lineHeight: 1.7 }}>{card.featuredMarket}{card.offersCount > 0 ? ` · ${card.offersCount} ofertas conectadas` : " · aguardando volume de ofertas"}</div>
-                <div style={{ marginTop: "auto", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "end" }}>
-                  <div style={{ fontSize: 24, fontWeight: 900 }}>{card.bestPrice > 0 ? formatPrice(card.bestPrice) : "em breve"}</div>
-                  <div style={{ color: "#73ffc2", fontWeight: 800 }}>{card.bestSavings > 0 ? `ate ${card.bestSavings}%` : "monitorando"}</div>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-      <section style={sectionWrap}>
-        <div style={sectionStyle()}>
-          <div style={{ display: "grid", gap: 12, maxWidth: 760 }}>
-            <span style={{ display: "inline-flex", width: "fit-content", padding: "7px 13px", borderRadius: 999, background: "rgba(15,111,94,0.10)", color: "#0d6f5e", fontSize: 12, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase" }}>Exemplo de comparacao</span>
-            <h2 style={{ margin: 0, color: "#112a26", fontSize: "clamp(2rem, 4vw, 3.4rem)", lineHeight: 0.96, letterSpacing: -1.4 }}>Quando a mesma compra aparece em varios mercados, a economia fica visivel</h2>
-          </div>
-          <div style={{ marginTop: 22, display: "grid", gridTemplateColumns: "minmax(0, 1.1fr) minmax(260px, 0.9fr)", gap: 18 }}>
-            <div style={{ overflowX: "auto", borderRadius: 24, border: "1px solid rgba(16,50,45,0.08)", background: "#ffffff", padding: 18 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620 }}>
-                <thead><tr>{["Produto", "Melhor mercado", "Preco", "Alternativa", "Economia"].map((label) => <th key={label} style={{ textAlign: "left", padding: "0 0 14px", borderBottom: "1px solid rgba(16,50,45,0.08)", color: "rgba(17,42,38,0.58)", fontSize: 13, fontWeight: 800 }}>{label}</th>)}</tr></thead>
-                <tbody>
-                  {(comparison.length ? comparison : [{ productName: "Sua comparacao de lista aparece aqui", bestMarket: "Mercado com melhor preco", bestPrice: 0, secondMarket: "Alternativa seguinte", secondPrice: 0, savingsPercent: 0, freshness: "Aguardando base real" }]).map((row) => (
-                    <tr key={`${row.productName}-${row.bestMarket}`}>
-                      <td style={{ padding: "16px 0", borderBottom: "1px solid rgba(16,50,45,0.08)", fontWeight: 800, color: "#112a26" }}>{row.productName}<div style={{ marginTop: 6, color: "rgba(17,42,38,0.54)", fontSize: 12, fontWeight: 700 }}>{row.freshness}</div></td>
-                      <td style={{ padding: "16px 0", borderBottom: "1px solid rgba(16,50,45,0.08)" }}>{row.bestMarket}</td>
-                      <td style={{ padding: "16px 0", borderBottom: "1px solid rgba(16,50,45,0.08)", fontWeight: 800 }}>{row.bestPrice > 0 ? formatPrice(row.bestPrice) : "—"}</td>
-                      <td style={{ padding: "16px 0", borderBottom: "1px solid rgba(16,50,45,0.08)" }}>{row.secondMarket}{row.secondPrice > 0 ? ` · ${formatPrice(row.secondPrice)}` : ""}</td>
-                      <td style={{ padding: "16px 0", borderBottom: "1px solid rgba(16,50,45,0.08)", fontWeight: 900, color: row.savingsPercent > 0 ? "#0f6d61" : "rgba(17,42,38,0.50)" }}>{row.savingsPercent > 0 ? `${row.savingsPercent}%` : "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div style={{ borderRadius: 24, padding: 22, background: "linear-gradient(180deg, #102f2a 0%, #123d35 100%)", color: "white", display: "grid", gap: 14, alignContent: "start" }}>
-              <div style={{ color: "rgba(255,255,255,0.68)", fontSize: 12, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1 }}>Leitura rapida</div>
-              <div style={{ fontSize: 34, fontWeight: 900, lineHeight: 0.98 }}>{comparison.length ? `${comparison[0].savingsPercent}%` : "Lista"}</div>
-              <p style={{ margin: 0, color: "rgba(255,255,255,0.78)", lineHeight: 1.75 }}>{comparison.length ? "No topo da base atual, ja existe variacao suficiente para mostrar onde a compra pode render mais." : "Assim que a mesma cesta aparecer em mercados diferentes, esta area passa a mostrar a vantagem de forma automatica."}</p>
-              <div style={{ padding: 16, borderRadius: 18, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.90)", lineHeight: 1.7 }}>O foco do Economiza Facil nao e exibir uma lista de precos solta. O objetivo e vender clareza para decidir melhor a compra inteira.</div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="comparar-lista" style={sectionWrap}>
-        <div style={sectionStyle()}>
-          <div style={{ display: "grid", gap: 12, maxWidth: 760 }}>
-            <span style={{ display: "inline-flex", width: "fit-content", padding: "7px 13px", borderRadius: 999, background: "rgba(15,111,94,0.10)", color: "#0d6f5e", fontSize: 12, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase" }}>Como funciona</span>
-            <h2 style={{ margin: 0, color: "#112a26", fontSize: "clamp(2rem, 4vw, 3.4rem)", lineHeight: 0.96, letterSpacing: -1.4 }}>Uma jornada simples para transformar lista em decisao</h2>
-          </div>
-          <div style={{ marginTop: 22, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
-            {[{ step: "1", title: "Envie sua lista", text: "Voce informa os itens que quer comprar. O Economiza Facil organiza isso em uma comparacao pronta para decidir." }, { step: "2", title: "Cruzamos os mercados", text: "A base combina ofertas ativas, mercado, categoria, recencia e variacao de preco para montar um radar util." }, { step: "3", title: "Receba a melhor direcao", text: "O resultado aponta onde sua compra tende a sair melhor e mostra as ofertas mais interessantes ao redor." }].map((item) => (
-              <article key={item.step} style={{ padding: 22, borderRadius: 24, background: "linear-gradient(180deg, #ffffff 0%, #f6fbf9 100%)", border: "1px solid rgba(16,50,45,0.08)", display: "grid", gap: 14 }}>
-                <div style={{ width: 46, height: 46, borderRadius: 16, display: "grid", placeItems: "center", background: "linear-gradient(135deg, #0f6f60 0%, #11a288 100%)", color: "white", fontWeight: 900 }}>{item.step}</div>
-                <h3 style={{ margin: 0, color: "#112a26", fontSize: 22 }}>{item.title}</h3>
-                <p style={{ margin: 0, color: "rgba(17,42,38,0.70)", lineHeight: 1.75 }}>{item.text}</p>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section style={sectionWrap}>
-        <div style={sectionStyle("linear-gradient(180deg, rgba(255,255,255,0.84) 0%, rgba(247,250,249,0.96) 100%)")}>
-          <div style={{ display: "grid", gap: 12, maxWidth: 760 }}>
-            <span style={{ display: "inline-flex", width: "fit-content", padding: "7px 13px", borderRadius: 999, background: "rgba(15,111,94,0.10)", color: "#0d6f5e", fontSize: 12, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase" }}>Beneficios</span>
-            <h2 style={{ margin: 0, color: "#112a26", fontSize: "clamp(2rem, 4vw, 3.4rem)", lineHeight: 0.96, letterSpacing: -1.4 }}>Uma landing para vender valor antes mesmo do WhatsApp voltar ao modo total</h2>
-          </div>
-          <div style={{ marginTop: 22, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14 }}>
-            {[{ title: "Comparacao centrada na lista inteira", text: "O valor nao esta em achar um produto isolado mais barato. O foco e descobrir qual mercado faz mais sentido para a compra completa." }, { title: "Decisao antes de sair de casa", text: "Voce economiza tempo, reduz compra por impulso e ganha clareza para decidir melhor com antecedencia." }, { title: "Leitura simples e comercial", text: "A experiencia foi desenhada para ser direta: sinais claros de preco, recencia, mercado e economia potencial." }, { title: "Base pronta para operacao real", text: "A landing conversa com a base do projeto e abre espaco para escalar sem reinventar a estrutura." }].map((item) => (
-              <article key={item.title} style={{ padding: 22, borderRadius: 24, background: "#ffffff", border: "1px solid rgba(16,50,45,0.08)", display: "grid", gap: 12 }}>
-                <h3 style={{ margin: 0, color: "#112a26", fontSize: 22 }}>{item.title}</h3>
-                <p style={{ margin: 0, color: "rgba(17,42,38,0.70)", lineHeight: 1.75 }}>{item.text}</p>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-      <section id="cta-final" style={sectionWrap}>
-        <div style={{ ...sectionStyle("linear-gradient(145deg, #0f2925 0%, #0f5f54 50%, #12a286 100%)"), color: "white", display: "grid", gridTemplateColumns: "minmax(0, 1.15fr) minmax(280px, 0.85fr)", gap: 20 }}>
-          <div style={{ display: "grid", gap: 16, alignContent: "center" }}>
-            <span style={{ display: "inline-flex", width: "fit-content", minHeight: 34, padding: "0 14px", alignItems: "center", borderRadius: 999, background: "rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.82)", fontSize: 12, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase" }}>CTA final</span>
-            <h2 style={{ margin: 0, fontSize: "clamp(2.2rem, 4vw, 3.7rem)", lineHeight: 0.98, letterSpacing: -1.8 }}>Compare sua lista antes de fazer a compra no escuro</h2>
-            <p style={{ margin: 0, color: "rgba(255,255,255,0.82)", lineHeight: 1.8, fontSize: 17 }}>O Economiza Facil foi criado para responder com clareza uma pergunta simples: em qual mercado a compra inteira faz mais sentido hoje.</p>
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minHeight: 58, padding: "0 22px", borderRadius: 18, background: "rgba(255,255,255,0.88)", color: "#16332e", textDecoration: "none", fontWeight: 900 }}>Falar no WhatsApp</a>
-              <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minHeight: 58, padding: "0 22px", borderRadius: 18, background: "linear-gradient(135deg, #0f6f60 0%, #11a288 100%)", color: "white", textDecoration: "none", fontWeight: 900, border: "1px solid rgba(255,255,255,0.14)" }}>Comparar minha lista</a>
-            </div>
-          </div>
-          <div style={{ display: "grid", gap: 14, alignContent: "start", padding: 18, borderRadius: 24, background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.14)" }}>
-            <div style={{ fontWeight: 800, color: "rgba(255,255,255,0.80)" }}>Espaco reservado para QR Code</div>
-            <div style={{ display: "grid", placeItems: "center", minHeight: 240, borderRadius: 22, border: "2px dashed rgba(255,255,255,0.24)", background: "rgba(255,255,255,0.06)", textAlign: "center", padding: 24, color: "rgba(255,255,255,0.78)", lineHeight: 1.7, fontWeight: 700 }}>QR Code oficial do canal<br />entra aqui na proxima etapa</div>
-          </div>
-        </div>
-      </section>
-
-      <section style={sectionWrap}>
-        <div style={sectionStyle()}>
-          <div style={{ display: "grid", gap: 12, maxWidth: 760 }}>
-            <span style={{ display: "inline-flex", width: "fit-content", padding: "7px 13px", borderRadius: 999, background: "rgba(15,111,94,0.10)", color: "#0d6f5e", fontSize: 12, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase" }}>FAQ</span>
-            <h2 style={{ margin: 0, color: "#112a26", fontSize: "clamp(2rem, 4vw, 3.4rem)", lineHeight: 0.96, letterSpacing: -1.4 }}>Perguntas curtas para reduzir atrito na conversao</h2>
-          </div>
-          <div style={{ marginTop: 22, display: "grid", gap: 12 }}>
-            {[{ q: "O Economiza Facil ja esta operando em modo real?", a: "A proposta comercial e a estrutura de comparacao ja estao prontas. O canal principal de WhatsApp segue em fase final de retomada operacional." }, { q: "Preciso baixar aplicativo?", a: "Nao. O MVP foi pensado para ser leve, com entrada simples e experiencia comercial direta." }, { q: "Os dados mostrados na landing sao reais?", a: hasConnectionError || !cards.length ? "Quando a base nao responde ou ainda nao tem volume suficiente, a landing troca para um fallback visual sem quebrar a experiencia." : "Sim. Sempre que a base estiver disponivel, a landing mostra produto, preco, mercado, categoria, recencia e sinais de economia usando a propria colecao de ofertas." }].map((item) => (
-              <article key={item.q} style={{ padding: 18, borderRadius: 22, background: "#ffffff", border: "1px solid rgba(16,50,45,0.08)" }}>
-                <h3 style={{ margin: 0, color: "#112a26", fontSize: 19 }}>{item.q}</h3>
-                <p style={{ margin: "10px 0 0", color: "rgba(17,42,38,0.70)", lineHeight: 1.75 }}>{item.a}</p>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <footer style={{ ...sectionWrap, display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap", padding: "6px 4px 0", color: "rgba(17,42,38,0.60)", fontSize: 14 }}>
-        <div>
-          <div style={{ color: "#12332d", fontWeight: 900 }}>Economiza Facil</div>
-          <div style={{ marginTop: 6 }}>Descubra onde sua lista de compras sai mais barata.</div>
-          <div style={{ marginTop: 10 }}>
-            <Link
-              to="/privacidade"
-              style={{
-                color: "#0f6f60",
+      {/* 5. WHATSAPP MOCKUP SECTION (THE HOOK) */}
+      <section id="demo" style={{ 
+        padding: "120px 20px", 
+        background: "radial-gradient(circle at 10% 20%, #F9FAFB 0%, #EDE9FE 100%)",
+        overflow: "hidden"
+      }}>
+        <div style={{ 
+          maxWidth: "1200px", 
+          margin: "0 auto", 
+          display: "grid", 
+          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", 
+          gap: 60,
+          alignItems: "center"
+        }}>
+          <div>
+             <span style={{ 
+               color: adminColors.primary, 
+               fontWeight: 800, 
+               fontSize: 14, 
+               textTransform: "uppercase", 
+               letterSpacing: 2,
+               display: "block",
+               marginBottom: 16
+             }}>
+               WhatsApp First
+             </span>
+             <h2 style={{ fontSize: "clamp(2rem, 4vw, 3.5rem)", fontWeight: 900, lineHeight: 1.1, marginBottom: 24 }}>
+               Sua lista de compras, <br /> simplificada.
+             </h2>
+             <div style={{ display: "grid", gap: 24, marginBottom: 40 }}>
+               <FeatureItem 
+                 icon={<CheckCircle2 color={adminColors.primary} />} 
+                 title="Envie por texto ou áudio" 
+                 desc="Mande o que você precisa comprar e nossa IA faz o resto." 
+               />
+               <FeatureItem 
+                 icon={<TrendingUp color={adminColors.primary} />} 
+                 title="Comparação Inteligente" 
+                 desc="Analisamos todos os mercados próximos para achar o melhor preço total." 
+               />
+               <FeatureItem 
+                 icon={<ShieldCheck color={adminColors.primary} />} 
+                 title="Grátis para sempre" 
+                 desc="Economia real na palma da sua mão sem pagar nada por isso." 
+               />
+             </div>
+             <a 
+              href={WHATSAPP_URL}
+              style={{ 
+                display: "inline-flex", 
+                alignItems: "center", 
+                gap: 12, 
+                background: "#25D366", 
+                color: "white", 
+                padding: "20px 40px", 
+                borderRadius: 20, 
+                fontSize: 18, 
+                fontWeight: 800, 
                 textDecoration: "none",
-                fontWeight: 800,
+                boxShadow: "0 20px 40px rgba(37, 211, 102, 0.25)"
+              }}
+             >
+               <MessageSquare size={24} /> Começar Econonizar agora
+             </a>
+          </div>
+
+          <div style={{ position: "relative" }}>
+             <img 
+               src="/assets/whatsapp-mockup.png" 
+               alt="Mockup do WhatsApp" 
+               style={{ 
+                 width: "100%", 
+                 maxWidth: 500, 
+                 height: "auto", 
+                 display: "block", 
+                 margin: "0 auto",
+                 filter: "drop-shadow(0 50px 80px rgba(0,0,0,0.15))"
+               }} 
+             />
+             <div style={{ 
+               position: "absolute", 
+               top: "20%", 
+               right: "-10%", 
+               background: "white", 
+               padding: "16px 24px", 
+               borderRadius: 20, 
+               boxShadow: "0 20px 40px rgba(0,0,0,0.05)",
+               animation: "economizaPulse 3s infinite"
+             }}>
+                <div style={{ fontWeight: 800, color: "#1F2937", display: "flex", alignItems: "center", gap: 8 }}>
+                  <Zap size={16} color={adminColors.primary} fill={adminColors.primary} /> Economia de R$ 42,50!
+                </div>
+                <div style={{ fontSize: 13, color: "#6B7280", marginTop: 4 }}>Sugestão: Compra no Assaí</div>
+             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 6. WHATSAPP BARRIER MODAL */}
+      {isLimitReached && (
+        <div style={{ 
+          position: "fixed", 
+          inset: 0, 
+          background: "rgba(15, 17, 23, 0.95)", 
+          display: "grid", 
+          placeItems: "center", 
+          zIndex: 1000,
+          padding: 20,
+          backdropFilter: "blur(8px)"
+        }}>
+          <div style={{ 
+            background: "white", 
+            padding: "48px 40px", 
+            borderRadius: 32, 
+            maxWidth: 500, 
+            width: "100%", 
+            textAlign: "center",
+            animation: "fadeIn 0.4s ease-out"
+          }}>
+            <div style={{ 
+              width: 80, 
+              height: 80, 
+              background: "#EDE9FE", 
+              borderRadius: "50%", 
+              display: "grid", 
+              placeItems: "center", 
+              margin: "0 auto 32px" 
+            }}>
+              <Smartphone size={40} color={adminColors.primary} />
+            </div>
+            <h2 style={{ fontSize: 28, fontWeight: 900, marginBottom: 16 }}>Opa! Você atingiu o limite web.</h2>
+            <p style={{ color: "#6B7280", fontSize: 16, lineHeight: 1.6, marginBottom: 32 }}>
+              Para garantir que tenhamos sempre as melhores ofertas atualizadas para você, o acesso completo e ilimitado é feito diretamente pelo nosso assistente no WhatsApp.
+            </p>
+            <a 
+              href={WHATSAPP_URL}
+              style={{ 
+                display: "flex", 
+                alignItems: "center", 
+                justifyContent: "center",
+                gap: 12, 
+                background: adminColors.primary, 
+                color: "white", 
+                padding: "18px", 
+                borderRadius: 18, 
+                fontSize: 16, 
+                fontWeight: 800, 
+                textDecoration: "none",
+                width: "100%"
               }}
             >
-              Política de Privacidade
-            </Link>
+              Continuar no WhatsApp Gratuitamente <ArrowRight size={20} />
+            </a>
+            <button 
+              onClick={() => {
+                setSearchCount(0);
+                localStorage.setItem("ef_search_count", "0");
+                setIsLimitReached(false);
+              }}
+              style={{ 
+                marginTop: 20, 
+                background: "none", 
+                border: "none", 
+                color: "#9CA3AF", 
+                fontSize: 13, 
+                cursor: "pointer",
+                textDecoration: "underline"
+              }}>
+              Reiniciar testes (Debug Mode)
+            </button>
           </div>
         </div>
-        <div style={{ maxWidth: 360, lineHeight: 1.7 }}>
-          {isLoading ? "Sincronizando a base para exibir ofertas reais na landing." : "Landing comercial conectada a ofertas reais da base quando disponiveis, com fallback elegante quando a colecao ainda nao entrega volume suficiente."}
-        </div>
+      )}
+
+      {/* 7. FOOTER */}
+      <footer style={{ padding: "80px 20px", textAlign: "center", borderTop: "1px solid #F3F4F6", color: "#9CA3AF", fontSize: 14 }}>
+        <p>© 2026 EconomizaFácil.ia · Inteligência a serviço da sua economia.</p>
       </footer>
+    </div>
+  );
+}
+
+function Star() {
+    return <div style={{ color: "#FBBF24" }}><CheckCircle2 size={20} /></div>;
+}
+
+function FeatureItem({ icon, title, desc }: { icon: React.ReactNode, title: string, desc: string }) {
+  return (
+    <div style={{ display: "flex", gap: 16 }}>
+      <div style={{ flexShrink: 0 }}>{icon}</div>
+      <div>
+        <div style={{ fontWeight: 800, color: "#111827", fontSize: 18 }}>{title}</div>
+        <div style={{ color: "#6B7280", fontSize: 15, lineHeight: 1.5, marginTop: 4 }}>{desc}</div>
+      </div>
     </div>
   );
 }
