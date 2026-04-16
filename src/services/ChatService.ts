@@ -75,6 +75,7 @@ interface ChatContext {
     predictedNeeds?: Array<{ product: string; daysRemaining: number; urgent: boolean }>;
     optimizationPreference?: 'economizar' | 'perto' | 'equilibrar';
     fuelPrice?: number;
+    hasConsented?: boolean;
 }
 
 // Palavras que NUNCA devem ser adicionadas como item de lista
@@ -235,6 +236,10 @@ class ChatSession {
         (globalThis as any).CURRENT_FUEL_PRICE = this.context.fuelPrice;
 
         this.context.isFirstContact = recentInteractions.length === 0;
+        
+        const consentData = await lgpdConsentService.getConsent(this.context.userId);
+        this.context.hasConsented = consentData.lgpdConsent === true;
+
         recentInteractions.forEach((interaction) => {
             this.conversationState.addMessage(this.context.userId, interaction.role, interaction.content);
         });
@@ -412,6 +417,25 @@ class ChatSession {
             return this.handleSaudacao();
         }
 
+        // ——— 0.6. LGPD CONSENT GATE ———
+        if (!this.context.hasConsented && !this.context.isFirstContact) {
+            if (conversationState.current === 'AWAITING_LGPD_CONSENT') {
+                const gate = await lgpdConsentService.evaluateConsentGate(this.context.userId, message);
+                if (gate.justConsented) {
+                    this.context.hasConsented = true;
+                    conversationState.reset();
+                    return { text: "✅ Combinado! O que você quer pesquisar hoje?" };
+                }
+                return { text: gate.responseText! };
+            }
+
+            if (actionableIntent) {
+                conversationState.transition('AWAITING_LGPD_CONSENT', 'lgpd_consent', null, 'Aceitar LGPD?');
+                const gate = await lgpdConsentService.evaluateConsentGate(this.context.userId, message);
+                return { text: gate.responseText! };
+            }
+        }
+
         // ——— 1. RESOLVER ESTADO PENDENTE (antes do NLP) ———
         const pending = conversationState.resolveIfPending(message);
 
@@ -419,14 +443,29 @@ class ChatSession {
             if (actionableIntent) {
                 console.log(`[FIRST_CONTACT_LOCATION_SKIPPED] user=${this.context.userId} reason=actionable_message`);
                 conversationState.reset();
-            }
-
-            if (/\b(nao|não|depois|agora nao|agora não|sem localizacao|sem localização)\b/.test(normalizedMessage)) {
+            } else if (/\b(nao|não|depois|agora nao|agora não|sem localizacao|sem localização)\b/.test(normalizedMessage)) {
                 console.log(`[FIRST_CONTACT_LOCATION_SKIPPED] user=${this.context.userId} reason=user_declined`);
                 conversationState.reset();
                 return {
                     text: 'Sem problema 👍\n\nVocê também pode me mandar o nome de um produto, sua lista ou uma foto de oferta que eu já começo a te ajudar.',
                 };
+            } else if (message.length > 3) {
+                // If it's not actionable, and not negative, it's likely they typed their neighborhood
+                conversationState.reset();
+                // We use default coordinates for the city (Vitória) since we don't have a Maps API hooked here
+                // Future improvement: hook ViaCEP or Maps API to geocode the string
+                this.context.userLocation = { lat: -20.2975, lng: -40.3015, address: message.trim() };
+                await userPreferencesService.savePreferences(this.context.userId, { userLocation: this.context.userLocation });
+                
+                const markets = await geoDecisionEngine.findNearbyMarkets(this.context.userLocation.lat, this.context.userLocation.lng);
+                if (markets.length > 0) {
+                    const lines = markets.slice(0, 3).map((market, index) =>
+                        `${index + 1}️⃣ ${market.marketName} - ${market.distance.toFixed(1).replace('.', ',')}km`,
+                    );
+                    return {
+                        text: `📍 Anotei seu bairro!\n\n🏪 Aqui estão alguns mercados na região:\n\n${lines.join('\n')}\n\nPode mandar um produto ou sua lista que eu verifico os preços!`,
+                    };
+                }
             }
         }
 
@@ -1145,6 +1184,13 @@ class ChatSession {
     // ——— Extras & SaudaÃ§Ãµes ———
 
     private handleSaudacao(): ChatResponse {
+        if (!this.context.isFirstContact && this.context.userLocation) {
+             const greeting = this.context.userName ? `Oi ${this.context.userName}! Que bom te ver de novo 💚` : `Oi! Que bom te ver de novo 💚`;
+             return {
+                 text: `${greeting}\n\nO que vamos economizar hoje? Pode me mandar o nome de um produto, uma lista de compras ou até a foto de uma oferta!`
+             };
+        }
+
         return {
             text:
                 'Olá! Eu sou o Economiza Fácil 💚\n\n' +
@@ -1196,14 +1242,29 @@ class ChatSession {
         return { text: "Não consegui identificar o valor. Pode digitar apenas o nÃºmero do consumo (ex: 12.5)?" };
     }
 
-    private handleCoords(lat: number, lng: number): ChatResponse {
+    private async handleCoords(lat: number, lng: number): Promise<ChatResponse> {
         this.context.userLocation = { lat, lng, address: `${lat.toFixed(4)}, ${lng.toFixed(4)}` };
         this.context.isFirstContact = false;
         void userPreferencesService.savePreferences(this.context.userId, {
             userLocation: this.context.userLocation,
         });
         this.conversationState.reset();
-        return { text: '📍 Localização recebida!\n\nAgora já consigo buscar os mercados mais próximos e as melhores ofertas pra você.\n\nPode mandar um produto, sua lista ou pedir ofertas de um mercado.' };
+        
+        await lgpdConsentService.recordLocationDeclaration(this.context.userId, 'gps_auto');
+
+        const markets = await geoDecisionEngine.findNearbyMarkets(lat, lng);
+        if (!markets.length) {
+            return { text: '📍 Localização recebida! Ainda não achei mercados muito perto de você, mas já posso te ajudar com preços. O que você quer pesquisar?' };
+        }
+
+        const lines = markets.slice(0, 3).map((market, index) =>
+            `${index + 1}️⃣ ${market.marketName} - ${market.distance.toFixed(1).replace('.', ',')}km`,
+        );
+        const closest = markets[0];
+
+        return {
+            text: `📍 Localização recebida!\n\n🏪 Mercados perto de você\n\n${lines.join('\n')}\n\n${closest.marketName} é o mais perto agora.\n\nPode mandar um produto ou sua lista que eu verifico os preços!`,
+        };
     }
 
     private async handleFindNearbyMarkets(): Promise<ChatResponse> {

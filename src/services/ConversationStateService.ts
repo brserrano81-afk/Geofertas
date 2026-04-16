@@ -30,6 +30,7 @@ export type ConversationStatus =
     | 'AWAITING_MULTI_CHOICE'
     | 'AWAITING_ONBOARDING_ANSWER'
     | 'AWAITING_LIST_RECOVERY'
+    | 'AWAITING_LGPD_CONSENT'
     | 'CRIANDO_LISTA';
 
 export class ConversationStateService {
@@ -57,6 +58,7 @@ export class ConversationStateService {
         'AWAITING_TRANSPORT_CONSUMPTION',
         'AWAITING_ONBOARDING_ANSWER',
         'AWAITING_LIST_RECOVERY',
+        'AWAITING_LGPD_CONSENT',
         'AWAITING_SHARE_TARGET',
     ];
 
