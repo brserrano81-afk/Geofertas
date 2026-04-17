@@ -57,6 +57,58 @@ interface ResponseBuildResult {
     reason: string;
 }
 
+function extractInboxLocation(message: InboxMessage): { lat: number; lng: number; address?: string } | null {
+    if (message.location && Number.isFinite(message.location.lat) && Number.isFinite(message.location.lng)) {
+        return {
+            lat: Number(message.location.lat),
+            lng: Number(message.location.lng),
+            address: message.location.address || undefined,
+        };
+    }
+
+    if (!message.rawMessageJson) {
+        return null;
+    }
+
+    try {
+        const parsed = JSON.parse(message.rawMessageJson);
+        const data = Array.isArray(parsed) ? (parsed[0] || {}) : parsed;
+        const rawLocation =
+            data?.message?.locationMessage ||
+            data?.message?.liveLocationMessage ||
+            data?.location ||
+            null;
+
+        if (!rawLocation || typeof rawLocation !== 'object') {
+            return null;
+        }
+
+        const lat = Number(
+            rawLocation.degreesLatitude ??
+            rawLocation.latitude ??
+            rawLocation.lat,
+        );
+        const lng = Number(
+            rawLocation.degreesLongitude ??
+            rawLocation.longitude ??
+            rawLocation.lng,
+        );
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            return null;
+        }
+
+        return {
+            lat,
+            lng,
+            address: String(rawLocation.address || rawLocation.name || '').trim() || undefined,
+        };
+    } catch (err) {
+        console.error(`[EvolutionInboxWorker] user=${message.userId} - Falha ao extrair localizacao do inbox:`, err);
+        return null;
+    }
+}
+
 const POLL_INTERVAL_MS = Number(process.env.EVOLUTION_WORKER_POLL_MS || 4000);
 const RUN_ONCE = process.argv.includes('--once');
 const VERBOSE = process.argv.includes('--verbose');
@@ -192,7 +244,7 @@ function getEvolutionPresenceUrl(): string | null {
 
 async function loadPendingMessages(): Promise<Array<{ id: string; data: InboxMessage }>> {
     const snapshot = await db.collection('message_inbox')
-        .where('status', '==', 'pending')
+        .where('status', '==', 'pending_test')
         .limit(10)
         .get();
 
@@ -902,6 +954,43 @@ async function buildResponse(rawMessage: InboxMessage): Promise<ResponseBuildRes
         };
     }
 
+    if (message.messageType === 'locationMessage' || message.messageType === 'liveLocationMessage') {
+        const location = extractInboxLocation(message);
+        if (!location) {
+            console.warn(`[FALLBACK_TRIGGERED] user=${message.userId} reason=invalid_location_payload`);
+            return {
+                text: 'Recebi sua localizacao, mas ela chegou incompleta pra mim. Pode tentar enviar de novo ou me mandar seu bairro por texto?',
+                shouldSend: true,
+                usedFallback: true,
+                reason: 'invalid_location_payload',
+            };
+        }
+
+        const locationMessage = `[GPS_LOCATION_UPDATE] ${location.lat}, ${location.lng}`;
+        const response = await chatService.processMessage(
+            locationMessage,
+            message.userId,
+            message.storageUserId || message.userId,
+        );
+
+        if (!String(response.text || '').trim()) {
+            console.warn(`[FALLBACK_TRIGGERED] user=${message.userId} reason=empty_location_chat_response`);
+            return {
+                text: 'Recebi sua localizacao, mas nao consegui concluir o cadastro agora. Pode tentar de novo ou me mandar seu bairro por texto?',
+                shouldSend: true,
+                usedFallback: true,
+                reason: 'empty_location_chat_response',
+            };
+        }
+
+        return {
+            text: response.text,
+            shouldSend: true,
+            usedFallback: false,
+            reason: 'location_processed',
+        };
+    }
+
     const text = String(message.text || '').trim();
     if (!text) {
         console.log(
@@ -959,7 +1048,7 @@ async function claimInboxItem(id: string): Promise<InboxMessage | null> {
         }
 
         const data = docSnap.data() as InboxMessage;
-        if (data.status !== 'pending') {
+        if (data.status !== 'pending' && data.status !== 'pending_test') {
             return null;
         }
 

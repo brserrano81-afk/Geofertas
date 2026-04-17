@@ -149,6 +149,20 @@ function capitalize(value: string): string {
     return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+function looksLikeNeighborhoodFallback(message: string): boolean {
+    const trimmed = String(message || '').trim();
+    const normalized = normalizeText(trimmed);
+
+    if (trimmed.length < 3 || trimmed.length > 80) return false;
+    if (!/[a-zA-ZÀ-ÿ]/.test(trimmed)) return false;
+    if (COURTESY_WORDS.has(normalized)) return false;
+    if (trimmed.split(/\s+/).length > 8) return false;
+    if (/\d/.test(trimmed)) return false;
+    if (/\b(ajuda|help|socorro|nao sei|não sei|sei la|sei lá)\b/.test(normalized)) return false;
+
+    return !/\b(quanto|valor|preco|precos|oferta|ofertas|lista|mercado|mercados|comprar|compra|quero|produto|produtos)\b/.test(normalized);
+}
+
 function normalizeTextListEntry(value: string): string {
     return String(value || '').toLowerCase().trim();
 }
@@ -238,7 +252,8 @@ class ChatSession {
         console.log(`[ChatService] Preferences loaded for ${this.context.userId}:`, prefs);
     }
 
-    public async processMessage(message: string): Promise<ChatResponse> {
+    public async processMessage(message: string): Promise<ChatResponse> { await this.conversationState.load(this.context.userId); const res = await this._processMessageInternal(message); await this.conversationState.save(this.context.userId); return res; }
+    private async _processMessageInternal(message: string): Promise<ChatResponse> {
         await this.ready;
         await this.refreshRichContext();
         const conversationState = this.conversationState;
@@ -428,6 +443,10 @@ class ChatSession {
         const pending = conversationState.resolveIfPending(message);
 
         if (conversationState.current === 'AWAITING_INITIAL_LOCATION') {
+            if (looksLikeNeighborhoodFallback(message) && !actionableIntent) {
+                return this.handleNeighborhoodFallback(message);
+            }
+
             if (actionableIntent) {
                 console.log(`[FIRST_CONTACT_LOCATION_SKIPPED] user=${this.context.userId} reason=actionable_message`);
                 conversationState.reset();
@@ -1223,14 +1242,33 @@ class ChatSession {
         return { text: "NÃ£o consegui identificar o valor. Pode digitar apenas o nÃºmero do consumo (ex: 12.5)?" };
     }
 
-    private handleCoords(lat: number, lng: number): ChatResponse {
+    private handleCoords(
+        lat: number,
+        lng: number,
+        locationSource: 'user_declared' | 'gps_auto' = 'gps_auto',
+    ): ChatResponse {
         this.context.userLocation = { lat, lng, address: `${lat.toFixed(4)}, ${lng.toFixed(4)}` };
         this.context.isFirstContact = false;
         void userPreferencesService.savePreferences(this.context.userId, {
             userLocation: this.context.userLocation,
+            locationSource,
         });
         this.conversationState.reset();
         return { text: '📍 Localização recebida!\n\nAgora já consigo buscar os mercados mais próximos e as melhores ofertas pra você.\n\nPode mandar um produto, sua lista ou pedir ofertas de um mercado.' };
+    }
+
+    private handleNeighborhoodFallback(message: string): ChatResponse {
+        const neighborhood = message.trim().replace(/\s+/g, ' ');
+        this.context.isFirstContact = false;
+        void userPreferencesService.savePreferences(this.context.userId, {
+            neighborhood,
+        });
+        this.conversationState.reset();
+        return {
+            text:
+                `Beleza, vou usar *${capitalize(neighborhood)}* como sua regiao por enquanto.\n\n` +
+                'Se quiser mais precisao depois, pode me mandar o GPS pelo WhatsApp. Agora pode pedir um produto, uma lista ou mercados perto.',
+        };
     }
 
     private async handleFindNearbyMarkets(): Promise<ChatResponse> {

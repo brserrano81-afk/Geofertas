@@ -313,6 +313,49 @@ function extractMessageText(payload = {}) {
     return text;
 }
 
+function extractLocationPayload(payload = {}) {
+    const rawData = payload.data || payload;
+    const data = Array.isArray(rawData) ? (rawData[0] || {}) : rawData;
+    const message = data.message || {};
+    const location =
+        message.locationMessage ||
+        message.liveLocationMessage ||
+        data.location ||
+        null;
+
+    if (!location || typeof location !== 'object') {
+        return null;
+    }
+
+    const lat = Number(
+        location.degreesLatitude ??
+        location.latitude ??
+        location.lat,
+    );
+    const lng = Number(
+        location.degreesLongitude ??
+        location.longitude ??
+        location.lng,
+    );
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return null;
+    }
+
+    const address = String(
+        location.address ||
+        location.name ||
+        data.address ||
+        '',
+    ).trim();
+
+    return {
+        lat,
+        lng,
+        address: address || null,
+    };
+}
+
 function normalizeEvolutionEvent(payload = {}, routeEvent = null) {
     // Evolution API v2 envia payload.data como array em messages.upsert
     const rawData = payload.data || {};
@@ -368,6 +411,7 @@ function normalizeEvolutionEvent(payload = {}, routeEvent = null) {
     }
 
     const text = extractMessageText(payload);
+    const location = extractLocationPayload(payload);
 
     return {
         correlationId: key.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -385,6 +429,7 @@ function normalizeEvolutionEvent(payload = {}, routeEvent = null) {
         messageType,
         text,
         textPreview: text ? text.slice(0, 160) : '',
+        location,
         raw: payload,
         receivedAtIso: new Date().toISOString(),
     };
@@ -412,9 +457,15 @@ function shouldEnqueueInboundMessage(normalizedEvent) {
         'videoMessage',
         'audioMessage',
         'documentMessage',
+        'locationMessage',
+        'liveLocationMessage',
     ]);
 
     if (supportedTypes.has(normalizedEvent.messageType)) {
+        return true;
+    }
+
+    if (normalizedEvent.location?.lat && normalizedEvent.location?.lng) {
         return true;
     }
 
@@ -531,6 +582,7 @@ async function enqueueInboundMessage(normalizedEvent) {
             messageType: normalizedEvent.messageType,
             text: normalizedEvent.text || '',
             textPreview: normalizedEvent.textPreview,
+            location: normalizedEvent.location || null,
             fromMe: normalizedEvent.fromMe,
             direction: normalizedEvent.direction,
             messageId: key.id || null,
@@ -546,6 +598,8 @@ async function enqueueInboundMessage(normalizedEvent) {
             // rawMessageJson: objeto 'data' do webhook serializado para que o worker
             // possa chamar /message/downloadMedia/{instance} e descriptografar a mídia.
             rawMessageJson: normalizedEvent.messageType === 'audioMessage'
+                || normalizedEvent.messageType === 'locationMessage'
+                || normalizedEvent.messageType === 'liveLocationMessage'
                 ? JSON.stringify(data)
                 : null,
             status: 'pending',
