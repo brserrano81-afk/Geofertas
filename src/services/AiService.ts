@@ -145,7 +145,10 @@ class AiService {
             }
 
             const genAI = new GoogleGenerativeAI(apiKey);
-            const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+            const model = genAI.getGenerativeModel({ 
+                model: 'gemini-1.5-flash',
+                generationConfig: { temperature: 0.1 }
+            });
 
             const contextPrompt = context?.richContextSummary
                 ? `\nCONTEXTO DO USUARIO:\n${context.richContextSummary}\n`
@@ -157,8 +160,24 @@ class AiService {
             ]);
 
             const responseText = result.response.text();
-            const cleaned = responseText.replace(/```json\s*/g, '').replace(/```/g, '').trim();
-            const parsed = JSON.parse(cleaned) as NlpResult & { isBatch?: boolean };
+            
+            // Extração robusta do JSON: mesmo que o Gemini fale "Aqui está: ```json { ... } ```"
+            let cleaned = responseText;
+            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                cleaned = jsonMatch[0];
+            } else {
+                cleaned = responseText.replace(/```json\s*/g, '').replace(/```/g, '').trim();
+            }
+
+            let parsed: NlpResult & { isBatch?: boolean };
+            try {
+                parsed = JSON.parse(cleaned) as NlpResult & { isBatch?: boolean };
+            } catch (e) {
+                console.error('[AiService] Failed to parse JSON. Raw response:', responseText);
+                console.error('[AiService] Cleaned string attempted to parse:', cleaned);
+                throw e; // Pass to the outer catch block
+            }
 
             const nlpResult: NlpResult = {
                 intent: parsed.intent || 'UNKNOWN',

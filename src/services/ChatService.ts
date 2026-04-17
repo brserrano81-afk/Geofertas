@@ -246,6 +246,23 @@ class ChatSession {
 
         // LGPD: Interceptar comando de exclusao de dados
         const normalizedForLgpd = message.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+        // 📍 Interceptar comando nativo de localização enviado pela Bridge
+        if (message.startsWith('[GPS_LOCATION_UPDATE]')) {
+            console.log(`[ChatService] Bypass de NLP para Localização detectado.`);
+            const coordsMatch = message.match(/\[GPS_LOCATION_UPDATE\]\s*([\d.-]+),\s*([\d.-]+)/);
+            if (coordsMatch) {
+                const lat = parseFloat(coordsMatch[1]);
+                const lng = parseFloat(coordsMatch[2]);
+                this.context.userLocation = { lat, lng };
+                
+                await userPreferencesService.savePreferences(this.context.userId, {
+                    userLocation: { lat, lng },
+                });
+                console.log(`[ChatService] Localização salva no contexto: ${lat}, ${lng}`);
+                return this.handleCoords(lat, lng); // Redireciona para o handler correto de processamento de coordenadas
+            }
+        }
         const isDeletionCommand = /\b(apagar|excluir|deletar|remover|esquece|esqueca)\s+(meus\s+)?dados\b/.test(normalizedForLgpd);
         if (isDeletionCommand) {
             console.log('[ChatService] [LGPD] Exclusao de dados solicitada: ' + this.context.userId);
