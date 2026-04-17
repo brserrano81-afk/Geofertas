@@ -100,7 +100,7 @@ export class ConversationStateService {
     }
 
     async load(userId: string) {
-        if (!isServer) return;
+        if (!isServer || !serverDb) return;
         try {
             const snap = await (serverDb as any).collection('user_conversations').doc(userId).get();
             if (snap.exists) {
@@ -118,7 +118,7 @@ export class ConversationStateService {
     }
 
     async save(userId: string) {
-        if (!isServer) return;
+        if (!isServer || !serverDb) return;
         try {
             await (serverDb as any).collection('user_conversations').doc(userId).set({
                 current: this.current,
