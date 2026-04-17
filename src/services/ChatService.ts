@@ -421,10 +421,22 @@ class ChatSession {
             return this.handleCalcularTotalLista();
         }
 
-        // Calcula interpretaÃ§Ã£o no inÃ­cio
-        const interpretation = await aiService.interpret(message, this.context);
         const explicitPreference = detectOptimizationPreference(message);
-        const asksForProfile = /\b(o que (voce|vc) sabe sobre mim|o que lembra de mim|me fala meu historico|me fale meu historico)\b/.test(normalizedMessage);
+        const asksForProfile = /\b(o que (voce|vc) sabe sobre mim|o que lembra de mim|me fala meu historico|me fala meu historico)\b/.test(normalizedMessage);
+
+        // ─── INTERCEPTOR DE BAIRRO (Antes do AI para evitar instabilidades) ───
+        if (conversationState.current === 'AWAITING_INITIAL_LOCATION') {
+            const normalized = normalizeText(message);
+            const isCourtesy = COURTESY_WORDS.has(normalized);
+            
+            if (looksLikeNeighborhoodFallback(message) && !isCourtesy) {
+                console.log(`[ChatService] Neighborhood Fallback Detectado (PRE-AI): ${message}`);
+                return this.handleNeighborhoodFallback(message);
+            }
+        }
+
+        // Calcula interpretação no início
+        const interpretation = await aiService.interpret(message, this.context);
         const hasProducts = Boolean(interpretation.product) || Boolean(interpretation.products?.length);
         const actionableIntent = isActionableIntent(interpretation.intent, hasProducts);
 
@@ -443,10 +455,6 @@ class ChatSession {
         const pending = conversationState.resolveIfPending(message);
 
         if (conversationState.current === 'AWAITING_INITIAL_LOCATION') {
-            if (looksLikeNeighborhoodFallback(message) && !actionableIntent) {
-                return this.handleNeighborhoodFallback(message);
-            }
-
             if (actionableIntent) {
                 console.log(`[FIRST_CONTACT_LOCATION_SKIPPED] user=${this.context.userId} reason=actionable_message`);
                 conversationState.reset();
