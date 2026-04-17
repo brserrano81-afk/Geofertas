@@ -770,16 +770,53 @@ Retorne SOMENTE o JSON, sem texto adicional.`;
         };
     }
 
-    // ── CHECK_PRICE: informa que vai buscar ofertas, sem salvar na lista ────────
+    // ── CHECK_PRICE: reusa a mesma trilha de texto para buscar preço/oferta ────
     if (intent === 'CHECK_PRICE') {
-        const itemNames = parsedItems.map((i) => i.name).join(', ');
-        console.log(`[AudioProcessor] user=${message.userId} — CHECK_PRICE para: ${itemNames}`);
-        return {
-            text: `🔍 Entendi que você quer saber o preço de: *${itemNames}*.\n\nVou buscar as ofertas!`,
-            shouldSend: true,
-            usedFallback: false,
-            reason: 'audio_check_price',
-        };
+        const itemNames = parsedItems.map((i) => i.name).filter(Boolean).join(', ');
+        if (!itemNames) {
+            return {
+                text: 'Ouvi seu áudio, mas não consegui identificar o produto para consultar o preço. Pode repetir?',
+                shouldSend: true,
+                usedFallback: false,
+                reason: 'audio_check_price_no_items',
+            };
+        }
+
+        const priceQuery = `consultar preço de ${itemNames}`;
+        console.log(`[AudioProcessor] user=${message.userId} — CHECK_PRICE reroteado para ChatService: ${priceQuery}`);
+
+        try {
+            const response = await chatService.processMessage(
+                priceQuery,
+                message.userId,
+                message.storageUserId || message.userId,
+            );
+
+            const responseText = String(response.text || '').trim();
+            if (!responseText) {
+                return {
+                    text: 'Entendi que você quer saber o preço, mas não consegui montar a consulta agora. Pode tentar de novo em texto?',
+                    shouldSend: true,
+                    usedFallback: true,
+                    reason: 'audio_check_price_empty_response',
+                };
+            }
+
+            return {
+                text: responseText,
+                shouldSend: true,
+                usedFallback: false,
+                reason: 'audio_check_price_routed_to_chat',
+            };
+        } catch (err) {
+            console.error(`[AudioProcessor] user=${message.userId} — Falha ao consultar preço via ChatService:`, err);
+            return {
+                text: 'Tive um problema ao consultar o preço agora. Pode tentar novamente em texto?',
+                shouldSend: true,
+                usedFallback: true,
+                reason: 'audio_check_price_chat_error',
+            };
+        }
     }
 
     // ── ADD_LIST: salva na lista ativa do usuário no Firestore ──────────────────
