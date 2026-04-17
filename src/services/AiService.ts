@@ -3,7 +3,18 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 function getGeminiKey(): string {
-    return import.meta.env?.VITE_GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
+    const key = import.meta.env?.VITE_GOOGLE_GEMINI_API_KEY || 
+                process.env.GOOGLE_GEMINI_API_KEY || 
+                process.env.GEMINI_API_KEY || 
+                '';
+    
+    if (key) {
+        console.log(`[AiService] Chave encontrada: ${key.substring(0, 8)}...`);
+    } else {
+        console.warn('[AiService] Nenhuma chave Gemini encontrada no ambiente.');
+    }
+    
+    return key;
 }
 
 export type Intent =

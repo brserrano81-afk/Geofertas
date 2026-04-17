@@ -902,6 +902,11 @@ app.post('/webhook/whatsapp-entrada', webhookRateLimit, async (req, res) => {
         const enqueueResult = validation.ok
             ? await enqueueInboundMessage(normalizedEvent)
             : { inboxId: null, duplicate: false, ignoredReason: validation.reason };
+
+        if (validation.ok && enqueueResult.inboxId && !enqueueResult.duplicate) {
+            console.log(`[EvolutionWebhook] [${normalizedEvent.correlationId}] Enfileirado: ${normalizedEvent.messageType} de ${maskIdentifier(normalizedEvent.remoteJid)} -> Inbox: ${enqueueResult.inboxId}`);
+        }
+
         const pipelineStatus = !validation.ok
             ? 'ignored'
             : enqueueResult.duplicate
@@ -909,6 +914,7 @@ app.post('/webhook/whatsapp-entrada', webhookRateLimit, async (req, res) => {
                 : enqueueResult.inboxId
                     ? 'enqueued'
                     : 'enqueue_failed';
+
         const filePath = await persistEvolutionEvent(normalizedEvent, {
             pipelineStatus,
             ignoredReason: !validation.ok ? validation.reason : null,
