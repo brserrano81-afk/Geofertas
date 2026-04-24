@@ -1,11 +1,12 @@
 import dotenv from 'dotenv';
+dotenv.config();
 import { adminDb as db, admin } from '../lib/firebase-admin';
 const serverTimestamp = admin.firestore.FieldValue.serverTimestamp;
 import { chatService } from '../services/ChatService';
 import { isMasterAdmin, masterAdminService } from '../services/MasterAdminService';
 import { maskIdentifier } from '../utils/maskSensitiveData';
 
-dotenv.config();
+
 
 interface InboxMessage {
     correlationId?: string;
@@ -244,7 +245,7 @@ function getEvolutionPresenceUrl(): string | null {
 
 async function loadPendingMessages(): Promise<Array<{ id: string; data: InboxMessage }>> {
     const snapshot = await db.collection('message_inbox')
-        .where('status', '==', 'pending_test')
+        .where('status', '==', 'pending')
         .limit(10)
         .get();
 
@@ -636,7 +637,7 @@ async function downloadAudioViaEvolution(
 }
 
 async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBuildResult> {
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
     if (!GEMINI_API_KEY) {
         console.error(`[AudioProcessor] user=${message.userId} — GEMINI_API_KEY não configurada`);
         return {
