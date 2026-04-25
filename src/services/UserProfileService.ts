@@ -246,19 +246,33 @@ class UserProfileService {
 
     private getTimestamp(value: unknown): number {
         if (!value) return 0;
-        if (typeof value === 'object' && value !== null && 'toMillis' in (value as { toMillis?: unknown })) {
-            const toMillis = (value as { toMillis: () => number }).toMillis;
-            if (typeof toMillis === 'function') {
-                return toMillis();
+        
+        try {
+            // Caso seja um objeto com toMillis (instancia do Timestamp do Firebase)
+            if (typeof value === 'object' && value !== null && 'toMillis' in (value as any)) {
+                const toMillis = (value as any).toMillis;
+                if (typeof toMillis === 'function') {
+                    return toMillis();
+                }
             }
+
+            // Caso seja um objeto literal de Timestamp { _seconds, _nanoseconds }
+            if (typeof value === 'object' && value !== null && '_seconds' in (value as any)) {
+                return (value as any)._seconds * 1000;
+            }
+
+            if (value instanceof Date) {
+                return value.getTime();
+            }
+
+            if (typeof value === 'string') {
+                const parsed = Date.parse(value);
+                return Number.isNaN(parsed) ? 0 : parsed;
+            }
+        } catch (e) {
+            console.error('[UserProfileService] Failed to parse timestamp:', value, e);
         }
-        if (value instanceof Date) {
-            return value.getTime();
-        }
-        if (typeof value === 'string') {
-            const parsed = Date.parse(value);
-            return Number.isNaN(parsed) ? 0 : parsed;
-        }
+
         return 0;
     }
 }
