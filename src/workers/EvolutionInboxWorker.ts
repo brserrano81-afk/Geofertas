@@ -1,5 +1,7 @@
 import dotenv from 'dotenv';
 dotenv.config();
+
+console.log('[SYSTEM] Deploy Version: 1.0.5 - Stability & Gemini Fix');
 import { adminDb as db, admin } from '../lib/firebase-admin';
 const serverTimestamp = admin.firestore.FieldValue.serverTimestamp;
 import { chatService } from '../services/ChatService';
