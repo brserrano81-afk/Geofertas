@@ -1088,43 +1088,8 @@ class ChatSession {
             case 'adicionar_item_lista': {
                 return this.handleAddItemsIntent(interpretation);
             }
-                const addEntities = interpretation.nlpResult.entities;
-                const interpretedProducts = ((interpretation.products || []) as string[]).filter((value) => typeof value === 'string' && value.length > 0);
-                const fallbackAddItems: string[] = interpretation.product
-                    ? [interpretation.product as string]
-                    : addEntities.map(e => e.value).filter((value): value is string => Boolean(value));
-                const rawAddItems: string[] = interpretedProducts.length > 0 ? interpretedProducts : fallbackAddItems;
-                const addItems = cleanProductList(rawAddItems);
-                if (addItems.length === 0) return { text: "Quais itens você quer adicionar?" };
-                addItems.forEach((name, idx) => {
-                    if (!this.context.shoppingList.find(i => i.name === name)) {
-                        this.context.shoppingList.push({
-                            name,
-                            quantity: addEntities[idx]?.quantity,
-                            unit: addEntities[idx]?.unit
-                        });
-                    }
-                });
-                await this.listManager.persistList(this.context.shoppingList);
-                const addResult = await this.listManager.recoverActiveListItemsOnly();
-                conversationState.transition('AWAITING_LIST_CONFIRMATION', 'confirm_list', this.context.shoppingList, 'Finalizar lista?');
-                return { text: `Adicionei à sua lista.\n\n${addResult.text}Finalizar lista?` };
-            }
             case 'remover_item_lista': {
                 return this.handleRemoveItemsIntent(interpretation);
-                const interpretedRemoveProducts = ((interpretation.products || []) as string[]).filter((value) => typeof value === 'string' && value.length > 0);
-                const fallbackRemoveItems: string[] = interpretation.product
-                    ? [interpretation.product as string]
-                    : interpretation.nlpResult.entities.map(e => e.value).filter((value): value is string => Boolean(value));
-                const removeItems: string[] = interpretedRemoveProducts.length > 0 ? interpretedRemoveProducts : fallbackRemoveItems;
-                if (removeItems.length === 0) return { text: "Quais itens você quer tirar da lista?" };
-                this.context.shoppingList = this.context.shoppingList.filter(
-                    item => !removeItems.some(r => item.name.toLowerCase().includes(r.toLowerCase()))
-                );
-                await this.listManager.persistList(this.context.shoppingList);
-                const rmResult = await this.listManager.recoverActiveListItemsOnly();
-                conversationState.transition('AWAITING_LIST_CONFIRMATION', 'confirm_list', this.context.shoppingList, 'Finalizar lista?');
-                return { text: `Pronto, removi. Sua lista atualizada:\n\n${rmResult.text}Finalizar lista?` };
             }
             case 'calcular_total_lista':
             case 'melhor_mercado_para_lista': {
