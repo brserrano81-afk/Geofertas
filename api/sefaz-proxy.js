@@ -302,6 +302,7 @@ function extractMessageText(payload = {}) {
         data.body ||
         data.caption ||
         data.text ||
+        data.conversation ||
         ''
     );
 
@@ -559,56 +560,61 @@ async function enqueueInboundMessage(normalizedEvent) {
     const rawData = normalizedEvent.raw?.data || {};
     const data = Array.isArray(rawData) ? (rawData[0] || {}) : rawData;
     const key = data.key || {};
+    const messageId = key.id || null;
+
+    if (!messageId) {
+        return { inboxId: null, duplicate: false, error: 'missing_message_id_in_payload' };
+    }
 
     try {
-        const existing = await findExistingInboxMessage({
-            ...normalizedEvent,
-            messageId: key.id || null,
-        });
-        if (existing) {
-            return { inboxId: existing.id, duplicate: true };
-        }
+        const inboxDocRef = db.collection('message_inbox').doc(messageId);
+        
+        // Uso de transação para garantir atomicidade e evitar duplicidade por race condition
+        const result = await db.runTransaction(async (transaction) => {
+            const docSnap = await transaction.get(inboxDocRef);
+            if (docSnap.exists) {
+                return { inboxId: messageId, duplicate: true };
+            }
 
-        const inboxRef = await db.collection('message_inbox').add({
-            correlationId: normalizedEvent.correlationId,
-            source: normalizedEvent.source,
-            event: normalizedEvent.event,
-            instance: normalizedEvent.instance,
-            userId: normalizedEvent.userId,
-            storageUserId: normalizedEvent.storageUserId || normalizedEvent.userId,
-            legacyUserId: normalizedEvent.legacyUserId || normalizedEvent.userId,
-            bsuid: normalizedEvent.bsuid || null,
-            remoteJid: normalizedEvent.remoteJid,
-            messageType: normalizedEvent.messageType,
-            text: normalizedEvent.text || '',
-            textPreview: normalizedEvent.textPreview,
-            location: normalizedEvent.location || null,
-            fromMe: normalizedEvent.fromMe,
-            direction: normalizedEvent.direction,
-            messageId: key.id || null,
-            // Evolution v2 com "Send Base64" ativado pode enviar o base64 em
-            // campos diferentes dependendo da versão: data.base64 (mais comum),
-            // data.message.base64, ou data.message.audioMessage.base64.
-            mediaBase64: data.base64 ||
-                data.message?.base64 ||
-                data.message?.audioMessage?.base64 ||
-                data.message?.ptt?.base64 ||
-                null,
-            mediaUrl: data.url || data.message?.audioMessage?.url || data.message?.ptt?.url || null,
-            // rawMessageJson: objeto 'data' do webhook serializado para que o worker
-            // possa chamar /message/downloadMedia/{instance} e descriptografar a mídia.
-            rawMessageJson: normalizedEvent.messageType === 'audioMessage'
-                || normalizedEvent.messageType === 'locationMessage'
-                || normalizedEvent.messageType === 'liveLocationMessage'
-                ? JSON.stringify(data)
-                : null,
-            status: 'pending',
-            receivedAtIso: normalizedEvent.receivedAtIso,
-            createdAt: serverTimestamp(),
-            createdAtIso: nowIso(),
+            const payload = {
+                correlationId: normalizedEvent.correlationId,
+                source: normalizedEvent.source,
+                event: normalizedEvent.event,
+                instance: normalizedEvent.instance,
+                userId: normalizedEvent.userId,
+                storageUserId: normalizedEvent.storageUserId || normalizedEvent.userId,
+                legacyUserId: normalizedEvent.legacyUserId || normalizedEvent.userId,
+                bsuid: normalizedEvent.bsuid || null,
+                remoteJid: normalizedEvent.remoteJid,
+                messageType: normalizedEvent.messageType,
+                text: normalizedEvent.text || '',
+                textPreview: normalizedEvent.textPreview,
+                location: normalizedEvent.location || null,
+                fromMe: normalizedEvent.fromMe,
+                direction: normalizedEvent.direction,
+                messageId: messageId,
+                mediaBase64: data.base64 ||
+                    data.message?.base64 ||
+                    data.message?.audioMessage?.base64 ||
+                    data.message?.ptt?.base64 ||
+                    null,
+                mediaUrl: data.url || data.message?.audioMessage?.url || data.message?.ptt?.url || null,
+                rawMessageJson: normalizedEvent.messageType === 'audioMessage'
+                    || normalizedEvent.messageType === 'locationMessage'
+                    || normalizedEvent.messageType === 'liveLocationMessage'
+                    ? JSON.stringify(data)
+                    : null,
+                status: 'pending',
+                receivedAtIso: normalizedEvent.receivedAtIso,
+                createdAt: serverTimestamp(),
+                createdAtIso: nowIso(),
+            };
+
+            transaction.set(inboxDocRef, payload);
+            return { inboxId: messageId, duplicate: false };
         });
 
-        return { inboxId: inboxRef.id, duplicate: false };
+        return result;
     } catch (err) {
         console.error('[EvolutionWebhook] Inbox enqueue failed:', err.message);
         return { inboxId: null, duplicate: false, error: err.message };
@@ -749,7 +755,7 @@ function extractAudioMediaUrl(normalizedEvent) {
 }
 
 async function processAudioMessage(normalizedEvent) {
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
     if (!GEMINI_API_KEY) {
         console.error('[AudioProcessor] GEMINI_API_KEY não configurada — defina a variável de ambiente');
         return null;
@@ -929,7 +935,7 @@ app.post('/webhook/whatsapp-entrada', webhookRateLimit, async (req, res) => {
                 status: 'ignored',
                 reason: validation.reason,
             });
-            console.warn(`[EvolutionWebhook] [${normalizedEvent.correlationId}] Evento ignorado: ${validation.reason}`);
+            console.log(`[EvolutionWebhook] [${normalizedEvent.correlationId}] Evento ignorado (filtro): ${validation.reason}`);
             res.status(202).json({ ok: true, ignored: true, reason: validation.reason, correlationId: normalizedEvent.correlationId });
             return;
         }
@@ -1018,7 +1024,7 @@ app.post('/webhook/whatsapp-entrada/:event', webhookRateLimit, async (req, res) 
                 status: 'ignored',
                 reason: validation.reason,
             });
-            console.warn(`[EvolutionWebhook] [${normalizedEvent.correlationId}] Evento ignorado: ${validation.reason}`);
+            console.log(`[EvolutionWebhook] [${normalizedEvent.correlationId}] Evento ignorado (filtro): ${validation.reason}`);
             res.status(202).json({ ok: true, ignored: true, reason: validation.reason, correlationId: normalizedEvent.correlationId });
             return;
         }
