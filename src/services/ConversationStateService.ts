@@ -1,3 +1,6 @@
+import { isServer } from '../lib/isServer';
+import { adminDb as serverDb, admin } from '../lib/firebase-admin';
+
 export interface MessageLog {
     role: 'user' | 'assistant';
     content: string;
@@ -96,6 +99,41 @@ export class ConversationStateService {
         this.data = null;
         this.prompt = '';
         this.updatedAt = Date.now();
+    }
+
+    async load(userId: string) {
+        if (!isServer || !serverDb) return;
+        try {
+            const snap = await (serverDb as any).collection('user_conversations').doc(userId).get();
+            if (snap.exists) {
+                const data = snap.data();
+                this.current = data.current || 'IDLE';
+                this.action = data.action || '';
+                this.data = data.data || null;
+                this.prompt = data.prompt || '';
+                this.updatedAt = data.updatedAt || Date.now();
+                this.turnCount = data.turnCount || 0;
+            }
+        } catch (err) {
+            console.error(`[ConversationState] Error loading state for ${userId}:`, err);
+        }
+    }
+
+    async save(userId: string) {
+        if (!isServer || !serverDb) return;
+        try {
+            await (serverDb as any).collection('user_conversations').doc(userId).set({
+                current: this.current,
+                action: this.action,
+                data: this.data,
+                prompt: this.prompt,
+                updatedAt: this.updatedAt,
+                turnCount: this.turnCount,
+                lastInteractionAt: admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+        } catch (err) {
+            console.error(`[ConversationState] Error saving state for ${userId}:`, err);
+        }
     }
 
     incrementTurn() {

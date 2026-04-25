@@ -151,6 +151,20 @@ function capitalize(value: string): string {
     return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+function looksLikeNeighborhoodFallback(message: string): boolean {
+    const trimmed = String(message || '').trim();
+    const normalized = normalizeText(trimmed);
+
+    if (trimmed.length < 3 || trimmed.length > 80) return false;
+    if (!/[a-zA-ZÀ-ÿ]/.test(trimmed)) return false;
+    if (COURTESY_WORDS.has(normalized)) return false;
+    if (trimmed.split(/\s+/).length > 8) return false;
+    if (/\d/.test(trimmed)) return false;
+    if (/\b(ajuda|help|socorro|nao sei|não sei|sei la|sei lá)\b/.test(normalized)) return false;
+
+    return !/\b(quanto|valor|preco|precos|oferta|ofertas|lista|mercado|mercados|comprar|compra|quero|produto|produtos)\b/.test(normalized);
+}
+
 function normalizeTextListEntry(value: string): string {
     return String(value || '').toLowerCase().trim();
 }
@@ -247,7 +261,8 @@ class ChatSession {
         console.log(`[ChatService] Preferences loaded for ${this.context.userId}:`, prefs);
     }
 
-    public async processMessage(message: string): Promise<ChatResponse> {
+    public async processMessage(message: string): Promise<ChatResponse> { await this.conversationState.load(this.context.userId); const res = await this._processMessageInternal(message); await this.conversationState.save(this.context.userId); return res; }
+    private async _processMessageInternal(message: string): Promise<ChatResponse> {
         await this.ready;
         await this.refreshRichContext();
         const conversationState = this.conversationState;
@@ -256,6 +271,23 @@ class ChatSession {
 
         // LGPD: Interceptar comando de exclusao de dados
         const normalizedForLgpd = message.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+        // 📍 Interceptar comando nativo de localização enviado pela Bridge
+        if (message.startsWith('[GPS_LOCATION_UPDATE]')) {
+            console.log(`[ChatService] Bypass de NLP para Localização detectado.`);
+            const coordsMatch = message.match(/\[GPS_LOCATION_UPDATE\]\s*([\d.-]+),\s*([\d.-]+)/);
+            if (coordsMatch) {
+                const lat = parseFloat(coordsMatch[1]);
+                const lng = parseFloat(coordsMatch[2]);
+                this.context.userLocation = { lat, lng };
+                
+                await userPreferencesService.savePreferences(this.context.userId, {
+                    userLocation: { lat, lng },
+                });
+                console.log(`[ChatService] Localização salva no contexto: ${lat}, ${lng}`);
+                return this.handleCoords(lat, lng); // Redireciona para o handler correto de processamento de coordenadas
+            }
+        }
         const isDeletionCommand = /\b(apagar|excluir|deletar|remover|esquece|esqueca)\s+(meus\s+)?dados\b/.test(normalizedForLgpd);
         if (isDeletionCommand) {
             console.log('[ChatService] [LGPD] Exclusao de dados solicitada: ' + this.context.userId);
@@ -399,10 +431,22 @@ class ChatSession {
             return this.handleCalcularTotalLista();
         }
 
-        // Calcula interpretaÃ§Ã£o no inÃ­cio
-        const interpretation = await aiService.interpret(message, this.context);
         const explicitPreference = detectOptimizationPreference(message);
-        const asksForProfile = /\b(o que (voce|vc) sabe sobre mim|o que lembra de mim|me fala meu historico|me fale meu historico)\b/.test(normalizedMessage);
+        const asksForProfile = /\b(o que (voce|vc) sabe sobre mim|o que lembra de mim|me fala meu historico|me fala meu historico)\b/.test(normalizedMessage);
+
+        // ─── INTERCEPTOR DE BAIRRO (Antes do AI para evitar instabilidades) ───
+        if (conversationState.current === 'AWAITING_INITIAL_LOCATION') {
+            const normalized = normalizeText(message);
+            const isCourtesy = COURTESY_WORDS.has(normalized);
+            
+            if (looksLikeNeighborhoodFallback(message) && !isCourtesy) {
+                console.log(`[ChatService] Neighborhood Fallback Detectado (PRE-AI): ${message}`);
+                return this.handleNeighborhoodFallback(message);
+            }
+        }
+
+        // Calcula interpretação no início
+        const interpretation = await aiService.interpret(message, this.context);
         const hasProducts = Boolean(interpretation.product) || Boolean(interpretation.products?.length);
         const actionableIntent = isActionableIntent(interpretation.intent, hasProducts);
 
@@ -1242,15 +1286,20 @@ class ChatSession {
         return { text: "Não consegui identificar o valor. Pode digitar apenas o nÃºmero do consumo (ex: 12.5)?" };
     }
 
-    private async handleCoords(lat: number, lng: number): Promise<ChatResponse> {
+    private async handleCoords(
+        lat: number,
+        lng: number,
+        locationSource: 'user_declared' | 'gps_auto' = 'gps_auto',
+    ): Promise<ChatResponse> {
         this.context.userLocation = { lat, lng, address: `${lat.toFixed(4)}, ${lng.toFixed(4)}` };
         this.context.isFirstContact = false;
         void userPreferencesService.savePreferences(this.context.userId, {
             userLocation: this.context.userLocation,
+            locationSource,
         });
         this.conversationState.reset();
         
-        await lgpdConsentService.recordLocationDeclaration(this.context.userId, 'gps_auto');
+        await lgpdConsentService.recordLocationDeclaration(this.context.userId, locationSource);
 
         const markets = await geoDecisionEngine.findNearbyMarkets(lat, lng);
         if (!markets.length) {
@@ -1264,6 +1313,20 @@ class ChatSession {
 
         return {
             text: `📍 Localização recebida!\n\n🏪 Mercados perto de você\n\n${lines.join('\n')}\n\n${closest.marketName} é o mais perto agora.\n\nPode mandar um produto ou sua lista que eu verifico os preços!`,
+        };
+    }
+
+    private handleNeighborhoodFallback(message: string): ChatResponse {
+        const neighborhood = message.trim().replace(/\s+/g, ' ');
+        this.context.isFirstContact = false;
+        void userPreferencesService.savePreferences(this.context.userId, {
+            neighborhood,
+        });
+        this.conversationState.reset();
+        return {
+            text:
+                `Beleza, vou usar *${capitalize(neighborhood)}* como sua região por enquanto.\n\n` +
+                'Se quiser mais precisão depois, pode me mandar o GPS pelo WhatsApp. Agora pode pedir um produto, uma lista ou mercados perto.',
         };
     }
 
