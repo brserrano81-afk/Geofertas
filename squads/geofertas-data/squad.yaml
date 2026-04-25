@@ -1,0 +1,214 @@
+---
+agent:
+  metadata:
+    id: "geofertas/data"
+    name: Geofertas Data Squad
+    title: Catalog + Pricing Engine
+    icon: 📊
+    squad: geofertas
+    
+  persona:
+    role: "Data specialists ensuring quality product catalog, accurate pricing, and scalable data pipeline."
+    principles:
+      - Data quality > volume
+      - Price freshness matters
+      - Normalization is key
+      - Audit trail mandatory
+
+---
+
+# Geofertas Data Squad
+
+## 🎯 Mission
+Build production-ready product catalog, pricing engine, and supermarket data with 95%+ quality score.
+
+## 📋 Scope
+
+### Phase 1: Schema Design & Validation (8h)
+- [ ] Design Firestore collection structure
+- [ ] Define product taxonomy (categories, attributes)
+- [ ] Create supermarket data model
+- [ ] Design pricing and offer schema
+- [ ] Plan for scalability (millions of products)
+- [ ] Create composite indexes
+
+### Phase 2: Data Pipeline Setup (12h)
+- [ ] Build SEFAZ DANFE parser
+- [ ] Create product deduplication engine
+- [ ] Implement price extraction pipeline
+- [ ] Set up supermarket data ingestion
+- [ ] Create ETL validation checks
+- [ ] Error handling and retry logic
+
+### Phase 3: Data Population (16h)
+- [ ] Load initial supermarket master data
+- [ ] Populate 1000+ core products
+- [ ] Load real pricing from SEFAZ samples
+- [ ] Test bulk import performance
+- [ ] Create test data fixtures
+- [ ] Document data loading procedures
+
+### Phase 4: Data Quality & Validation (12h)
+- [ ] Implement quality checks (price bounds, name normalization)
+- [ ] Create data quality dashboards
+- [ ] Validate deduplication success rate
+- [ ] Test search and filtering performance
+- [ ] Measure data freshness
+- [ ] Document data hygiene processes
+
+### Phase 5: Integration & Testing (8h)
+- [ ] Integration with backend APIs
+- [ ] Performance testing (query response times)
+- [ ] Backup and recovery procedures
+- [ ] Data migration playbooks
+- [ ] Documentation and runbooks
+- [ ] Ready for user testing
+
+## 👥 Team
+
+| Role | Agent |
+|------|-------|
+| Lead | supermarket-data-specialist |
+| SEFAZ Integration | sefaz-integration-specialist |
+| Database Support | database-architect |
+
+## ✅ Definition of Done
+
+- [ ] Firestore schema optimized
+- [ ] 1000+ products in catalog
+- [ ] Real supermarket pricing loaded
+- [ ] Deduplication working (95%+ success)
+- [ ] Search and filter queries < 100ms
+- [ ] Price freshness validated
+- [ ] Data quality metrics 95%+
+- [ ] Backup procedures tested
+- [ ] Ready for search and comparison features
+
+## 📅 Timeline
+
+| Day | Phase | Hours | Deliverable |
+|-----|-------|-------|-------------|
+| 2 | Schema Design | 8 | Firestore ready |
+| 2-3 | Pipeline Setup | 12 | ETL working |
+| 3-4 | Data Load | 16 | 1000+ products |
+| 4-5 | Quality Checks | 12 | Quality 95%+ |
+| 5 | Integration | 8 | Backend tests pass |
+
+## 📊 Data Model
+
+```yaml
+/supermarkets/{storeId}
+  - name: String (supermarket name)
+  - cnpj: String (tax ID)
+  - location: GeoPoint (coordinates)
+  - address: String
+  - hours: Map (day → hours)
+  - phone: String
+  - website: String
+
+/products/{productId}
+  - name: String (normalized)
+  - category: String (main category)
+  - subcategories: Array (secondary categories)
+  - brand: String
+  - upc: String (barcode)
+  - unit: String (kg, L, unit)
+  - description: String
+  - imageUrl: String
+  - canonicalId: String (for duplicates)
+  - attributes: Map (weight, color, etc)
+
+/offers/{offerId}
+  - productId: Reference
+  - storeId: Reference
+  - price: Number
+  - originalPrice: Number (if discount)
+  - discount: Number (%)
+  - validFrom: Timestamp
+  - validTo: Timestamp
+  - quantity: Number (if limited)
+  - source: String (SEFAZ, website, manual)
+  - createdAt: Timestamp
+  - updatedAt: Timestamp
+
+/price_history/{productId}/{storeId}
+  - date: Timestamp
+  - price: Number
+  - source: String
+  - quantity: Number
+```
+
+## 🔄 Data Quality Checks
+
+| Check | Rule | Action if Failed |
+|-------|------|-----------------|
+| **Price Bounds** | 0.01 - 1000 BRL | Flag for review |
+| **Product Name** | Min 3 chars, no symbols | Normalize |
+| **Store Location** | Valid Brazil coords | Geocode/validate |
+| **Offer Dates** | validFrom < validTo | Reject |
+| **Category** | Must exist in taxonomy | Assign default |
+| **UPC** | Valid EAN-13 checksum | Flag duplicate |
+
+## 📈 Data Quality Metrics
+
+| Metric | Target | Current | Status |
+|--------|--------|---------|--------|
+| Catalog Completeness | > 1000 products | TBD | ⏳ |
+| Deduplication Success | > 95% | TBD | ⏳ |
+| Price Freshness | < 24 hours | TBD | ⏳ |
+| Data Quality Score | > 95% | TBD | ⏳ |
+| Query Performance | < 100ms | TBD | ⏳ |
+
+## 🚨 Known Risks
+
+- SEFAZ data availability and quality
+- Supermarket data accuracy and completeness
+- Scaling to millions of products
+- Real-time pricing synchronization
+- Data deduplication edge cases
+
+## 🔗 Integration Points
+
+```
+┌────────────────────────────────┐
+│  SEFAZ (Squad A support)       │
+│  Extracts invoice prices ← ✓   │
+├────────────────────────────────┤
+│  Backend APIs (Squad A)        │
+│  Serves data via endpoints ← ✓ │
+├────────────────────────────────┤
+│  Frontend (Squad B)            │
+│  Displays in dashboard ← ✓     │
+├────────────────────────────────┤
+│  Quality Tests (Squad C)       │
+│  Tests data queries ← ✓        │
+└────────────────────────────────┘
+```
+
+## 📝 Data Loading Scripts
+
+Existing scripts in `EconomizaFacil-Firebase/`:
+- `popular_completo.js` — Full data load
+- `enriquecer_ofertas.js` — Offer enrichment
+- `unificar_ofertas.js` — Deduplication
+- `FIREBASE_categorizar-produtos.js` — Category assignment
+- `listar_produtos.js` — Product export
+
+From `src/scripts/`:
+- `seedTestOfferUniverse.ts` — Test data
+- `upsertPopularCatalogProducts.ts` — Bulk updates
+- `reportCatalogCoverage.ts` — Quality reporting
+- `importStapleOffersFromCsv.ts` — CSV import
+
+## 💡 Optimization Tips
+
+1. **Composite Indexes**: Create for common queries
+   ```
+   /offers: (storeId, validFrom, price)
+   /offers: (productId, validTo, price)
+   ```
+
+2. **Caching**: Cache popular searches in Redis
+3. **Batch Operations**: Load 100s at a time
+4. **Pagination**: Use cursor-based pagination
+5. **Archival**: Move old offers to archive collection

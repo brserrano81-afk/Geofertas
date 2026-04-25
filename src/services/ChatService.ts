@@ -67,6 +67,7 @@ interface ChatContext {
     pendingAllProducts?: string[];
     lastIntent?: Intent;
     userLocation?: UserLocation;
+    neighborhood?: string;
     transportMode?: TransportMode;
     consumption?: number;
     busTicket?: number;
@@ -244,7 +245,9 @@ class ChatSession {
         if (prefs.busTicket) this.context.busTicket = prefs.busTicket;
         if (prefs.optimizationPreference) this.context.optimizationPreference = prefs.optimizationPreference;
         if (prefs.userLocation) this.context.userLocation = prefs.userLocation;
-        this.context.isFirstContact = recentInteractions.length === 0;
+        if (prefs.neighborhood) this.context.neighborhood = prefs.neighborhood;
+        const hasKnownLocation = Boolean(this.context.userLocation || this.context.neighborhood);
+        this.context.isFirstContact = recentInteractions.length === 0 && !hasKnownLocation;
         recentInteractions.forEach((interaction) => {
             this.conversationState.addMessage(this.context.userId, interaction.role, interaction.content);
         });
@@ -323,6 +326,11 @@ class ChatSession {
         const conversationState = this.conversationState;
         conversationState.incrementTurn();
         const normalizedMessage = normalizeText(message);
+
+        if (conversationState.current === 'AWAITING_INITIAL_LOCATION' && this.hasKnownLocationContext()) {
+            console.log(`[ChatService] Clearing stale location gate for user=${this.context.userId}: location already known.`);
+            conversationState.reset();
+        }
 
         // â”€â”€â”€ 0. GPS: TRATAMENTO DE COORDENADAS DIRETAS â”€â”€â”€
         if (message.startsWith('COORDENADAS:') || message.startsWith('[GPS_LOCATION_UPDATE]')) {
@@ -1199,6 +1207,14 @@ class ChatSession {
     // â”€â”€â”€ Extras & SaudaÃ§Ãµes â”€â”€â”€
 
     private handleSaudacao(): ChatResponse {
+        if (this.hasKnownLocationContext()) {
+            return {
+                text:
+                    'Olá! Eu sou o Economiza Fácil 💚\n\n' +
+                    'Pode mandar um produto, sua lista ou pedir ofertas de um mercado que eu te ajudo a comparar.',
+            };
+        }
+
         return {
             text:
                 'Olá! Eu sou o Economiza Fácil 💚\n\n' +
@@ -1207,6 +1223,10 @@ class ChatSession {
                 'Assim eu já busco os mercados mais próximos e as melhores ofertas pra você.',
             requestLocation: true,
         };
+    }
+
+    private hasKnownLocationContext(): boolean {
+        return Boolean(this.context.userLocation || this.context.neighborhood);
     }
 
     private handleLocation(): ChatResponse {

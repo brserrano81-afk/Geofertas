@@ -1,0 +1,130 @@
+---
+agent:
+  metadata:
+    id: "geofertas/frontend"
+    name: Geofertas Frontend Squad
+    title: Dashboard UI + Integration
+    icon: 💻
+    squad: geofertas
+    
+  persona:
+    role: "Frontend specialists delivering responsive, performant React components integrated with backend APIs."
+    principles:
+      - Component reusability > one-off solutions
+      - Mobile-first responsive design
+      - Accessibility is mandatory
+      - Performance measured, not assumed
+
+---
+
+# Geofertas Frontend Squad
+
+## 🎯 Mission
+Deliver production-ready dashboard with complete backend integration and responsive design.
+
+## 📋 Scope
+
+### Phase 1: Component Audit (6h)
+- [ ] Inventory all existing components in `src/`
+- [ ] Identify missing components
+- [ ] Check component reusability
+- [ ] Review Tailwind styling consistency
+
+### Phase 2: Core Pages (20h)
+- [ ] Authentication pages (login, register)
+- [ ] Dashboard home page
+- [ ] Product search + filtering
+- [ ] Offer details page
+- [ ] Supermarket location page
+- [ ] User profile/preferences
+
+### Phase 3: Integration (12h)
+- [ ] Connect all API calls to backend
+- [ ] State management (React Context or similar)
+- [ ] Error handling and user feedback
+- [ ] Loading states and animations
+- [ ] Form validation
+
+### Phase 4: Polish (10h)
+- [ ] Responsive design (mobile, tablet, desktop)
+- [ ] Accessibility audit (WCAG 2.1 AA)
+- [ ] Performance optimization
+- [ ] Dark mode support
+- [ ] Animations and transitions
+
+### Phase 5: Testing (6h)
+- [ ] Component tests (React Testing Library)
+- [ ] Integration tests (page flows)
+- [ ] E2E scenarios (ready for Squad C)
+- [ ] Visual regression testing
+- [ ] Accessibility testing
+
+## 👥 Team
+
+| Role | Agent |
+|------|-------|
+| Lead | frontend-specialist |
+| Testing | test-engineer |
+
+## ✅ Definition of Done
+
+- [ ] All pages built and routed
+- [ ] API integration complete
+- [ ] State management working
+- [ ] Responsive on mobile/tablet/desktop
+- [ ] Accessibility score 90%+
+- [ ] Component test coverage 70%+
+- [ ] Lighthouse score 85+
+- [ ] Ready for E2E testing
+
+## 📅 Timeline
+
+| Day | Phase | Hours | Deliverable |
+|-----|-------|-------|-------------|
+| 2 | Audit + Design | 6 | Component inventory |
+| 2-3 | Core Pages | 20 | All pages built |
+| 3-4 | Integration | 12 | APIs connected |
+| 4 | Polish | 10 | Design complete |
+| 5 | Testing | 6 | Tests passing |
+
+## 🚨 Known Risks
+
+- Backend API delays (blocks integration phase)
+- Responsive design complexity on legacy browsers
+- Performance challenges with large datasets
+- State management complexity at scale
+
+## 🔗 Integration Points
+
+```
+┌──────────────────────────────┐
+│  Backend APIs (Squad A)      │
+│  Provides data ← ✓           │
+├──────────────────────────────┤
+│  Firebase (Squad A)          │
+│  Realtime updates ← ✓        │
+├──────────────────────────────┤
+│  Component Tests (Squad C)   │
+│  Tests scenarios ← ✓         │
+└──────────────────────────────┘
+```
+
+## 📱 Priority Pages
+
+### High Priority (Core User Flow)
+1. Search products by name/category
+2. View price comparisons across supermarkets
+3. Find nearby supermarkets
+4. Track personal offers/wishlist
+
+### Medium Priority (Enhancement)
+1. User profile and preferences
+2. Order history
+3. Saved searches
+4. Price alerts
+
+### Low Priority (Nice to have)
+1. Social sharing
+2. Reviews and ratings
+3. Advanced filters
+4. Recommendation engine

@@ -1,0 +1,113 @@
+---
+agent:
+  metadata:
+    id: "geofertas/backend"
+    name: Geofertas Backend Squad
+    title: Backend APIs + SEFAZ Integration
+    icon: 🔌
+    squad: geofertas
+    
+  persona:
+    role: "Backend specialists delivering production-ready APIs, SEFAZ integration, and Firebase optimization."
+    principles:
+      - API contracts are contracts (breaking changes escalate)
+      - SEFAZ compliance is non-negotiable
+      - Performance > convenience
+      - All code is reviewed before merge
+
+---
+
+# Geofertas Backend Squad
+
+## 🎯 Mission
+Deliver production-ready backend APIs with complete SEFAZ integration and Firebase optimization.
+
+## 📋 Scope
+
+### Phase 1: API Audit (8h)
+- [ ] Map all existing endpoints in `src/` and `api/`
+- [ ] Identify missing endpoints for frontend
+- [ ] Check error handling and validation
+- [ ] Verify authentication flow
+
+### Phase 2: Core API Completion (16h)
+- [ ] Implement user authentication endpoints
+- [ ] Build product search + filtering APIs
+- [ ] Create offer management endpoints
+- [ ] Implement supermarket location endpoints
+- [ ] Add offer tracking endpoints
+
+### Phase 3: SEFAZ Integration (12h)
+- [ ] Validate SEFAZ proxy (`api/sefaz-proxy.js`)
+- [ ] Test DANFE parsing with real invoices
+- [ ] Implement price extraction pipeline
+- [ ] Error handling for SEFAZ failures
+- [ ] Rate limiting + retry logic
+
+### Phase 4: Firebase Optimization (8h)
+- [ ] Design optimal Firestore schema
+- [ ] Create composite indexes
+- [ ] Implement caching strategy
+- [ ] Query performance validation
+- [ ] Cost optimization
+
+### Phase 5: Testing & Validation (4h)
+- [ ] API contract tests
+- [ ] Integration tests with SEFAZ
+- [ ] Load testing
+- [ ] Security validation
+- [ ] Ready for E2E testing
+
+## 👥 Team
+
+| Role | Agent |
+|------|-------|
+| Lead | backend-specialist |
+| SEFAZ Expert | sefaz-integration-specialist |
+| Database | database-architect |
+
+## ✅ Definition of Done
+
+- [ ] 100% API endpoints implemented
+- [ ] All endpoints documented (OpenAPI/Swagger)
+- [ ] Error codes standardized (HTTP 400/401/403/500)
+- [ ] Validation on all inputs
+- [ ] Authentication required on protected routes
+- [ ] SEFAZ integration tested with real invoices
+- [ ] Firebase queries optimized (< 100ms)
+- [ ] API tests 80%+ coverage
+- [ ] Ready for frontend integration testing
+
+## 📅 Timeline
+
+| Day | Phase | Hours | Deliverable |
+|-----|-------|-------|-------------|
+| 2 | Audit + Design | 8 | API spec updated |
+| 2-3 | Core APIs | 16 | All endpoints ready |
+| 3-4 | SEFAZ | 12 | Integration complete |
+| 4 | Firebase | 8 | Queries optimized |
+| 5 | Testing | 4 | Integration tests pass |
+
+## 🚨 Known Risks
+
+- SEFAZ API downtime (external dependency)
+- Firebase schema rework if design changes
+- Authentication complexity with Evolution API
+
+## 🔗 Integration Points
+
+```
+┌──────────────────────────────┐
+│  Frontend (Squad B)          │
+│  Makes API calls → ✓         │
+├──────────────────────────────┤
+│  WhatsApp (Squad E - optional)│
+│  Triggers notifications ← ✓  │
+├──────────────────────────────┤
+│  SEFAZ                       │
+│  Gets invoice data ← ✓       │
+├──────────────────────────────┤
+│  Firebase/Firestore          │
+│  Stores everything ← ✓       │
+└──────────────────────────────┘
+```

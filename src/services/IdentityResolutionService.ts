@@ -343,8 +343,12 @@ class IdentityResolutionService {
                 (db as any).collection('users').doc(identity.canonicalUserId).get(),
             ]);
 
-            if (!legacySnap.exists) return;
+            if (!legacySnap.exists) {
+                console.log(`[IdentityResolution] Backfill skipped: legacy user ${identity.legacyUserId} does not exist.`);
+                return;
+            }
 
+            console.log(`[IdentityResolution] Backfilling data from ${identity.legacyUserId} to ${identity.canonicalUserId}...`);
             const legacyData = legacySnap.data();
             await (db as any).collection('users').doc(identity.canonicalUserId).set({
                 ...(canonicalSnap.exists ? canonicalSnap.data() : {}),
@@ -388,6 +392,7 @@ class IdentityResolutionService {
             analyticsEventWriter.mergeAggregateDocuments(identity.canonicalUserId, [identity.legacyUserId]),
         ]);
 
+        console.log(`[IdentityResolution] Backfill completed for ${identity.canonicalUserId}. Marking as migrated.`);
         const migratedIdentity: CanonicalIdentity = {
             ...identity,
             storageUserId: identity.canonicalUserId,

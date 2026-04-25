@@ -1,0 +1,48 @@
+{
+  "squad": "geofertas-quality",
+  "status": "completed",
+  "step": {
+    "current": 4,
+    "total": 4,
+    "label": "completed"
+  },
+  "agents": [
+    {
+      "id": "test-engineer",
+      "name": "Test Engineer",
+      "icon": "T",
+      "status": "done",
+      "desk": { "col": 1, "row": 1 }
+    },
+    {
+      "id": "security-auditor",
+      "name": "Security Auditor",
+      "icon": "S",
+      "status": "done",
+      "desk": { "col": 2, "row": 1 }
+    },
+    {
+      "id": "performance-optimizer",
+      "name": "Performance Optimizer",
+      "icon": "P",
+      "status": "done",
+      "desk": { "col": 3, "row": 1 }
+    },
+    {
+      "id": "devops-engineer",
+      "name": "DevOps Engineer",
+      "icon": "D",
+      "status": "done",
+      "desk": { "col": 1, "row": 2 }
+    }
+  ],
+  "handoff": {
+    "from": "performance-optimizer",
+    "to": "devops-engineer",
+    "message": "Relatorio de readiness gerado com gates verdes e blockers de producao.",
+    "completedAt": "2026-04-24T19:36:00.0000000-03:00"
+  },
+  "startedAt": "2026-04-24T19:32:07.9443369-03:00",
+  "updatedAt": "2026-04-24T19:36:00.0000000-03:00",
+  "completedAt": "2026-04-24T19:36:00.0000000-03:00"
+}

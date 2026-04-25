@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 const apiBaseUrl = process.env.API_BASE_URL || process.env.TEST_API_BASE_URL || '';
 const targetUrl = process.env.TEST_WEBHOOK_URL || (apiBaseUrl ? `${apiBaseUrl.replace(/\/$/, '')}/webhook/whatsapp-entrada` : '');
 const remoteJid = process.env.TEST_REMOTE_JID || '5527998862440@s.whatsapp.net';

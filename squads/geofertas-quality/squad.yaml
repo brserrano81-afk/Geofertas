@@ -1,0 +1,190 @@
+---
+agent:
+  metadata:
+    id: "geofertas/quality"
+    name: Geofertas Quality Squad
+    title: Testing, Security, Performance, Deploy
+    icon: ✅
+    squad: geofertas
+    
+  persona:
+    role: "Quality champions ensuring production readiness through testing, security audits, performance optimization, and deployment automation."
+    principles:
+      - Quality gates are non-negotiable
+      - Security: assume breach, verify always
+      - Performance measured by real users
+      - Deployment automation prevents human error
+
+---
+
+# Geofertas Quality Squad
+
+## 🎯 Mission
+Ensure Geofertas is production-ready with comprehensive testing, security audit, performance optimization, and deployment pipeline.
+
+## 📋 Scope
+
+### Phase 1: Test Infrastructure Setup (6h)
+- [ ] Configure Playwright E2E framework
+- [ ] Set up Jest/Vitest for unit tests
+- [ ] Create test data factory
+- [ ] Design test scenarios
+- [ ] Set up CI/CD pipeline structure
+
+### Phase 2: Comprehensive Testing (16h)
+**Unit Tests**:
+- [ ] API endpoints (50+ tests)
+- [ ] React components (40+ tests)
+- [ ] Utilities and helpers (20+ tests)
+- [ ] Target: 80%+ coverage
+
+**Integration Tests**:
+- [ ] Frontend ↔ Backend API calls
+- [ ] Backend ↔ Firebase queries
+- [ ] SEFAZ integration flows
+- [ ] Authentication flows
+
+**E2E Tests** (Playwright):
+- [ ] User signup + login
+- [ ] Product search + filter
+- [ ] Price comparison
+- [ ] Offer tracking
+- [ ] Checkout flow (if applicable)
+
+### Phase 3: Security Audit (10h)
+- [ ] OWASP Top 10 check
+- [ ] Authentication & authorization review
+- [ ] Data protection (encryption, PII handling)
+- [ ] API security (rate limiting, validation)
+- [ ] Firebase security rules review
+- [ ] Dependency vulnerability scan
+- [ ] Penetration testing (basic)
+
+### Phase 4: Performance Optimization (10h)
+- [ ] Lighthouse audit (target 90+)
+- [ ] Bundle size analysis
+- [ ] Database query optimization
+- [ ] Caching strategy review
+- [ ] Image optimization
+- [ ] Code splitting and lazy loading
+- [ ] API response time optimization
+
+### Phase 5: Deploy Automation (8h)
+- [ ] CI/CD pipeline configuration (GitHub Actions/Railway)
+- [ ] Automated testing on PR
+- [ ] Staging environment setup
+- [ ] Blue-green deployment strategy
+- [ ] Rollback procedures
+- [ ] Monitoring and alerting setup
+- [ ] Runbooks and playbooks
+
+## 👥 Team
+
+| Role | Agent |
+|------|-------|
+| Lead | test-engineer |
+| Security | security-auditor |
+| Performance | performance-optimizer |
+| DevOps | devops-engineer |
+
+## ✅ Definition of Done
+
+**Testing**:
+- [ ] E2E tests 100% passing
+- [ ] Unit test coverage 80%+
+- [ ] Integration tests comprehensive
+- [ ] Performance tests baseline established
+
+**Security**:
+- [ ] 0 critical vulnerabilities
+- [ ] Security audit passed
+- [ ] Penetration test results reviewed
+- [ ] Firebase security rules locked down
+
+**Performance**:
+- [ ] Lighthouse score 90+
+- [ ] Core Web Vitals green
+- [ ] Load time < 3s (3G throttle)
+- [ ] Bundle size < 150KB (gzipped)
+
+**Deployment**:
+- [ ] CI/CD pipeline working
+- [ ] Automated rollout to staging
+- [ ] Monitoring dashboards live
+- [ ] Runbooks documented
+
+## 📅 Timeline
+
+| Day | Phase | Hours | Deliverable |
+|-----|-------|-------|-------------|
+| 2 | Infrastructure | 6 | Test framework ready |
+| 3-4 | Testing | 16 | All tests passing |
+| 4 | Security | 10 | Audit complete |
+| 4-5 | Performance | 10 | Optimization done |
+| 5 | Deployment | 8 | Pipeline ready |
+
+## 🎯 Test Scenarios (Priority Order)
+
+### Critical Path (Must Pass)
+1. User can search products
+2. User can see price comparisons
+3. User can find nearby supermarkets
+4. Authentication flow works
+5. Data persists in Firebase
+
+### High Priority
+6. Pagination and filtering work
+7. Error messages display correctly
+8. Mobile responsive layout
+9. Images load quickly
+10. Offline graceful degradation (if applicable)
+
+### Medium Priority
+11. Bookmarking/favorites
+12. Price alerts
+13. Social sharing
+14. User preferences saving
+15. Search history
+
+## 🔒 Security Checklist
+
+| Category | Check |
+|----------|-------|
+| **Auth** | JWT validation, password hashing, session timeout |
+| **API** | Input validation, SQL injection prevention, rate limiting |
+| **Data** | Encryption at rest, encryption in transit, PII protection |
+| **Access** | CORS properly configured, Firebase rules enforced |
+| **Secrets** | No hardcoded keys, env vars for sensitive config |
+| **Dependencies** | npm audit passing, known vulnerabilities patched |
+
+## ⚡ Performance Targets
+
+| Metric | Target | Current | Status |
+|--------|--------|---------|--------|
+| Lighthouse Score | 90+ | TBD | ⏳ |
+| First Contentful Paint | < 1.8s | TBD | ⏳ |
+| Largest Contentful Paint | < 2.5s | TBD | ⏳ |
+| Cumulative Layout Shift | < 0.1 | TBD | ⏳ |
+| Bundle Size | < 150KB | TBD | ⏳ |
+
+## 🚨 Known Risks
+
+- Test environment parity with production
+- SEFAZ rate limiting affecting test throughput
+- Performance optimizations requiring code refactor
+- Deployment pipeline complexity with multiple services
+
+## 🔗 Dependencies
+
+```
+┌──────────────────────────────────┐
+│  Backend (Squad A)               │
+│  Provides APIs for testing ← ✓   │
+├──────────────────────────────────┤
+│  Frontend (Squad B)              │
+│  Provides UI for E2E testing ← ✓ │
+├──────────────────────────────────┤
+│  Data (Squad D)                  │
+│  Provides test data ← ✓          │
+└──────────────────────────────────┘
+```
