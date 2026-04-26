@@ -4,4 +4,4 @@
 buildCommand = "npm install"
 
 [deploy]
-startCommand = "bash start.sh"
+startCommand = "poneia start poneia.config.js"
