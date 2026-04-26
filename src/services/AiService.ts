@@ -2,6 +2,8 @@
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+const GEMINI_MODEL = 'gemini-2.5-flash';
+
 function getGeminiKey(): string {
     const key = import.meta.env?.VITE_GOOGLE_GEMINI_API_KEY || 
                 process.env.GOOGLE_GEMINI_API_KEY || 
@@ -159,7 +161,7 @@ class AiService {
 
             const genAI = new GoogleGenerativeAI(apiKey);
             const model = genAI.getGenerativeModel({ 
-                model: 'gemini-2.0-flash',
+                model: GEMINI_MODEL,
                 generationConfig: { temperature: 0.1 }
             });
 
@@ -241,7 +243,7 @@ class AiService {
         }
 
         const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+        const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
         const AI_PROMPT = `Você é o "Economiza Fácil", um assistente virtual focado em entregar economia real no WhatsApp.
 Sua personalidade: clara, útil, comercial e natural.
@@ -282,7 +284,7 @@ Nunca altere números do sistema e nunca misture histórico pessoal de compra co
 
         try {
             const genAI = new GoogleGenerativeAI(apiKey);
-            const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+            const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
             let binary = '';
             for (let i = 0; i < audioData.length; i++) {
