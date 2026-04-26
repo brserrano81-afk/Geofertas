@@ -4,4 +4,4 @@
 buildCommand = "npm install"
 
 [deploy]
-startCommand = "node api/sefaz-proxy.js & npm run worker:evolution"
+startCommand = "bash start.sh"
