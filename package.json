@@ -29,10 +29,11 @@
     "test:whatsapp": "tsx tests/integration/whatsapp-pipeline.test.ts",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "start": "bash start.sh"
+    "start": "poneia start poneia.config.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "poneia": "^1.0.0",
     "cheerio": "^1.2.0",
     "concurrently": "^9.1.2",
     "dotenv": "^17.3.1",
