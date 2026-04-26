@@ -215,11 +215,17 @@ class UserProfileService {
                 });
             }));
 
-            return batches
-                .flat()
-                .sort((a, b) => this.getTimestamp(b.createdAt) - this.getTimestamp(a.createdAt))
-                .slice(0, 8)
-                .reverse();
+            const flat = batches.flat();
+
+            let sorted: UserInteraction[];
+            try {
+                sorted = flat.sort((a, b) => this.getTimestamp(b.createdAt) - this.getTimestamp(a.createdAt));
+            } catch (sortErr) {
+                console.warn('[UserProfileService] Sort by timestamp failed, returning unsorted interactions:', sortErr);
+                sorted = flat;
+            }
+
+            return sorted.slice(0, 8).reverse();
         } catch (err) {
             console.error('[UserProfileService] Error loading interactions:', err);
             return [];
@@ -245,24 +251,33 @@ class UserProfileService {
     }
 
     private getTimestamp(value: unknown): number {
-        if (!value) return 0;
-        
+        if (value === null || value === undefined) return 0;
+
         try {
-            // Caso seja um objeto com toMillis (instancia do Timestamp do Firebase)
-            if (typeof value === 'object' && value !== null && 'toMillis' in (value as any)) {
-                const toMillis = (value as any).toMillis;
-                if (typeof toMillis === 'function') {
-                    return toMillis();
-                }
+            if (typeof value !== 'object' && typeof value !== 'string' && typeof value !== 'number') return 0;
+
+            // Firestore Timestamp instance — has a callable toMillis()
+            if (typeof value === 'object' && value !== null && typeof (value as any).toMillis === 'function') {
+                const ms = (value as any).toMillis();
+                if (typeof ms === 'number' && !Number.isNaN(ms)) return ms;
             }
 
-            // Caso seja um objeto literal de Timestamp { _seconds, _nanoseconds }
+            // Plain Firestore Timestamp literal: { _seconds: number, _nanoseconds: number }
             if (typeof value === 'object' && value !== null && '_seconds' in (value as any)) {
-                return (value as any)._seconds * 1000;
+                const seconds = (value as any)._seconds;
+                if (typeof seconds !== 'number' || Number.isNaN(seconds)) {
+                    console.warn('[UserProfileService] Malformed timestamp — _seconds is not a valid number:', value);
+                    return 0;
+                }
+                return seconds * 1000;
             }
 
             if (value instanceof Date) {
                 return value.getTime();
+            }
+
+            if (typeof value === 'number') {
+                return Number.isNaN(value) ? 0 : value;
             }
 
             if (typeof value === 'string') {
