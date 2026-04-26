@@ -828,7 +828,7 @@ class ChatSession {
         }
 
         // â”€â”€â”€ 2.6. MULTI-PRODUTO: Perguntar "preÃ§o ou lista?" â”€â”€â”€
-        const rawMultiProducts = interpretation.products || interpretation.nlpResult.entities.map(e => e.value);
+        const rawMultiProducts = (interpretation.products || interpretation.nlpResult.entities.map(e => e.value)).filter((v): v is string => typeof v === 'string' && v.length > 0);
         const multiProducts = cleanProductList(rawMultiProducts);
         const hasMultipleProducts = multiProducts.length >= 2;
         const msgLower = message.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -1002,7 +1002,8 @@ class ChatSession {
             case 'limpar_lista':
                 await this.listManager.archiveActiveList();
                 this.context.shoppingList = [];
-                return { text: "Lista limpa com sucesso! Quando quiser comeÃ§ar uma nova, Ã© sÃ³ me falar os itens." };
+                this.conversationState.reset();
+                return { text: "✅ Lista limpa com sucesso! 🛒\nSua lista agora está vazia. Quando quiser começar uma nova, é só me falar os itens!" };
 
             case 'ver_ultima_lista':
                 return this.listManager.getLastList();
@@ -1953,21 +1954,22 @@ class ChatSession {
         }
 
         if (items.length === 0) {
-            this.moveToListCreation('Me dÃª os produtos que eu crio uma lista pra vocÃª bem rÃ¡pida e econÃ´mica!');
+            this.moveToListCreation('Me fala os produtos que eu monto sua lista rapidinho. 🛒');
             return { text: 'Me fala os produtos que eu monto sua lista rapidinho. 🛒' };
         }
 
-        const entities = interpretation.nlpResult.entities;
-        this.context.shoppingList = items.map((name, index) => {
-            const item: any = { name };
-            if (entities[index]?.quantity !== undefined) item.quantity = entities[index].quantity;
-            if (entities[index]?.unit !== undefined) item.unit = entities[index].unit;
-            return item;
-        });
+        this.context.shoppingList = []; // Start fresh if it's a new list
+        const { addedCount, duplicates } = this.addProductsToShoppingList(items);
         await this.listManager.persistList(this.context.shoppingList);
 
-        this.moveToListCreation('Diga os itens');
-        return { text: `✅ Adicionado à sua lista:\n${items.map((item) => `• ${item}`).join('\n')}\n\nDigite minha lista pra ver tudo! 🛒` };
+        const createdResult = await this.listManager.recoverActiveListItemsOnly();
+        let response = `✅ Lista criada com sucesso! 🛒\n\n${createdResult.text}`;
+        if (duplicates.length > 0) {
+            response += `\n⚠️ Obs: ${duplicates.join(', ')} já estavam na lista.`;
+        }
+        response += `\nDeseja adicionar mais alguma coisa ou já quer comparar preços?`;
+        
+        return { text: response };
     }
 
     private async handleAddItemsIntent(interpretation: Awaited<ReturnType<typeof aiService.interpret>>): Promise<ChatResponse> {
@@ -1978,19 +1980,19 @@ class ChatSession {
                 ? [interpretation.product]
                 : entities.map((entity) => entity.value);
         const addItems = cleanProductList(rawItems);
-        if (addItems.length === 0) return { text: 'Quais itens vocÃª quer adicionar?' };
+        if (addItems.length === 0) return { text: 'Quais itens você quer adicionar? 🛒' };
 
-        addItems.forEach((name, index) => {
-            if (!this.context.shoppingList.find((item) => item.name === name)) {
-                const newItem: any = { name };
-                if (entities[index]?.quantity !== undefined) newItem.quantity = entities[index].quantity;
-                if (entities[index]?.unit !== undefined) newItem.unit = entities[index].unit;
-                this.context.shoppingList.push(newItem);
-            }
-        });
-
+        const { addedCount, duplicates } = this.addProductsToShoppingList(addItems);
         await this.listManager.persistList(this.context.shoppingList);
-        return { text: `✅ Adicionado à sua lista:\n${addItems.map((item) => `• ${item}`).join('\n')}\n\nDigite minha lista pra ver tudo! 🛒` };
+        const addedResult = await this.listManager.recoverActiveListItemsOnly();
+        
+        let response = addedCount > 0 ? `✅ Adicionado à sua lista!\n\n` : '';
+        if (duplicates.length > 0) {
+            response += `⚠️ **${duplicates.join(', ')}** já ${duplicates.length === 1 ? 'está' : 'estão'} na sua lista.\n\n`;
+        }
+        response += `${addedResult.text}Deseja adicionar mais alguma coisa? 🛒`;
+        
+        return { text: response };
     }
 
     private async handleRemoveItemsIntent(interpretation: Awaited<ReturnType<typeof aiService.interpret>>): Promise<ChatResponse> {
@@ -2001,13 +2003,25 @@ class ChatSession {
                 : interpretation.nlpResult.entities.map((entity) => entity.value);
         if (removeItems.length === 0) return { text: 'Quais itens vocÃª quer tirar da lista?' };
 
+        const beforeCount = this.context.shoppingList.length;
         this.context.shoppingList = this.context.shoppingList.filter((item) =>
-            !removeItems.some((removeItem) => normalizeTextListEntry(item.name).includes(normalizeTextListEntry(removeItem))),
+            !removeItems.some((removeItem) => {
+                const itemNorm = normalizeTextListEntry(item.name);
+                const removeNorm = normalizeTextListEntry(removeItem);
+                return itemNorm.includes(removeNorm) || removeNorm.includes(itemNorm);
+            }),
         );
+        const removedCount = beforeCount - this.context.shoppingList.length;
+
         await this.listManager.persistList(this.context.shoppingList);
         const removedResult = await this.listManager.recoverActiveListItemsOnly();
-        this.conversationState.transition('AWAITING_LIST_CONFIRMATION', 'confirm_list', this.context.shoppingList, 'Finalizar lista?');
-        return { text: `✅ Removi da sua lista.\n\n${removedResult.text}Quer ajustar mais alguma coisa?` };
+        
+        let response = removedCount > 0 
+            ? `✅ Removi **${removedCount} item(ns)** da sua lista!\n\n` 
+            : `❓ Não encontrei esses itens na sua lista.\n\n`;
+            
+        response += `${removedResult.text}Quer ajustar mais alguma coisa? 😉`;
+        return { text: response };
     }
 
     private async handleSinglePriceIntent(term?: string): Promise<ChatResponse> {

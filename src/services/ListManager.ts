@@ -123,18 +123,21 @@ class ListManager {
     }
 
     async archiveActiveList(): Promise<void> {
-        const active = await this.getActiveListDoc();
-        if (!active) return;
-        if (isServer) {
-            await db.collection('users').doc(this.userId).collection('lists').doc(active.id).update({
-                status: 'archived',
-                updatedAt: serverTimestamp(),
-            });
-        } else {
-            await updateDoc(active.ref, {
-                status: 'archived',
-                updatedAt: serverTimestamp(),
-            });
+        const activeDocs = await this.getAllActiveListDocs();
+        console.log(`[ListManager] Archiving ${activeDocs.length} active lists for user ${this.userId}`);
+        
+        for (const active of activeDocs) {
+            if (isServer) {
+                await db.collection('users').doc(this.userId).collection('lists').doc(active.id).update({
+                    status: 'archived',
+                    updatedAt: serverTimestamp(),
+                });
+            } else {
+                await updateDoc(active.ref, {
+                    status: 'archived',
+                    updatedAt: serverTimestamp(),
+                });
+            }
         }
     }
 
@@ -240,6 +243,19 @@ class ListManager {
             text: `🛒 Melhor mercado pra sua lista (${items.length} itens)\n\n${lines.join('\n')}`,
             topMarketName,
         };
+    }
+
+    private async getAllActiveListDocs(): Promise<any[]> {
+        if (isServer) {
+            const snap = await db.collection('users').doc(this.userId).collection('lists')
+                .where('status', '==', 'active')
+                .get();
+            return snap.docs.map((d: any) => ({ id: d.id, ref: d.ref, ...d.data() }));
+        }
+        const listsRef = collection(db, 'users', this.userId, 'lists');
+        const q = query(listsRef, where('status', '==', 'active'));
+        const snap = await getDocs(q);
+        return snap.docs.map(d => ({ id: d.id, ref: d.ref, ...d.data() }));
     }
 
     private async getActiveListDoc(): Promise<{

@@ -67,13 +67,14 @@ REGRAS ABSOLUTAS:
 3. Entenda erros, abreviacoes e girias como "kto ta o cafe", "oferta do extra", "add leite", "vale ir de carro".
 4. Nunca peca cadastro, CPF, login ou senha.
 5. "onde comprar minha lista" e "qual mercado e mais barato pra minha lista" -> CALCULATE_LIST.
-6. "me ajuda a planejar o mes", "planejar compras", "o que preciso comprar esse mes" -> VIEW_CONSUMPTION_PATTERN.
-7. "o que voce sabe sobre mim", "o que lembra de mim", "me fala meu historico" -> SHOW_PROFILE.
-8. "tem coisa mais barata que o nescafe", "marca propria do arroz vale a pena", "qual oleo e mais em conta" -> SEARCH_PRODUCT.
-9. Pedido com cupom, nota fiscal, QR code da compra, comprovante da compra -> EXTRACT_RECEIPT.
-10. Pedido com foto de oferta, tabloide, encarte, etiqueta, preco de prateleira -> EXTRACT_RECEIPT.
+6. "limpa", "limpar", "esvaziar", "deletar lista" -> CLEAR_LIST.
+7. "me ajuda a planejar o mes", "planejar compras", "o que preciso comprar esse mes" -> VIEW_CONSUMPTION_PATTERN.
+8. "o que voce sabe sobre mim", "o que lembra de mim", "me fala meu historico" -> SHOW_PROFILE.
+9. "tem coisa mais barata que o nescafe", "marca propria do arroz vale a pena", "qual oleo e mais em conta" -> SEARCH_PRODUCT.
+10. Pedido com cupom, nota fiscal, QR code da compra, comprovante da compra -> EXTRACT_RECEIPT.
 11. Palavra isolada que pareca produto -> SEARCH_PRODUCT.
 12. Evite UNKNOWN se houver leitura razoavel como produto, mercado, lista, perfil ou imagem de compra/oferta.
+13. IMPORTANTE: Para SHARE_LIST, CLEAR_LIST e SHOW_LIST, o campo "entities" deve ser vazio a menos que haja um numero de telefone (para SHARE_LIST). Nao coloque comandos como "limpa" ou "enviar" dentro de entities.value.
 
 Responda APENAS com JSON valido:
 {
@@ -93,7 +94,8 @@ Regras de classificacao:
 - "ofertas do [mercado]" -> MARKET_OFFERS
 - "hortifruti" / "carnes" / categoria -> CATEGORY_SEARCH
 - Gasto financeiro: extraia valor em "amount" e mercado em "value"
-- Periodo: extraia dias em "days"`;
+- Periodo: extraia dias em "days"
+- Compartilhar: extraia telefone em "targetPhone" (apenas numeros com DDD)`;
 
 const NLP_TO_INTENT: Record<string, Intent> = {
     'SEARCH_PRODUCT': 'consultar_preco_produto',
