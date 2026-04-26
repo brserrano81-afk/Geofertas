@@ -161,7 +161,7 @@ function looksLikeNeighborhoodFallback(message: string): boolean {
     if (/\d/.test(trimmed)) return false;
     if (/\b(ajuda|help|socorro|nao sei|não sei|sei la|sei lá)\b/.test(normalized)) return false;
 
-    return !/\b(quanto|valor|preco|precos|oferta|ofertas|lista|mercado|mercados|comprar|compra|quero|produto|produtos)\b/.test(normalized);
+    return !/\b(quanto|valor|preco|precos|oferta|ofertas|lista|mercado|mercados|comprar|compra|quero|produto|produtos|adiciona|coloca|poe|arroz|feijao|cafe|leite|ovos|pao)\b/.test(normalized) && !normalized.includes(',') && !normalized.includes(' e ');
 }
 
 function normalizeTextListEntry(value: string): string {
@@ -1077,11 +1077,10 @@ class ChatSession {
                 if (addItems.length === 0) return { text: "Quais itens vocÃª quer adicionar?" };
                 addItems.forEach((name, idx) => {
                     if (!this.context.shoppingList.find(i => i.name === name)) {
-                        this.context.shoppingList.push({
-                            name,
-                            quantity: addEntities[idx]?.quantity,
-                            unit: addEntities[idx]?.unit
-                        });
+                const newItem: any = { name };
+                if (addEntities[idx]?.quantity !== undefined) newItem.quantity = addEntities[idx].quantity;
+                if (addEntities[idx]?.unit !== undefined) newItem.unit = addEntities[idx].unit;
+                this.context.shoppingList.push(newItem);
                     }
                 });
                 await this.listManager.persistList(this.context.shoppingList);
@@ -1959,11 +1958,12 @@ class ChatSession {
         }
 
         const entities = interpretation.nlpResult.entities;
-        this.context.shoppingList = items.map((name, index) => ({
-            name,
-            quantity: entities[index]?.quantity,
-            unit: entities[index]?.unit,
-        }));
+        this.context.shoppingList = items.map((name, index) => {
+            const item: any = { name };
+            if (entities[index]?.quantity !== undefined) item.quantity = entities[index].quantity;
+            if (entities[index]?.unit !== undefined) item.unit = entities[index].unit;
+            return item;
+        });
         await this.listManager.persistList(this.context.shoppingList);
 
         this.moveToListCreation('Diga os itens');
@@ -1982,11 +1982,10 @@ class ChatSession {
 
         addItems.forEach((name, index) => {
             if (!this.context.shoppingList.find((item) => item.name === name)) {
-                this.context.shoppingList.push({
-                    name,
-                    quantity: entities[index]?.quantity,
-                    unit: entities[index]?.unit,
-                });
+                const newItem: any = { name };
+                if (entities[index]?.quantity !== undefined) newItem.quantity = entities[index].quantity;
+                if (entities[index]?.unit !== undefined) newItem.unit = entities[index].unit;
+                this.context.shoppingList.push(newItem);
             }
         });
 
