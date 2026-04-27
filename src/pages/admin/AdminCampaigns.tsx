@@ -59,6 +59,12 @@ export default function AdminCampaigns() {
       .finally(() => setLoading(false));
   }, []);
 
+  const stats = useMemo(() => {
+    const active = campaigns.filter(c => c.active).length;
+    const upcoming = campaigns.filter(c => c.startsAt && new Date(c.startsAt) > new Date()).length;
+    return { active, upcoming };
+  }, [campaigns]);
+
   const filteredCampaigns = useMemo(() => {
     let result = [...campaigns];
     if (searchTerm) {
@@ -131,102 +137,144 @@ export default function AdminCampaigns() {
   }
 
   return (
-    <div style={adminShellStyle}>
+    <div style={{ ...adminShellStyle, gap: 48 }}>
       {/* ── Header ─────────────────────────────────────────── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800 }}>Campanhas</h1>
-          <p style={{ margin: '4px 0 0', color: adminColors.textSecondary, fontSize: 15 }}>
-            Crie anúncios e promoções sazonais para mercados específicos.
+          <h1 style={{ margin: 0, fontSize: 36, fontWeight: 900, letterSpacing: '-0.05em', color: adminColors.text }}>Central de Campanhas</h1>
+          <p style={{ margin: '8px 0 0', color: adminColors.textSecondary, fontSize: 16, fontWeight: 500 }}>
+            {campaigns.length} iniciativas promocionais gerenciadas na plataforma.
           </p>
         </div>
-        <button onClick={handleAddClick} style={{ ...adminButtonStyle, gap: 8 }}>
-          <Plus size={18} />
-          Nova Campanha
+        <button onClick={handleAddClick} style={{ ...adminButtonStyle, height: 52, padding: '0 32px', gap: 12, boxShadow: `0 12px 24px ${adminColors.primary}33` }}>
+          <Plus size={22} strokeWidth={3} />
+          <span>Criar Campanha</span>
         </button>
+      </div>
+
+      {/* ── Stats Cards ────────────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 32 }}>
+        <div style={{ ...adminPanelStyle }}>
+          <div style={{ color: adminColors.textSecondary, fontSize: 13, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 16 }}>Em Execução</div>
+          <div style={{ fontSize: 36, fontWeight: 900, color: adminColors.text }}>{stats.active}</div>
+          <div style={{ marginTop: 12, fontSize: 13, color: adminColors.success, fontWeight: 700 }}>Rodando agora</div>
+        </div>
+        <div style={{ ...adminPanelStyle }}>
+          <div style={{ color: adminColors.textSecondary, fontSize: 13, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 16 }}>Agendadas</div>
+          <div style={{ fontSize: 36, fontWeight: 900, color: adminColors.text }}>{stats.upcoming}</div>
+          <div style={{ marginTop: 12, fontSize: 13, color: adminColors.warning, fontWeight: 700 }}>Próximos lançamentos</div>
+        </div>
+        <div style={{ ...adminPanelStyle }}>
+          <div style={{ color: adminColors.textSecondary, fontSize: 13, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 16 }}>Alcance Estimado</div>
+          <div style={{ fontSize: 36, fontWeight: 900, color: adminColors.text }}>12.4k</div>
+          <div style={{ marginTop: 12, fontSize: 13, color: adminColors.textSecondary, fontWeight: 600 }}>Usuários ativos</div>
+        </div>
+        <div style={{ ...adminPanelStyle, background: adminColors.primary, border: 'none' }}>
+          <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 16 }}>ROAS Médio</div>
+          <div style={{ fontSize: 36, fontWeight: 900, color: '#fff' }}>4.2x</div>
+          <div style={{ marginTop: 12, fontSize: 13, color: 'rgba(255,255,255,0.8)', fontWeight: 600 }}>Alta performance</div>
+        </div>
       </div>
 
       {feedback && (
         <div style={{ 
           ...adminBadgeStyle(feedback.includes('Erro') ? "red" : "green"), 
-          padding: '12px 20px',
-          width: 'fit-content'
+          padding: '16px 32px',
+          width: 'fit-content',
+          borderRadius: 14,
+          boxShadow: '0 8px 20px rgba(0,0,0,0.05)',
+          fontSize: 14
         }}>
           {feedback}
         </div>
       )}
 
       {/* ── Table & Search ───────────────────────────────────── */}
-      <section style={adminPanelStyle}>
-        <div style={{ position: 'relative', marginBottom: 24, maxWidth: 400 }}>
-          <Search size={18} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: adminColors.neutral }} />
-          <input 
-            style={{ ...adminInputStyle, paddingLeft: 40 }} 
-            placeholder="Buscar campanhas..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+      <section style={{ ...adminPanelStyle, padding: 0, overflow: 'hidden', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+        <div style={{ padding: '32px 40px', borderBottom: `1px solid ${adminColors.border}`, display: 'flex', gap: 32, alignItems: 'center', background: '#fff' }}>
+          <div style={{ position: 'relative', flex: 1, maxWidth: 600 }}>
+            <Search size={22} style={{ position: 'absolute', left: 20, top: '50%', transform: 'translateY(-50%)', color: adminColors.neutral }} />
+            <input 
+              style={{ ...adminInputStyle, paddingLeft: 56, height: 52, background: '#F8FAFC', border: '1px solid #F1F5F9' }} 
+              placeholder="Filtrar por nome ou mercado da campanha..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
         </div>
 
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead>
-              <tr style={{ borderBottom: `1px solid ${adminColors.border}` }}>
-                <th style={{ padding: '12px 16px', fontSize: 12, fontWeight: 700, color: adminColors.textSecondary, textTransform: 'uppercase' }}>Nome da Campanha</th>
-                <th style={{ padding: '12px 16px', fontSize: 12, fontWeight: 700, color: adminColors.textSecondary, textTransform: 'uppercase' }}>Mercado</th>
-                <th style={{ padding: '12px 16px', fontSize: 12, fontWeight: 700, color: adminColors.textSecondary, textTransform: 'uppercase' }}>Vigência</th>
-                <th style={{ padding: '12px 16px', fontSize: 12, fontWeight: 700, color: adminColors.textSecondary, textTransform: 'uppercase' }}>Status</th>
-                <th style={{ padding: '12px 16px', textAlign: 'right' }}></th>
+              <tr style={{ background: '#F8FAFC' }}>
+                <th style={{ padding: '20px 40px', fontSize: 12, fontWeight: 900, color: adminColors.textSecondary, textTransform: 'uppercase', letterSpacing: '0.15em' }}>Nome / Descrição</th>
+                <th style={{ padding: '20px 40px', fontSize: 12, fontWeight: 900, color: adminColors.textSecondary, textTransform: 'uppercase', letterSpacing: '0.15em' }}>Mercado Vinculado</th>
+                <th style={{ padding: '20px 40px', fontSize: 12, fontWeight: 900, color: adminColors.textSecondary, textTransform: 'uppercase', letterSpacing: '0.15em' }}>Vigência</th>
+                <th style={{ padding: '20px 40px', fontSize: 12, fontWeight: 900, color: adminColors.textSecondary, textTransform: 'uppercase', letterSpacing: '0.15em' }}>Status</th>
+                <th style={{ padding: '20px 40px', textAlign: 'right' }}></th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                   <td colSpan={5} style={{ padding: 40, textAlign: 'center', color: adminColors.textSecondary }}>Carregando campanhas...</td>
+                   <td colSpan={5} style={{ padding: 120, textAlign: 'center' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 }}>
+                         <div style={{ width: 48, height: 48, border: `4px solid ${adminColors.primaryLight}`, borderTopColor: adminColors.primary, borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                         <span style={{ fontWeight: 700, color: adminColors.textSecondary, fontSize: 16 }}>Sincronizando campanhas...</span>
+                      </div>
+                   </td>
                 </tr>
               ) : filteredCampaigns.map((c) => (
                 <tr key={c.id} style={{ borderBottom: `1px solid ${adminColors.border}`, transition: 'background 0.2s' }}>
-                  <td style={{ padding: '16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div style={{ width: 32, height: 32, borderRadius: 8, background: '#F59E0B15', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#F59E0B' }}>
-                            <Megaphone size={16} />
+                  <td style={{ padding: '32px 40px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+                        <div style={{ width: 48, height: 48, borderRadius: 12, background: '#F59E0B15', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#F59E0B', border: '1px solid #F59E0B33' }}>
+                            <Megaphone size={22} strokeWidth={1.5} />
                         </div>
                         <div>
-                            <div style={{ fontWeight: 700, color: adminColors.text }}>{c.name}</div>
-                            <div style={{ fontSize: 12, color: adminColors.textSecondary, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.description}</div>
+                            <div style={{ fontWeight: 900, color: adminColors.text, fontSize: 16 }}>{c.name}</div>
+                            <div style={{ fontSize: 13, color: adminColors.textSecondary, marginTop: 4, fontWeight: 600, maxWidth: 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.description}</div>
                         </div>
                     </div>
                   </td>
-                  <td style={{ padding: '16px', color: adminColors.textSecondary, fontSize: 14 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <MapPin size={14} />
+                  <td style={{ padding: '32px 40px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontWeight: 700, color: adminColors.text, fontSize: 15 }}>
+                        <MapPin size={16} color={adminColors.textSecondary} />
                         {c.marketName || "-"}
                     </div>
                   </td>
-                  <td style={{ padding: '16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: adminColors.textSecondary }}>
-                      <Calendar size={14} />
+                  <td style={{ padding: '32px 40px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, color: adminColors.textSecondary, fontWeight: 700 }}>
+                      <Calendar size={16} />
                       {c.startsAt ? new Date(c.startsAt).toLocaleDateString("pt-BR") : "—"} 
                       <span style={{ opacity: 0.5 }}>→</span>
                       {c.endsAt ? new Date(c.endsAt).toLocaleDateString("pt-BR") : "—"}
                     </div>
                   </td>
-                  <td style={{ padding: '16px' }}>
-                    {c.active ? <span style={adminBadgeStyle("green")}>Ativa</span> : <span style={adminBadgeStyle("red")}>Inativa</span>}
+                  <td style={{ padding: '32px 40px' }}>
+                    {c.active ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                           <div style={{ width: 8, height: 8, borderRadius: '50%', background: adminColors.success }} />
+                           <span style={{ fontSize: 12, fontWeight: 900, color: adminColors.success, textTransform: 'uppercase' }}>Ativa</span>
+                        </div>
+                    ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                           <div style={{ width: 8, height: 8, borderRadius: '50%', background: adminColors.error }} />
+                           <span style={{ fontSize: 12, fontWeight: 900, color: adminColors.error, textTransform: 'uppercase' }}>Inativa</span>
+                        </div>
+                    )}
                   </td>
-                  <td style={{ padding: '16px', textAlign: 'right' }}>
-                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                  <td style={{ padding: '32px 40px', textAlign: 'right' }}>
+                    <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
                       <button 
                         onClick={() => startEditing(c)}
-                        style={{ background: 'transparent', border: 'none', color: adminColors.textSecondary, cursor: 'pointer', padding: 6 }}
-                        title="Editar"
+                        style={{ background: '#F1F5F9', border: 'none', color: adminColors.textSecondary, cursor: 'pointer', width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                       >
                         <Edit2 size={18} />
                       </button>
                       <button 
                         onClick={() => handleToggle(c)}
-                        style={{ background: 'transparent', border: 'none', color: c.active ? adminColors.error : adminColors.success, cursor: 'pointer', padding: 6 }}
-                        title={c.active ? "Inativar" : "Ativar"}
+                        style={{ background: c.active ? `${adminColors.error}10` : `${adminColors.success}10`, border: 'none', color: c.active ? adminColors.error : adminColors.success, cursor: 'pointer', width: 40, height: 40, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                       >
                         <Power size={18} />
                       </button>
@@ -237,42 +285,47 @@ export default function AdminCampaigns() {
             </tbody>
           </table>
           {!filteredCampaigns.length && !loading && (
-             <div style={{ padding: 60, textAlign: 'center', color: adminColors.textSecondary }}>
-                Nenhuma campanha encontrada.
+             <div style={{ padding: 120, textAlign: 'center', color: adminColors.textSecondary, background: '#F8FAFC' }}>
+                <Megaphone size={48} strokeWidth={1.5} style={{ marginBottom: 20, opacity: 0.3 }} />
+                <div style={{ fontSize: 18, fontWeight: 700 }}>Nenhuma campanha encontrada</div>
+                <div style={{ fontSize: 14 }}>Ajuste os filtros ou crie uma nova iniciativa.</div>
              </div>
           )}
         </div>
       </section>
 
-      {/* ── Side Form (Optsolv Style) ────────────────────────── */}
+      {/* ── Side Form ────────────────────────── */}
       {isFormOpen && (
         <div style={{
           position: 'fixed',
           top: 0,
           right: 0,
-          width: 500,
+          width: 580,
           height: '100vh',
           background: '#fff',
-          boxShadow: '-10px 0 40px rgba(0,0,0,0.1)',
+          boxShadow: '-30px 0 80px rgba(0,0,0,0.2)',
           zIndex: 100,
           display: 'flex',
           flexDirection: 'column',
-          animation: 'slideIn 0.3s ease-out'
+          animation: 'slideIn 0.5s cubic-bezier(0.16, 1, 0.3, 1)'
         }}>
-          <div style={{ padding: '24px 32px', borderBottom: `1px solid ${adminColors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>
-              {editingId ? 'Editar Campanha' : 'Nova Campanha'}
-            </h2>
-            <button onClick={closeForm} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: adminColors.textSecondary }}>
-              <X size={24} />
+          <div style={{ padding: '40px 48px', borderBottom: `1px solid ${adminColors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: 28, fontWeight: 900, letterSpacing: '-0.04em' }}>
+                {editingId ? 'Editar Campanha' : 'Nova Campanha'}
+              </h2>
+              <p style={{ margin: '8px 0 0', fontSize: 16, color: adminColors.textSecondary, fontWeight: 500 }}>Defina o nome e o período da promoção.</p>
+            </div>
+            <button onClick={closeForm} style={{ background: '#F1F5F9', border: 'none', cursor: 'pointer', color: adminColors.textSecondary, width: 48, height: 48, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <X size={24} strokeWidth={3} />
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} style={{ padding: 32, display: 'grid', gap: 24, flex: 1, overflowY: 'auto' }}>
-            <div style={{ display: 'grid', gap: 8 }}>
-              <label style={{ fontSize: 13, fontWeight: 700, color: adminColors.text }}>Nome da Campanha *</label>
+          <form onSubmit={handleSubmit} style={{ padding: 48, display: 'grid', gap: 40, flex: 1, overflowY: 'auto' }}>
+            <div style={{ display: 'grid', gap: 12 }}>
+              <label style={{ fontSize: 14, fontWeight: 900, color: adminColors.text, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Nome da Campanha *</label>
               <input
-                style={adminInputStyle}
+                style={{ ...adminInputStyle, height: 56 }}
                 placeholder="Ex: Liquidação de Verão"
                 value={form.name}
                 onChange={(e) => setForm(c => ({ ...c, name: e.target.value }))}
@@ -280,36 +333,36 @@ export default function AdminCampaigns() {
               />
             </div>
 
-            <div style={{ display: 'grid', gap: 8 }}>
-                <label style={{ fontSize: 13, fontWeight: 700, color: adminColors.text }}>Mercado vinculado *</label>
+            <div style={{ display: 'grid', gap: 12 }}>
+                <label style={{ fontSize: 14, fontWeight: 900, color: adminColors.text, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Mercado vinculado *</label>
                 <select
-                    style={adminInputStyle}
+                    style={{ ...adminInputStyle, height: 56, background: '#F8FAFC' }}
                     value={form.marketId}
                     onChange={(e) => setForm(c => ({ ...c, marketId: e.target.value }))}
                     required
                 >
-                    <option value="">Selecione o mercado...</option>
+                    <option value="">Selecione o mercado alvo...</option>
                     {markets.map(m => (
                         <option key={m.id} value={m.id}>{m.nome} ({m.bairro})</option>
                     ))}
                 </select>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <div style={{ display: 'grid', gap: 8 }}>
-                    <label style={{ fontSize: 13, fontWeight: 700, color: adminColors.text }}>Início da Vigência *</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+                <div style={{ display: 'grid', gap: 12 }}>
+                    <label style={{ fontSize: 14, fontWeight: 900, color: adminColors.text, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Data de Início *</label>
                     <input
-                        style={adminInputStyle}
+                        style={{ ...adminInputStyle, height: 56 }}
                         type="date"
                         value={dateInputFromIso(form.startsAt)}
                         onChange={(e) => setForm(c => ({ ...c, startsAt: e.target.value ? `${e.target.value}T12:00:00.000Z` : "" }))}
                         required
                     />
                 </div>
-                <div style={{ display: 'grid', gap: 8 }}>
-                    <label style={{ fontSize: 13, fontWeight: 700, color: adminColors.text }}>Fim da Vigência *</label>
+                <div style={{ display: 'grid', gap: 12 }}>
+                    <label style={{ fontSize: 14, fontWeight: 900, color: adminColors.text, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Data de Término *</label>
                     <input
-                        style={adminInputStyle}
+                        style={{ ...adminInputStyle, height: 56 }}
                         type="date"
                         value={dateInputFromIso(form.endsAt)}
                         onChange={(e) => setForm(c => ({ ...c, endsAt: e.target.value ? `${e.target.value}T12:00:00.000Z` : "" }))}
@@ -318,22 +371,22 @@ export default function AdminCampaigns() {
                 </div>
             </div>
 
-            <div style={{ display: 'grid', gap: 8 }}>
-              <label style={{ fontSize: 13, fontWeight: 700, color: adminColors.text }}>Descrição / Detalhes *</label>
+            <div style={{ display: 'grid', gap: 12 }}>
+              <label style={{ fontSize: 14, fontWeight: 900, color: adminColors.text, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Descrição / Regras *</label>
               <textarea
-                style={{ ...adminInputStyle, minHeight: 120, resize: 'vertical' }}
-                placeholder="Detalhes da promoção, regras ou avisos..."
+                style={{ ...adminInputStyle, minHeight: 180, resize: 'vertical', padding: '20px' }}
+                placeholder="Detalhes da promoção, regras de uso ou avisos importantes..."
                 value={form.description}
                 onChange={(e) => setForm(c => ({ ...c, description: e.target.value }))}
                 required
               />
             </div>
 
-            <div style={{ marginTop: 'auto', paddingTop: 32, display: 'flex', gap: 12 }}>
-              <button type="submit" style={{ ...adminButtonStyle, flex: 1 }} disabled={saving}>
+            <div style={{ marginTop: 'auto', paddingTop: 48, display: 'flex', gap: 20 }}>
+              <button type="submit" style={{ ...adminButtonStyle, flex: 2, height: 60, fontSize: 16 }} disabled={saving}>
                 {saving ? "Salvando..." : editingId ? "Salvar Alterações" : "Criar Campanha"}
               </button>
-              <button type="button" onClick={closeForm} style={{ ...adminInputStyle, width: 'auto', padding: '0 24px' }}>
+              <button type="button" onClick={closeForm} style={{ ...adminInputStyle, flex: 1, height: 60, background: '#F8FAFC', fontWeight: 800, border: 'none' }}>
                 Cancelar
               </button>
             </div>
@@ -344,14 +397,17 @@ export default function AdminCampaigns() {
       {isFormOpen && (
         <div 
           onClick={closeForm}
-          style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(15,17,23,0.4)', zIndex: 90 }} 
+          style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(15,23,42,0.4)', backdropFilter: 'blur(8px)', zIndex: 90 }} 
         />
       )}
 
       <style>{`
         @keyframes slideIn {
-          from { transform: translateX(100%); }
-          to { transform: translateX(0); }
+          from { transform: translateX(100%); opacity: 0; }
+          to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
         }
       `}</style>
     </div>

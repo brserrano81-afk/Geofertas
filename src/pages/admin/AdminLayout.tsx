@@ -128,7 +128,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     }}>
                         <LayoutDashboard size={22} color="#fff" strokeWidth={2.5} />
                     </div>
-                    <span>Optsolv</span>
+                    <span>Economiza Fácil</span>
                 </div>
 
                 <div style={{ flex: 1, overflowY: 'auto', paddingRight: 4 }}>

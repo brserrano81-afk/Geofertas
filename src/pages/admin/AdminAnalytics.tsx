@@ -96,20 +96,23 @@ export default function AdminAnalytics() {
     }, []);
 
     return (
-        <div style={adminShellStyle}>
+        <div style={{ ...adminShellStyle, gap: 48 }}>
             {/* ── Page Title ────────────────────────────────────────── */}
-            <div style={{ marginBottom: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-                    <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800 }}>Painel Analítico</h1>
-                    <span style={adminBadgeStyle('purple')}>Inteligência de Mercado</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                <div>
+                    <h1 style={{ margin: 0, fontSize: 36, fontWeight: 900, letterSpacing: '-0.05em', color: adminColors.text }}>Inteligência de Mercado</h1>
+                    <p style={{ margin: '8px 0 0', color: adminColors.textSecondary, fontSize: 16, fontWeight: 500 }}>
+                        Visão analítica de consumo, comportamento e economia gerada.
+                    </p>
                 </div>
-                <p style={{ margin: 0, color: adminColors.textSecondary, fontSize: 15 }}>
-                    Análise agregada de comportamento, intenções de compra e economia gerada.
-                </p>
+                <div style={{ display: 'flex', gap: 12 }}>
+                    <div style={{ ...adminBadgeStyle('green'), padding: '8px 16px', borderRadius: 10, fontSize: 12, fontWeight: 800 }}>Dados em Tempo Real</div>
+                    <div style={{ ...adminBadgeStyle('neutral'), padding: '8px 16px', borderRadius: 10, fontSize: 12, fontWeight: 800 }}>Últimos 30 dias</div>
+                </div>
             </div>
 
             {error && (
-                <div style={{ ...adminBadgeStyle('red'), width: 'fit-content', padding: '12px 20px', fontSize: 13 }}>
+                <div style={{ ...adminBadgeStyle('red'), width: 'fit-content', padding: '16px 32px', fontSize: 14, borderRadius: 12 }}>
                     {error}
                 </div>
             )}
@@ -117,8 +120,8 @@ export default function AdminAnalytics() {
             {/* ── KPI Grid ──────────────────────────────────────────── */}
             <div style={{
                 display: 'grid',
-                gap: 20,
-                gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))'
+                gap: 32,
+                gridTemplateColumns: 'repeat(4, 1fr)'
             }}>
                 <KPICard 
                     title="Volume de Eventos" 
@@ -149,12 +152,12 @@ export default function AdminAnalytics() {
             {/* ── Main Analytics Grid ───────────────────────────────── */}
             <div style={{
                 display: 'grid',
-                gap: 20,
+                gap: 32,
                 gridTemplateColumns: 'repeat(2, 1fr)',
             }}>
                 {/* 1. Ticket Médio Detalhado (Full width in its row) */}
-                <div style={{ ...adminPanelStyle, gridColumn: 'span 2' }}>
-                    <h3 style={{ margin: '0 0 24px 0', fontSize: 16, fontWeight: 700 }}>Distribuição de Compra & Poupança</h3>
+                <div style={{ ...adminPanelStyle, gridColumn: 'span 2', padding: 40 }}>
+                    <h3 style={{ margin: '0 0 32px 0', fontSize: 20, fontWeight: 900, letterSpacing: '-0.02em' }}>Distribuição de Compra & Poupança</h3>
                     {loading ? <SkeletonPanel /> : (
                         <TicketMedioChart
                             avgTicket={summary.avgTicket}
@@ -166,26 +169,22 @@ export default function AdminAnalytics() {
                 </div>
 
                 {/* 2. Top Categorias & Produtos */}
-                <div>
-                    <h3 style={{ margin: '0 0 16px 8px', fontSize: 15, fontWeight: 700 }}>Produtos Mais Consultados</h3>
-                    <div style={adminPanelStyle}>
-                        {loading ? <SkeletonPanel /> : (
-                            <TopProductsChart data={summary.topPriceQueryCategories} />
-                        )}
-                    </div>
+                <div style={{ ...adminPanelStyle, padding: 40 }}>
+                    <h3 style={{ margin: '0 0 32px 0', fontSize: 18, fontWeight: 900, letterSpacing: '-0.02em' }}>Produtos Mais Consultados</h3>
+                    {loading ? <SkeletonPanel /> : (
+                        <TopProductsChart data={summary.topPriceQueryCategories} />
+                    )}
                 </div>
-                <div>
-                    <h3 style={{ margin: '0 0 16px 8px', fontSize: 15, fontWeight: 700 }}>Categorias Dominantes</h3>
-                    <div style={adminPanelStyle}>
-                        {loading ? <SkeletonPanel /> : (
-                            <TopCategoriesChart data={summary.topCategories} />
-                        )}
-                    </div>
+                <div style={{ ...adminPanelStyle, padding: 40 }}>
+                    <h3 style={{ margin: '0 0 32px 0', fontSize: 18, fontWeight: 900, letterSpacing: '-0.02em' }}>Categorias Dominantes</h3>
+                    {loading ? <SkeletonPanel /> : (
+                        <TopCategoriesChart data={summary.topCategories} />
+                    )}
                 </div>
 
                 {/* 3. Frequência Temporal (Full width) */}
-                <div style={{ ...adminPanelStyle, gridColumn: 'span 2' }}>
-                    <h3 style={{ margin: '0 0 24px 0', fontSize: 16, fontWeight: 700 }}>Mapa de Calor de Engajamento (Dia vs Hora)</h3>
+                <div style={{ ...adminPanelStyle, gridColumn: 'span 2', padding: 40 }}>
+                    <h3 style={{ margin: '0 0 32px 0', fontSize: 20, fontWeight: 900, letterSpacing: '-0.02em' }}>Mapa de Calor de Engajamento</h3>
                     {loading ? <SkeletonPanel /> : (
                         <FrequencyHeatmap
                             matrix={summary.weekdayHourMatrix}
@@ -195,43 +194,49 @@ export default function AdminAnalytics() {
                 </div>
 
                 {/* 4. Mercados & Regiões */}
-                <div>
-                    <h3 style={{ margin: '0 0 16px 8px', fontSize: 15, fontWeight: 700 }}>Market Share (Menor Preço)</h3>
-                    <div style={adminPanelStyle}>
-                        {loading ? <SkeletonPanel /> : (
-                            <MarketRankingChart data={summary.topMarkets} />
-                        )}
-                    </div>
+                <div style={{ ...adminPanelStyle, padding: 40 }}>
+                    <h3 style={{ margin: '0 0 32px 0', fontSize: 18, fontWeight: 900, letterSpacing: '-0.02em' }}>Market Share (Menor Preço)</h3>
+                    {loading ? <SkeletonPanel /> : (
+                        <MarketRankingChart data={summary.topMarkets} />
+                    )}
                 </div>
-                <div>
-                    <h3 style={{ margin: '0 0 16px 8px', fontSize: 15, fontWeight: 700 }}>Geografia do Consumo</h3>
-                    <div style={adminPanelStyle}>
-                        {loading ? <SkeletonPanel /> : (
-                            <RegionConsumptionMap data={summary.topRegions} />
-                        )}
-                    </div>
+                <div style={{ ...adminPanelStyle, padding: 40 }}>
+                    <h3 style={{ margin: '0 0 32px 0', fontSize: 18, fontWeight: 900, letterSpacing: '-0.02em' }}>Geografia do Consumo</h3>
+                    {loading ? <SkeletonPanel /> : (
+                        <RegionConsumptionMap data={summary.topRegions} />
+                    )}
                 </div>
             </div>
 
             {/* ── Privacy Footer ────────────────────────────────────── */}
             <div style={{
                 ...adminPanelStyle,
-                background: `${adminColors.primary}05`,
-                border: `1px dashed ${adminColors.primary}33`,
+                background: '#F8FAFC',
+                border: '1px solid #F1F5F9',
+                padding: '32px 40px',
                 display: 'flex',
-                gap: 16,
-                alignItems: 'flex-start'
+                gap: 24,
+                alignItems: 'flex-start',
+                borderRadius: 24
             }}>
-                <div style={{ color: adminColors.primary, paddingTop: 2 }}>
-                    <ShieldCheck size={20} />
+                <div style={{ width: 48, height: 48, borderRadius: 12, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: adminColors.primary, boxShadow: '0 4px 12px rgba(0,0,0,0.05)', flexShrink: 0 }}>
+                    <ShieldCheck size={24} />
                 </div>
-                <p style={{ margin: 0, fontSize: 13, color: '#4B5563', lineHeight: 1.6 }}>
-                    <strong>Privacidade & Conformidade:</strong> Este painel opera sob o princípio de 
-                    <em> Differential Privacy</em>. Os dados são agregados de forma anônima e 
-                    não permitem a identificação individual de usuários ou comportamentos específicos. 
-                    Nenhum dado pessoal (PII) é armazenado ou processado neste nó de visualização.
-                </p>
+                <div>
+                    <h4 style={{ margin: '0 0 8px 0', fontSize: 16, fontWeight: 900, color: adminColors.text }}>Privacidade & Conformidade (LGPD)</h4>
+                    <p style={{ margin: 0, fontSize: 14, color: adminColors.textSecondary, lineHeight: 1.6, fontWeight: 500 }}>
+                        Este painel opera sob o princípio de <strong>Differential Privacy</strong>. Os dados são agregados de forma anônima e 
+                        não permitem a identificação individual de usuários. Nenhum dado pessoal (PII) é armazenado ou processado neste nó de visualização, garantindo total conformidade com a LGPD.
+                    </p>
+                </div>
             </div>
+            
+            <style>{`
+                @keyframes pulse {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.5; }
+                }
+            `}</style>
         </div>
     );
 }

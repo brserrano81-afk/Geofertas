@@ -1,5 +1,5 @@
 /**
- * Admin UI Design System (Optsolv Model - Royal Purple Theme)
+ * Admin UI Design System (Economiza Fácil Model - Premium Clean Theme)
  * Centralized styles for the Economiza Fácil Admin Panel.
  */
 
