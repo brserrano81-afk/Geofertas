@@ -6,7 +6,8 @@ import {
   MapPin, 
   Edit2, 
   Power, 
-  X
+  X,
+  ChevronDown
 } from "lucide-react";
 
 import {

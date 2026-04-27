@@ -206,9 +206,9 @@ class ChatSession {
 
     private context: ChatContext;
     private readonly conversationState = new ConversationStateService();
-    private readonly listManager: ListManager;
-    private readonly purchaseManager: PurchaseManager;
-    private readonly purchaseAnalytics: PurchaseAnalyticsService;
+    private listManager: ListManager;
+    private purchaseManager: PurchaseManager;
+    private purchaseAnalytics: PurchaseAnalyticsService;
     private readonly ready: Promise<void>;
     private lastContextRefreshAt = 0;
 
@@ -1975,7 +1975,7 @@ class ChatSession {
         }
 
         this.context.shoppingList = []; // Start fresh if it's a new list
-        const { addedCount, duplicates } = this.addProductsToShoppingList(items);
+        const { duplicates } = this.addProductsToShoppingList(items);
         await this.listManager.persistList(this.context.shoppingList);
 
         const createdResult = await this.listManager.recoverActiveListItemsOnly();

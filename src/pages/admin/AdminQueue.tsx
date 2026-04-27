@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { 
   CheckCircle, 
   Clock, 
@@ -177,7 +177,7 @@ export default function AdminQueue() {
                   <span style={{ fontWeight: 700, color: adminColors.textSecondary, fontSize: 16 }}>Sincronizando fila de moderação...</span>
                </div>
             </div>
-          ) : filteredItems.map((item) => (
+          ) : filteredItems.map((item: OfferQueueItem) => (
             <article
               key={item.id}
               style={{

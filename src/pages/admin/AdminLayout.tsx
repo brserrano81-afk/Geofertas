@@ -8,8 +8,6 @@ import {
     Megaphone, 
     BarChart3, 
     LogOut,
-    User,
-    ChevronDown,
     Bell
 } from 'lucide-react';
 
