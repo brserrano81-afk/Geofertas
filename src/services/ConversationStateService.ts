@@ -213,8 +213,8 @@ export class ConversationStateService {
 
     private resolveShareConfirmation(message: string, isYes: boolean, isNo: boolean): PendingResolution | null {
         const low = this.normalizeMessage(message);
-        const isMercado = /\b(mercado|barato|proximo|rota|1)\b/.test(low);
-        const isShare = /\b(compartilhar|whatsapp|zap|mandar|enviar|2)\b/.test(low);
+        const isMercado = /^(mercado|barato|proximo|rota|1)$/.test(low) || /\b(opção 1|opcao 1)\b/.test(low);
+        const isShare = /^(compartilhar|whatsapp|zap|mandar|enviar|2)$/.test(low) || /\b(opção 2|opcao 2)\b/.test(low);
 
         let confirmed = isMercado;
         if (isShare) confirmed = false;

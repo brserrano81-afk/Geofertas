@@ -995,6 +995,7 @@ async function buildResponse(rawMessage: InboxMessage): Promise<ResponseBuildRes
             new Uint8Array(buffer),
             message.userId,
             message.storageUserId || message.userId,
+            message.bsuid,
         );
         console.log(`[INTENT_RESOLVED] user=${message.userId} channel=whatsapp source=imageMessage`);
         return {
@@ -1032,6 +1033,7 @@ async function buildResponse(rawMessage: InboxMessage): Promise<ResponseBuildRes
             locationMessage,
             message.userId,
             message.storageUserId || message.userId,
+            message.bsuid,
         );
 
         if (!String(response.text || '').trim()) {
@@ -1079,7 +1081,12 @@ async function buildResponse(rawMessage: InboxMessage): Promise<ResponseBuildRes
         }
     }
 
-    const response = await chatService.processMessage(text, message.userId, message.storageUserId || message.userId);
+    const response = await chatService.processMessage(
+        text, 
+        message.userId, 
+        message.storageUserId || message.userId,
+        message.bsuid
+    );
     if (!String(response.text || '').trim()) {
         console.warn(`[FALLBACK_TRIGGERED] user=${message.userId} reason=empty_chat_response`);
         return {

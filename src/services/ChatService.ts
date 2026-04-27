@@ -8,6 +8,7 @@ import { diagnosticService } from './DiagnosticService.ts';
 import { aiService, type Intent } from './AiService';
 import { offerEngine } from './OfferEngine';
 import { ListManager } from './ListManager';
+import { identityResolutionService } from './IdentityResolutionService';
 import { PurchaseManager } from './PurchaseManager';
 import { ingestionPipeline, type PipelineResult } from './IngestionPipeline';
 import { matchReceiptToList, type MatchResult } from './ReceiptMatcher';
@@ -211,7 +212,7 @@ class ChatSession {
     private readonly ready: Promise<void>;
     private lastContextRefreshAt = 0;
 
-    constructor(userId: string = 'default_user', storageUserId: string = userId) {
+    constructor(userId: string = 'default_user', storageUserId: string = userId, bsuid?: string | null) {
         this.context = {
             shoppingList: [],
             userId,
@@ -230,10 +231,25 @@ class ChatSession {
             ChatSession.diagnosticsChecked = true;
         }
 
-        this.ready = this.init();
+        this.ready = this.init(bsuid);
     }
 
-    private async init() {
+    private async init(bsuid?: string | null) {
+        // Se houver BSUID, resolver identidade canÃ´nica
+        if (bsuid) {
+            console.log(`[ChatService] BSUID Detectado: ${bsuid}. Resolvendo identidade...`);
+            const identity = await identityResolutionService.resolveWhatsAppIdentity({ 
+                remoteJid: this.context.userId, 
+                bsuid 
+            });
+            console.log(`[ChatService] Identidade Resolvida: canonical=${identity.canonicalUserId}, storage=${identity.storageUserId}`);
+            this.context.storageUserId = identity.storageUserId;
+            // Reinicializar managers com o novo storageUserId se mudou
+            this.listManager = new ListManager(this.context.storageUserId);
+            this.purchaseManager = new PurchaseManager(this.context.storageUserId, this.context.userId);
+            this.purchaseAnalytics = new PurchaseAnalyticsService(this.context.storageUserId);
+        }
+
         const { profile, recentInteractions } = await userProfileService.bootstrapUser(this.context.userId);
         this.context.shoppingList = await this.listManager.loadActiveList();
 
@@ -508,7 +524,7 @@ class ChatSession {
             }
         }
 
-        const fallbackIntent = explicitPreference
+        const fallbackIntent = (explicitPreference && interpretation.intent === 'desconhecido')
             ? 'definir_preferencia_usuario'
             : asksForProfile
                 ? 'ver_perfil_usuario'
@@ -2124,22 +2140,22 @@ class ChatSession {
 class ChatService {
     private readonly sessions = new Map<string, ChatSession>();
 
-    private getSession(userId: string = 'default_user', storageUserId: string = userId): ChatSession {
+    private getSession(userId: string = 'default_user', storageUserId: string = userId, bsuid?: string | null): ChatSession {
         const normalizedUserId = userId || 'default_user';
 
         if (!this.sessions.has(normalizedUserId)) {
-            this.sessions.set(normalizedUserId, new ChatSession(normalizedUserId, storageUserId || normalizedUserId));
+            this.sessions.set(normalizedUserId, new ChatSession(normalizedUserId, storageUserId || normalizedUserId, bsuid));
         }
 
         return this.sessions.get(normalizedUserId)!;
     }
 
-    public async processMessage(message: string, userId: string = 'default_user', storageUserId: string = userId): Promise<ChatResponse> {
-        return this.getSession(userId, storageUserId).processMessage(message);
+    public async processMessage(message: string, userId: string = 'default_user', storageUserId: string = userId, bsuid?: string | null): Promise<ChatResponse> {
+        return this.getSession(userId, storageUserId, bsuid).processMessage(message);
     }
 
-    public async processImage(imageData: Uint8Array, userId: string = 'default_user', storageUserId: string = userId): Promise<ChatResponse> {
-        return this.getSession(userId, storageUserId).processImage(imageData);
+    public async processImage(imageData: Uint8Array, userId: string = 'default_user', storageUserId: string = userId, bsuid?: string | null): Promise<ChatResponse> {
+        return this.getSession(userId, storageUserId, bsuid).processImage(imageData);
     }
 }
 

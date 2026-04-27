@@ -4,20 +4,20 @@
  */
 
 export const adminColors = {
-  primary: "#6D28D9", // Royal Purple
-  primaryLight: "#EDE9FE",
+  primary: "#7C3AED", // Royal Purple (Vibrant)
+  primaryLight: "#F5F3FF",
   primaryText: "#FFFFFF",
-  sidebarBg: "#0F1117", // Dark Navy
-  sidebarActive: "rgba(109, 40, 217, 0.25)",
-  background: "#F9FAFB",
+  sidebarBg: "#0B0E14", // Deeper Dark Navy
+  sidebarActive: "rgba(124, 58, 237, 0.12)",
+  background: "#F1F5F9", // Crisp grey (Slate 100)
   surface: "#FFFFFF",
-  text: "#111827",
-  textSecondary: "#6B7280",
-  border: "#E5E7EB",
+  text: "#0F172A", // Slate 900
+  textSecondary: "#64748B", // Slate 500
+  border: "#E2E8F0", // Slate 200
   success: "#10B981",
   error: "#EF4444",
   warning: "#F59E0B",
-  neutral: "#9CA3AF",
+  neutral: "#94A3B8",
 };
 
 export const adminShellStyle = {
@@ -41,10 +41,10 @@ export const adminTopbarStyle = {
 export const adminPanelStyle = {
   background: adminColors.surface,
   border: `1px solid ${adminColors.border}`,
-  borderRadius: 12,
-  boxShadow: "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)",
-  padding: "24px",
-  transition: "box-shadow 0.2s ease",
+  borderRadius: 16,
+  boxShadow: "0 1px 2px 0 rgb(0 0 0 / 0.05)",
+  padding: "32px",
+  transition: "all 0.2s ease",
 };
 
 export const adminGridStyle = {
@@ -62,18 +62,18 @@ export const adminKPIStyle = {
 
 export const adminInputStyle = {
   width: "100%",
-  borderRadius: 8,
+  borderRadius: 10,
   border: `1px solid ${adminColors.border}`,
-  background: "white",
-  padding: "10px 14px",
+  background: "#FFFFFF",
+  padding: "12px 16px",
   fontSize: 14,
   color: adminColors.text,
   outline: "none",
   boxSizing: "border-box" as const,
-  transition: "border-color 0.2s, box-shadow 0.2s",
+  transition: "all 0.2s ease",
   ":focus": {
     borderColor: adminColors.primary,
-    boxShadow: `0 0 0 3px ${adminColors.primaryLight}`,
+    boxShadow: `0 0 0 4px ${adminColors.primary}1A`,
   },
 };
 
@@ -81,9 +81,9 @@ export const adminButtonStyle = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  minHeight: 40,
-  padding: "0 20px",
-  borderRadius: 8,
+  minHeight: 44,
+  padding: "0 24px",
+  borderRadius: 10,
   border: "none",
   background: adminColors.primary,
   color: "white",
@@ -91,7 +91,14 @@ export const adminButtonStyle = {
   fontSize: 14,
   cursor: "pointer",
   textDecoration: "none",
-  transition: "filter 0.2s",
+  transition: "all 0.2s ease",
+  ":hover": {
+    filter: "brightness(1.1)",
+    transform: "translateY(-1px)",
+  },
+  ":active": {
+    transform: "translateY(0)",
+  }
 };
 
 export const adminSecondaryButtonStyle = {

@@ -1,0 +1,483 @@
+# EconomizaFacil.IA
+## Seu assistente de economia no WhatsApp 💚
+
+---
+
+> Você não precisa baixar nada. Não precisa fazer cadastro. Não precisa colocar senha.
+> **Só salva o número, manda mensagem e economiza.**
+
+---
+
+## Como ele funciona?
+
+O EconomizaFacil aprende com você. Quanto mais você usa, mais esperto ele fica. Ele lembra o que você costuma comprar, qual mercado você prefere, quanto você gasta por mês — e usa tudo isso pra te ajudar a economizar mais.
+
+---
+
+## 14 coisas que você pode fazer
+
+---
+
+### 1. Saber o preço de qualquer produto
+
+Fala do jeito que você falar mesmo:
+
+```
+preço do café
+kto ta o arroz
+quanto tá o leite
+feijão tá caro?
+tem oferta de frango?
+```
+
+**Resposta:**
+```
+☕ CAFÉ 500g
+
+🟢 R$ 9,90 – Café do Dia (Extrabom)
+🟡 R$ 11,50 – Melitta (Atacadão)
+🔴 R$ 16,90 – Nescafé (Carone)
+
+💰 Você economiza: R$ 7,00
+
+Quer saber se vale ir de carro? 🚗
+```
+
+---
+
+### 2. Comparar marcas
+
+```
+tem coisa mais barata que o Nescafé
+marca própria do arroz vale a pena
+qual óleo é mais em conta
+```
+
+**Resposta:**
+```
+☕ CAFÉ 500g — comparação de marcas
+
+🟢 R$ 9,90  – Café do Dia
+🟡 R$ 11,50 – Melitta
+🔴 R$ 16,90 – Nescafé
+
+💡 Trocando pro Café do Dia:
+   R$ 7,00 por pacote
+   R$ 84,00 por ano!
+
+Quer que eu troque na sua lista? 🛒
+```
+
+---
+
+### 3. Ver as ofertas de um mercado
+
+```
+quais as ofertas do Extrabom?
+o que tá em oferta no Atacadão hoje?
+promoções do Carone
+```
+
+**Resposta:**
+```
+🏪 Ofertas do EXTRABOM — hoje
+
+🥩 Açougue
+• Fraldinha 1kg – R$ 34,90
+• Frango inteiro – R$ 12,50/kg
+
+🛒 Mercearia
+• Arroz Tio João 5kg – R$ 22,90
+• Óleo Liza 900ml – R$ 6,49
+• Feijão Carioca 1kg – R$ 8,90
+
+🍺 Bebidas
+• Skol Lata 350ml – R$ 3,49
+• Coca-Cola 2L – R$ 9,90
+
+🥛 Laticínios
+• Leite Integral 1L – R$ 4,89
+
+Tem 3 unidades do Extrabom na região.
+Quer saber qual fica mais perto de você? 📍
+```
+
+
+
+
+
+---
+
+### 4. Saber qual mercado ir
+
+```
+qual mercado tá mais barato
+onde comprar mais barato perto de mim
+mercado mais próximo
+```
+
+**Resposta:**
+```
+🏪 Mercados mais baratos perto de você
+
+1️⃣ Atacadão Serra – 2,3km
+2️⃣ Extrabom Jardim Camburi – 1,1km
+3️⃣ Carone – 3,8km
+
+O Extrabom tá mais perto mas o
+Atacadão tá mais barato nos seus produtos.
+
+Quer calcular se vale ir de carro? 🚗
+```
+
+---
+
+### 5. Calcular se vale ir de carro
+
+```
+vale ir de carro no Atacadão?
+compensa ir longe?
+vale a pena ir de moto no Assaí?
+```
+
+**Ele pergunta:**
+```
+🚗 Vou calcular pra você!
+
+Qual a média do seu carro? (km/litro)
+Se não souber, manda "não sei"
+e uso 10km/l como padrão.
+```
+
+**Você responde:** `não sei`
+
+**Resposta:**
+```
+🚗 Ir de carro no Atacadão Serra
+
+Distância: 4,2km (ida e volta: 8,4km)
+Gasolina: R$ 4,95
+Economia nos produtos: R$ 23,00
+
+✅ VALE A PENA!
+Você economiza R$ 18,05 no total.
+```
+
+**Se não compensar:**
+```
+🚗 Ir de carro no Assaí Camburi
+
+Distância: 12km (ida e volta: 24km)
+Gasolina: R$ 14,10
+Economia nos produtos: R$ 8,00
+
+❌ NÃO COMPENSA
+Você gastaria R$ 6,10 a mais.
+O Extrabom aqui perto é melhor hoje!
+```
+
+---
+
+### 6. Criar sua lista de compras
+
+**Adicionar:**
+```
+adiciona arroz, feijão e café
+coloca leite na lista
+add macarrão
+```
+
+**Resposta:**
+```
+✅ Adicionado à sua lista:
+• Arroz
+• Feijão
+• Café
+
+Digite minha lista pra ver tudo! 🛒
+```
+
+**Ver a lista:**
+```
+minha lista
+o que tá na minha lista
+```
+
+**Resposta:**
+```
+🛒 Sua lista (5 itens):
+
+1. Arroz
+2. Feijão
+3. Café
+4. Leite
+5. Macarrão
+
+Quer saber onde comprar mais barato?
+Digite: onde comprar minha lista
+```
+
+**Remover:**
+```
+tira o café da lista
+remove o leite
+```
+
+**Zerar:**
+```
+limpa minha lista
+apaga tudo da lista
+```
+
+---
+
+### 7. Onde comprar a lista inteira
+
+```
+onde comprar minha lista
+qual mercado é mais barato pra minha lista
+```
+
+**Resposta:**
+```
+🛒 Melhor mercado pra sua lista (5 itens)
+
+1️⃣ Atacadão Serra      – R$ 87,40
+2️⃣ Extrabom Camburi    – R$ 94,20
+3️⃣ Carone              – R$ 102,80
+
+💰 Indo no Atacadão você economiza
+   R$ 15,40 vs o Carone!
+
+Quer calcular o transporte também? 🚗
+```
+
+---
+
+### 8. Compartilhar lista com a família
+
+```
+compartilha minha lista com minha esposa
+manda lista pro 27999887766
+```
+
+**Resposta:**
+```
+✅ Lista enviada pra 27999887766!
+
+Sua esposa recebeu a lista com
+5 itens. Boas compras! 🛒
+```
+
+---
+
+### 9. Mandar foto do cupom fiscal
+
+Depois que voltar do mercado, tira foto do cupom e manda.
+
+**Você manda a foto.**
+
+**Resposta:**
+```
+🧾 ANÁLISE DO SEU CUPOM — Carone 15/03
+
+✅ Da sua lista (8 itens):    R$ 87,40
+⚠️ Fora da lista (3 itens):  R$ 34,20
+
+Compras fora da lista:
+• Cerveja Skol 6un  – R$ 24,90
+• Salgadinho        – R$ 5,30
+• Chocolate Bis     – R$ 4,00
+
+💸 R$ 34,20 além do planejado
+
+📊 Você pagou caro em:
+   Arroz: R$ 28,00 (média R$ 26,00) ⚠️
+
+📊 Você pagou bem em:
+   Café: R$ 13,90 (média R$ 14,50) ✅
+```
+
+---
+
+### 10. Ver quanto você gastou
+
+```
+quanto gastei esse mês
+quanto gastei de cerveja em março
+meu gasto com carne
+o que mais gasto por mês
+```
+
+**Resposta:**
+```
+📊 Seus gastos — março 2026
+
+Total: R$ 543,20
+Compras no mês: 4 vezes
+
+Maiores gastos:
+• Carnes:   R$ 145,00
+• Bebidas:  R$ 87,90
+• Grãos:    R$ 89,00
+
+🔝 Produto que mais gastou:
+   Cerveja — R$ 87,90/mês
+```
+
+---
+
+### 11. Planejar as compras do mês
+
+```
+me ajuda a planejar o mês
+o que preciso comprar esse mês
+planejar compras
+```
+
+**Resposta:**
+```
+📅 Planejamento — março
+
+Com base no seu histórico:
+
+🔴 Arroz    – acabou há 2 dias
+🔴 Feijão   – acabou hoje
+🟡 Café     – acaba em 3 dias
+🟡 Óleo     – acaba em 5 dias
+🟢 Macarrão – ainda tem uns 10 dias
+
+💰 Estimativa do mês: R$ 290,00
+
+Quer que eu monte a lista? 🛒
+```
+
+---
+
+### 12. Quando produto fica mais barato
+
+```
+quando o frango fica mais barato
+melhor época pra comprar arroz
+```
+
+**Resposta:**
+```
+📈 Sazonalidade do FRANGO
+
+✅ Mais barato: junho/julho
+   Média: R$ 12,90/kg
+
+❌ Mais caro: novembro/dezembro
+   Média: R$ 18,50/kg
+
+💡 Estocando em julho você economiza
+   R$ 5,60/kg!
+```
+
+---
+
+### 13. Definir sua preferência
+
+```
+prefiro economizar mesmo que seja longe
+prefiro mercado mais perto
+quero equilibrar os dois
+```
+
+**Resposta:**
+```
+✅ Anotado! Vou sempre te mostrar
+as opções mais baratas primeiro,
+mesmo que sejam um pouco mais longe.
+
+Pode mudar quando quiser! 😊
+```
+
+---
+
+### 14. Ver o que o sistema sabe sobre você
+
+```
+o que você sabe sobre mim
+me fala meu histórico
+o que você lembra de mim
+```
+
+**Resposta:**
+```
+👤 O que eu sei sobre você:
+
+📍 Bairro: Serra
+🏪 Mercado favorito: Atacadão Serra
+🚗 Transporte: Carro (10km/l)
+💚 Preferência: Economizar
+
+🛒 Produtos mais comprados:
+   Arroz, Feijão, Café, Leite, Frango
+
+💰 Gasto médio mensal: R$ 487,00
+📦 Interações registradas: 23
+
+Quer corrigir alguma informação?
+```
+
+---
+
+## Fala do jeito que você falar
+
+O sistema entende erros, abreviações e gírias:
+
+| Você digita | Ele entende |
+|---|---|
+| `kto ta o cafe` | preço do café |
+| `arroz ta caro demais` | buscar preço do arroz |
+| `add leite` | adicionar leite na lista |
+| `vale ir de carro` | cálculo de transporte |
+| `oferta do extra` | ofertas do Extrabom |
+| `carne` | açougue — todas as carnes |
+| `gelada` | bebidas — cervejas |
+
+
+
+
+
+
+
+## Modos de transporte
+
+| | Transporte | Quando usar |
+|---|---|---|
+| 🚶 | A pé | Mercado até 1km |
+| 🚲 | Bike | Mercado até 3km |
+| 🛵 | Moto | Mercado até 8km |
+| 🚗 | Carro | Qualquer distância |
+| 🚌 | Ônibus | Quando não tem carro |
+
+---
+
+## Categorias que ele entende
+
+| Emoji | Categoria | Exemplos |
+|---|---|---|
+| 🥩 | Açougue | carne, frango, peixe, linguiça |
+| 🛒 | Mercearia | arroz, feijão, óleo, café |
+| 🍺 | Bebidas | cerveja, refri, suco, água |
+| 🥛 | Laticínios | leite, queijo, manteiga |
+| 🍞 | Padaria | pão, bolo, biscoito |
+| 🧴 | Higiene | sabonete, shampoo |
+| 🧹 | Limpeza | detergente, sabão |
+| 🥦 | Hortifruti | frutas, verduras |
+
+---
+
+## Em resumo
+
+> Manda mensagem → ele busca o menor preço → você economiza.
+
+**Simples assim. 💚**
+
+---
+
+*EconomizaFacil.IA — Grande Vitória/ES — 2026*
+

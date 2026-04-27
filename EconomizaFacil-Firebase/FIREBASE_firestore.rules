@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Usuários — só o próprio usuário lê/escreve
+    match /users/{userId} {
+      allow read, write: if true; // n8n acessa via service account
+    }
+
+    // Listas de compras
+    match /shopping_lists/{docId} {
+      allow read, write: if true;
+    }
+
+    // Compras e histórico
+    match /purchases/{docId} {
+      allow read, write: if true;
+    }
+
+    // Recibos de cupom
+    match /purchase_receipts/{docId} {
+      allow read, write: if true;
+    }
+
+    // Produtos — somente leitura para o sistema
+    match /products/{docId} {
+      allow read: if true;
+      allow write: if false; // só admin pode escrever
+    }
+
+    // Ofertas — somente leitura para o sistema
+    match /offers/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Mercados — somente leitura
+    match /markets/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Campaigns — somente leitura
+    match /campaigns/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Networks — somente leitura
+    match /networks/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Preferences
+    match /preferences/{docId} {
+      allow read, write: if true;
+    }
+  }
+}

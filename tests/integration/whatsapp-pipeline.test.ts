@@ -35,7 +35,7 @@ async function runTest() {
     try {
         // Usamos tsx para rodar o arquivo TypeScript diretamente
         execSync('npx tsx src/workers/EvolutionInboxWorker.ts --once --verbose', {
-            env: { ...process.env, EVOLUTION_WORKER_POLL_MS: '100' },
+            env: { ...process.env, EVOLUTION_WORKER_POLL_MS: '100', EVOLUTION_WORKER_USER_ID: testUserId },
             stdio: 'inherit'
         });
     } catch (err) {

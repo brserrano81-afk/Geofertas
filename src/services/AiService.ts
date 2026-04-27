@@ -59,43 +59,21 @@ export interface Interpretation {
     nlpResult: NlpResult;
 }
 
-const SYSTEM_PROMPT = `Voce e o classificador de intencoes do Economiza Facil, um assistente de economia no WhatsApp.
-
-REGRAS ABSOLUTAS:
-1. Se a pessoa pedir preco, oferta, comparacao, lista, mercado, gasto, historico, cupom, tabloide, encarte ou foto de oferta, classifique na intencao util mais proxima.
-2. Se a mensagem parece busca de produto, use SEARCH_PRODUCT.
-3. Entenda erros, abreviacoes e girias como "kto ta o cafe", "oferta do extra", "add leite", "vale ir de carro".
-4. Nunca peca cadastro, CPF, login ou senha.
-5. "onde comprar minha lista" e "qual mercado e mais barato pra minha lista" -> CALCULATE_LIST.
-6. "limpa", "limpar", "esvaziar", "deletar lista" -> CLEAR_LIST.
-7. "me ajuda a planejar o mes", "planejar compras", "o que preciso comprar esse mes" -> VIEW_CONSUMPTION_PATTERN.
-8. "o que voce sabe sobre mim", "o que lembra de mim", "me fala meu historico" -> SHOW_PROFILE.
-9. "tem coisa mais barata que o nescafe", "marca propria do arroz vale a pena", "qual oleo e mais em conta" -> SEARCH_PRODUCT.
-10. Pedido com cupom, nota fiscal, QR code da compra, comprovante da compra -> EXTRACT_RECEIPT.
-11. Palavra isolada que pareca produto -> SEARCH_PRODUCT.
-12. Evite UNKNOWN se houver leitura razoavel como produto, mercado, lista, perfil ou imagem de compra/oferta.
-13. IMPORTANTE: Para SHARE_LIST, CLEAR_LIST e SHOW_LIST, o campo "entities" deve ser vazio a menos que haja um numero de telefone (para SHARE_LIST). Nao coloque comandos como "limpa" ou "enviar" dentro de entities.value.
-
-Responda APENAS com JSON valido:
-{
-  "intent": "SEARCH_PRODUCT|CREATE_LIST|ADD_TO_LIST|REMOVE_FROM_LIST|SHOW_LIST|CLEAR_LIST|SHARE_LIST|CALCULATE_LIST|EXTRACT_RECEIPT|CONFIRM_PURCHASE|CANCEL_PURCHASE|GREETING|HELP|SET_LOCATION|SET_TRANSPORT|SET_CONSUMPTION|SET_FUEL_PRICE|SET_PREFERENCE|SHOW_PROFILE|MARKET_OFFERS|WEEKLY_OFFERS|CATEGORY_SEARCH|PRICE_HISTORY|REGISTER_EXPENSE|EXPENSE_ANALYSIS|VIEW_PURCHASE_HISTORY|VIEW_RECENT_EXPENSES|VIEW_LAST_PURCHASE|VIEW_CONSUMPTION_PATTERN|FIND_NEARBY_MARKETS|CANCEL_OR_EXIT|UNKNOWN",
-  "entities": [{"value": "nome_do_produto", "quantity": 1, "unit": "kg", "targetPhone": "5527999887766"}],
-  "isBatch": false,
-  "confidence": 0.95
-}
-
-Regras de classificacao:
-- Link http/sefaz/nfce -> EXTRACT_RECEIPT
-- "lista com" ou itens com virgula -> CREATE_LIST
-- Saudacao simples, girias ou pontuacao isolada -> GREETING
-- Busca de produto -> SEARCH_PRODUCT
-- Multiplos produtos -> isBatch: true
-- "mercados perto" / "mercado proximo" -> FIND_NEARBY_MARKETS
-- "ofertas do [mercado]" -> MARKET_OFFERS
-- "hortifruti" / "carnes" / categoria -> CATEGORY_SEARCH
-- Gasto financeiro: extraia valor em "amount" e mercado em "value"
-- Periodo: extraia dias em "days"
-- Compartilhar: extraia telefone em "targetPhone" (apenas numeros com DDD)`;
+const SYSTEM_PROMPT = `Classificador NLP do Economiza Facil.
+REGRAS:
+1. Responda APENAS JSON: {"intent": "...", "entities": [{"value": "...", "quantity": 1, "unit": "...", "targetPhone": "...", "amount": 0, "days": 0}], "isBatch": false, "confidence": 0.95}
+2. INTENTS: SEARCH_PRODUCT, CREATE_LIST, ADD_TO_LIST, REMOVE_FROM_LIST, SHOW_LIST, CLEAR_LIST, SHARE_LIST, CALCULATE_LIST, EXTRACT_RECEIPT, CONFIRM_PURCHASE, CANCEL_PURCHASE, GREETING, HELP, SET_LOCATION, SET_TRANSPORT, SET_CONSUMPTION, SET_FUEL_PRICE, SET_PREFERENCE, SHOW_PROFILE, MARKET_OFFERS, WEEKLY_OFFERS, CATEGORY_SEARCH, PRICE_HISTORY, SAZONALIDADE, REGISTER_EXPENSE, EXPENSE_ANALYSIS, VIEW_PURCHASE_HISTORY, VIEW_RECENT_EXPENSES, VIEW_LAST_PURCHASE, VIEW_CONSUMPTION_PATTERN, FIND_NEARBY_MARKETS, CANCEL_OR_EXIT, UNKNOWN
+3. EXEMPLOS:
+- "quando o frango fica mais barato" -> SAZONALIDADE
+- "melhor epoca pra comprar arroz" -> SAZONALIDADE
+- "qual mercado e mais barato?" -> FIND_NEARBY_MARKETS
+- "qual mercado ta mais barato perto de mim" -> FIND_NEARBY_MARKETS
+- "onde comprar minha lista" -> CALCULATE_LIST
+- "quanto fica minha lista" -> CALCULATE_LIST
+- "compartilha minha lista com 27999887766" -> SHARE_LIST (targetPhone: "27999887766")
+- "vale ir de carro no atacadao?" -> SET_TRANSPORT (entities.value: "atacadao")
+4. Entenda girias: "kto ta", "add", "tira".
+5. SHARE/CLEAR/SHOW_LIST: entities deve ser vazio (exceto phone em SHARE).`;
 
 const NLP_TO_INTENT: Record<string, Intent> = {
     'SEARCH_PRODUCT': 'consultar_preco_produto',
@@ -121,6 +99,7 @@ const NLP_TO_INTENT: Record<string, Intent> = {
     'WEEKLY_OFFERS': 'ofertas_da_semana',
     'CATEGORY_SEARCH': 'buscar_categoria',
     'PRICE_HISTORY': 'consultar_historico_global',
+    'SAZONALIDADE': 'consultar_historico_global',
     'REGISTER_EXPENSE': 'registrar_gasto',
     'EXPENSE_ANALYSIS': 'analise_gastos_pessoal',
     'VIEW_PURCHASE_HISTORY': 'ver_historico_compras',

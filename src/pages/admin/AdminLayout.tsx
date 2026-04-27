@@ -29,34 +29,49 @@ const SidebarItem = ({ to, icon: Icon, label }: SidebarItemProps) => (
             alignItems: 'center',
             gap: 12,
             padding: '12px 16px',
-            borderRadius: 8,
-            color: isActive ? '#fff' : '#9CA3AF',
+            borderRadius: 10,
+            color: isActive ? '#fff' : '#94A3B8',
             background: isActive ? adminColors.primary : 'transparent',
             textDecoration: 'none',
             fontSize: 14,
-            fontWeight: 500,
-            transition: 'all 0.2s ease',
+            fontWeight: 600,
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            position: 'relative'
         })}
     >
-        <Icon size={20} />
-        <span>{label}</span>
+        {({ isActive }) => (
+            <>
+                {isActive && (
+                    <div style={{
+                        position: 'absolute',
+                        left: -16,
+                        width: 4,
+                        height: 20,
+                        background: '#fff',
+                        borderRadius: '0 4px 4px 0'
+                    }} />
+                )}
+                <Icon size={20} strokeWidth={isActive ? 2.5 : 2} />
+                <span>{label}</span>
+            </>
+        )}
     </NavLink>
 );
 
 const SidebarGroup = ({ title, children }: { title: string; children: React.ReactNode }) => (
-    <div style={{ marginBottom: 24 }}>
+    <div style={{ marginBottom: 32 }}>
         <h3 style={{ 
             fontSize: 11, 
-            fontWeight: 700, 
-            color: '#4B5563', 
+            fontWeight: 800, 
+            color: '#475569', 
             textTransform: 'uppercase', 
-            letterSpacing: '0.05em',
+            letterSpacing: '0.1em',
             padding: '0 16px',
-            marginBottom: 12
+            marginBottom: 16
         }}>
             {title}
         </h3>
-        <div style={{ display: 'grid', gap: 4 }}>
+        <div style={{ display: 'grid', gap: 6 }}>
             {children}
         </div>
     </div>
@@ -66,7 +81,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     const navigate = useNavigate();
 
     const handleLogout = () => {
-        // Simples logout para o MVP
         sessionStorage.removeItem('admin_auth');
         navigate('/admin/login');
     };
@@ -75,47 +89,51 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <div style={{ 
             display: 'flex', 
             minHeight: '100vh', 
-            background: adminColors.background 
+            maxHeight: '100vh',
+            background: adminColors.background,
+            fontFamily: '"Inter", system-ui, sans-serif',
+            overflow: 'hidden'
         }}>
             {/* ── Sidebar ─────────────────────────────────────────── */}
             <aside style={{
-                width: 260,
+                width: 280,
                 background: adminColors.sidebarBg,
                 color: '#fff',
                 display: 'flex',
                 flexDirection: 'column',
-                padding: '24px 16px',
-                position: 'fixed',
+                padding: '40px 16px',
                 height: '100vh',
-                boxSizing: 'border-box'
+                boxSizing: 'border-box',
+                zIndex: 50,
+                borderRight: '1px solid #1E293B'
             }}>
                 <div style={{ 
-                    marginBottom: 40, 
+                    marginBottom: 56, 
                     padding: '0 16px',
-                    fontSize: 18,
-                    fontWeight: 800,
-                    letterSpacing: '-0.02em',
-                    color: adminColors.primary,
+                    fontSize: 22,
+                    fontWeight: 900,
+                    letterSpacing: '-0.04em',
+                    color: '#fff',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 10
+                    gap: 12
                 }}>
                     <div style={{ 
-                        width: 32, 
-                        height: 32, 
+                        width: 40, 
+                        height: 40, 
                         background: adminColors.primary, 
-                        borderRadius: 8,
+                        borderRadius: 12,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        color: '#fff'
+                        boxShadow: `0 8px 20px ${adminColors.primary}4D`
                     }}>
-                        <LayoutDashboard size={20} />
+                        <LayoutDashboard size={22} color="#fff" strokeWidth={2.5} />
                     </div>
-                    Economizafacil.ia.br
+                    <span>Optsolv</span>
                 </div>
 
-                <div style={{ flex: 1, overflowY: 'auto' }}>
+                <div style={{ flex: 1, overflowY: 'auto', paddingRight: 4 }}>
                     <SidebarGroup title="Principal">
                         <SidebarItem to="/admin/home" icon={LayoutDashboard} label="Dashboard" />
                     </SidebarGroup>
@@ -138,7 +156,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 <div style={{ 
                     marginTop: 'auto', 
                     paddingTop: 24, 
-                    borderTop: '1px solid #1F2937' 
+                    borderTop: '1px solid #1E293B' 
                 }}>
                     <button 
                         onClick={handleLogout}
@@ -150,14 +168,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                             width: '100%',
                             background: 'transparent',
                             border: 'none',
-                            color: '#EF4444',
+                            color: '#64748B',
                             cursor: 'pointer',
                             fontSize: 14,
-                            fontWeight: 500
+                            fontWeight: 600,
+                            transition: 'color 0.2s ease'
                         }}
+                        onMouseEnter={(e) => e.currentTarget.style.color = '#EF4444'}
+                        onMouseLeave={(e) => e.currentTarget.style.color = '#64748B'}
                     >
                         <LogOut size={20} />
-                        Sair
+                        Sair da Conta
                     </button>
                 </div>
             </aside>
@@ -165,71 +186,90 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             {/* ── Main Content ────────────────────────────────────── */}
             <main style={{ 
                 flex: 1, 
-                marginLeft: 260,
                 display: 'flex',
-                flexDirection: 'column'
+                flexDirection: 'column',
+                height: '100vh',
+                overflowY: 'auto'
             }}>
                 {/* Header */}
                 <header style={{
-                    height: 64,
+                    height: 80,
+                    minHeight: 80,
                     background: '#fff',
                     borderBottom: `1px solid ${adminColors.border}`,
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '0 32px',
+                    justifyContent: 'flex-end',
+                    padding: '0 60px',
                     position: 'sticky',
                     top: 0,
-                    zIndex: 10
+                    zIndex: 40
                 }}>
-                    <div style={{ 
-                        fontSize: 14, 
-                        color: adminColors.textSecondary,
-                        fontWeight: 500 
-                    }}>
-                        Admin / <span style={{ color: adminColors.text }}>Economiza Fácil</span>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-                        <button style={{ 
-                            background: 'transparent', 
-                            border: 'none', 
-                            color: adminColors.textSecondary, 
-                            cursor: 'pointer' 
-                        }}>
-                            <Bell size={20} />
-                        </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 40 }}>
+                        <div style={{ position: 'relative' }}>
+                            <button style={{ 
+                                background: 'transparent', 
+                                border: 'none', 
+                                color: adminColors.textSecondary, 
+                                cursor: 'pointer',
+                                padding: 8,
+                                borderRadius: '50%',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                transition: 'background 0.2s'
+                            }}>
+                                <Bell size={22} />
+                                <div style={{
+                                    position: 'absolute',
+                                    top: 8,
+                                    right: 8,
+                                    width: 8,
+                                    height: 8,
+                                    background: adminColors.error,
+                                    borderRadius: '50%',
+                                    border: '2px solid #fff'
+                                }} />
+                            </button>
+                        </div>
                         
                         <div style={{ 
                             display: 'flex', 
                             alignItems: 'center', 
-                            gap: 12,
-                            paddingLeft: 24,
-                            borderLeft: `1px solid ${adminColors.border}`
-                        }}>
+                            gap: 16,
+                            cursor: 'pointer',
+                            padding: '8px 12px',
+                            borderRadius: 12,
+                            transition: 'background 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = '#F8FAFC'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                        >
                             <div style={{ textAlign: 'right' }}>
-                                <div style={{ fontSize: 13, fontWeight: 700 }}>Master Admin</div>
-                                <div style={{ fontSize: 11, color: adminColors.textSecondary }}>Administrador</div>
+                                <div style={{ fontSize: 13, fontWeight: 800, color: adminColors.text }}>Bruno Rios</div>
+                                <div style={{ fontSize: 11, color: adminColors.textSecondary, fontWeight: 700 }}>Administrador</div>
                             </div>
                             <div style={{ 
-                                width: 36, 
-                                height: 36, 
-                                borderRadius: 10, 
-                                background: '#F3F4F6',
+                                width: 44, 
+                                height: 44, 
+                                borderRadius: 14, 
+                                background: adminColors.sidebarBg,
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
-                                color: adminColors.textSecondary
+                                color: '#fff',
+                                fontWeight: 900,
+                                fontSize: 15,
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
                             }}>
-                                <User size={20} />
+                                BR
                             </div>
-                            <ChevronDown size={14} color={adminColors.textSecondary} />
                         </div>
                     </div>
                 </header>
 
                 {/* Page Content */}
-                <div style={{ padding: 40, maxWidth: 1400, margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
+                <div style={{ padding: '60px', maxWidth: 1600, width: '100%', boxSizing: 'border-box' }}>
                     {children}
                 </div>
             </main>

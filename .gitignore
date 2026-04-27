@@ -23,6 +23,7 @@ dist-ssr
 # Credenciais e arquivos sensíveis
 service-account.json
 service-account*.json
+serviceAccountKey.json
 .claude/settings.local.json
 
 # Runtime / sessions
