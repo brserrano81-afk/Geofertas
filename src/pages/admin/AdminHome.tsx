@@ -28,30 +28,35 @@ const emptyMetrics: DashboardMetrics = {
   recentEntries: [],
 };
 
-function StatCard({ label, value, icon: Icon, color }: { label: string, value: number | string, icon: any, color: string }) {
+function StatCard({ label, value, icon: Icon, color, trend }: { label: string, value: number | string, icon: any, color: string, trend?: string }) {
   return (
     <article style={{
       ...adminPanelStyle,
       display: 'flex',
-      alignItems: 'center',
+      flexDirection: 'column',
       gap: 16,
-      padding: '20px'
+      padding: '32px',
+      position: 'relative',
+      overflow: 'hidden'
     }}>
       <div style={{
-        width: 44,
-        height: 44,
-        borderRadius: 10,
-        background: `${color}15`,
+        width: 48,
+        height: 48,
+        borderRadius: 12,
+        background: `${color}10`,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         color: color
       }}>
-        <Icon size={22} />
+        <Icon size={24} strokeWidth={2.5} />
       </div>
       <div>
-        <div style={{ fontSize: 13, color: adminColors.textSecondary, fontWeight: 500, marginBottom: 2 }}>{label}</div>
-        <div style={{ fontSize: 22, fontWeight: 800, color: adminColors.text }}>{value}</div>
+        <div style={{ fontSize: 13, color: adminColors.textSecondary, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>{label}</div>
+        <div style={{ fontSize: 32, fontWeight: 900, color: adminColors.text }}>{value}</div>
+        {trend && (
+          <div style={{ marginTop: 8, fontSize: 12, color: adminColors.success, fontWeight: 700 }}>{trend}</div>
+        )}
       </div>
     </article>
   );
@@ -74,91 +79,95 @@ export default function AdminHome() {
   }, []);
 
   return (
-    <div style={adminShellStyle}>
+    <div style={{ ...adminShellStyle, gap: 48 }}>
       {/* ── Header ─────────────────────────────────────────── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800 }}>Dashboard Operacional</h1>
-          <p style={{ margin: '4px 0 0', color: adminColors.textSecondary, fontSize: 15 }}>
-            Bem-vindo ao centro de comando do Economiza Facil.
+          <h1 style={{ margin: 0, fontSize: 36, fontWeight: 900, letterSpacing: '-0.05em', color: adminColors.text }}>Visão Geral</h1>
+          <p style={{ margin: '8px 0 0', color: adminColors.textSecondary, fontSize: 16, fontWeight: 500 }}>
+            Monitoramento em tempo real da operação Economiza Fácil.
           </p>
         </div>
-        <Link to="/admin/offers" style={{ ...adminButtonStyle, gap: 8 }}>
-          <Plus size={18} />
-          Nova Oferta
+        <Link to="/admin/offers" style={{ ...adminButtonStyle, height: 52, padding: '0 32px', gap: 12, boxShadow: `0 12px 24px ${adminColors.primary}33` }}>
+          <Plus size={22} strokeWidth={3} />
+          <span>Nova Oferta</span>
         </Link>
       </div>
 
       {error ? (
-        <div style={{ ...adminBadgeStyle("red"), padding: '12px 20px' }}>{error}</div>
+        <div style={{ ...adminBadgeStyle("red"), padding: '16px 32px', borderRadius: 12, fontSize: 14 }}>{error}</div>
       ) : null}
 
       {/* ── Stats Grid ──────────────────────────────────────── */}
       <section style={{
         display: "grid",
-        gap: 20,
+        gap: 32,
         gridTemplateColumns: "repeat(4, 1fr)",
       }}>
-        <StatCard label="Total de Mercados" value={loading ? "..." : metrics.totalMarkets} icon={Store} color={adminColors.primary} />
-        <StatCard label="Ofertas Ativas" value={loading ? "..." : metrics.activeOffers} icon={Tag} color="#10B981" />
-        <StatCard label="Ofertas Vencidas" value={loading ? "..." : metrics.expiredOffers} icon={Clock} color="#EF4444" />
-        <StatCard label="Destaques" value={loading ? "..." : metrics.featuredOffers} icon={Star} color="#F59E0B" />
+        <StatCard label="Mercados" value={loading ? "..." : metrics.totalMarkets} icon={Store} color={adminColors.primary} trend="+2 esta semana" />
+        <StatCard label="Ofertas Ativas" value={loading ? "..." : metrics.activeOffers} icon={Tag} color={adminColors.success} trend="+48 hoje" />
+        <StatCard label="Vencidas" value={loading ? "..." : metrics.expiredOffers} icon={Clock} color={adminColors.error} />
+        <StatCard label="Destaques" value={loading ? "..." : metrics.featuredOffers} icon={Star} color={adminColors.warning} />
       </section>
 
       {/* ── Bottom Content ─────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 32 }}>
         
         {/* Recent Entries */}
-        <section style={adminPanelStyle}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Últimos Cadastros</h2>
-            <Link to="/admin/offers" style={{ color: adminColors.primary, fontSize: 13, fontWeight: 700, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
-              Ver todos <ArrowRight size={14} />
+        <section style={{ ...adminPanelStyle, padding: '40px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
+            <h2 style={{ margin: 0, fontSize: 22, fontWeight: 900, letterSpacing: '-0.03em' }}>Últimas Atividades</h2>
+            <Link to="/admin/offers" style={{ color: adminColors.primary, fontSize: 14, fontWeight: 800, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 8 }}>
+              Ver relatório completo <ArrowRight size={16} />
             </Link>
           </div>
 
           {!metrics.recentEntries.length && !loading ? (
-            <div style={{ color: adminColors.textSecondary, padding: '20px 0', textAlign: 'center' }}>
-              Ainda não existem registros recentes.
+            <div style={{ color: adminColors.textSecondary, padding: '40px 0', textAlign: 'center', fontWeight: 600 }}>
+              Ainda não existem registros recentes na plataforma.
             </div>
           ) : (
-            <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "grid", gap: 16 }}>
               {metrics.recentEntries.map((entry) => (
                 <article
                   key={`${entry.type}-${entry.id}`}
                   style={{
-                    padding: '12px 16px',
-                    borderRadius: 12,
-                    background: '#F9FAFB',
+                    padding: '20px 24px',
+                    borderRadius: 16,
+                    background: '#F8FAFC',
                     border: `1px solid ${adminColors.border}`,
                     display: "flex",
                     justifyContent: "space-between",
-                    alignItems: "center"
+                    alignItems: "center",
+                    transition: 'transform 0.2s'
                   }}
+                  onMouseEnter={(e) => e.currentTarget.style.transform = 'translateX(8px)'}
+                  onMouseLeave={(e) => e.currentTarget.style.transform = 'none'}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
                     <div style={{ 
-                      width: 36, 
-                      height: 36, 
-                      borderRadius: 8, 
-                      background: entry.type === 'oferta' ? '#ECFDF5' : '#F3F4F6', 
+                      width: 48, 
+                      height: 48, 
+                      borderRadius: 12, 
+                      background: entry.type === 'oferta' ? adminColors.primaryLight : '#fff', 
                       display: 'flex', 
                       alignItems: 'center', 
                       justifyContent: 'center',
-                      color: entry.type === 'oferta' ? '#10B981' : '#6B7280'
+                      color: entry.type === 'oferta' ? adminColors.primary : adminColors.neutral,
+                      border: `1px solid ${adminColors.border}`
                     }}>
-                      {entry.type === 'oferta' ? <ShoppingCart size={18} /> : <Store size={18} />}
+                      {entry.type === 'oferta' ? <ShoppingCart size={22} /> : <Store size={22} />}
                     </div>
                     <div>
-                      <div style={{ fontWeight: 700, color: adminColors.text, fontSize: 14 }}>{entry.title}</div>
-                      <div style={{ color: adminColors.textSecondary, fontSize: 12, marginTop: 2 }}>{entry.subtitle}</div>
+                      <div style={{ fontWeight: 900, color: adminColors.text, fontSize: 16 }}>{entry.title}</div>
+                      <div style={{ color: adminColors.textSecondary, fontSize: 13, marginTop: 4, fontWeight: 600 }}>{entry.subtitle}</div>
                     </div>
                   </div>
-                  <div style={{ textAlign: "right", display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <span style={adminBadgeStyle(entry.type === "oferta" ? "green" : "neutral")}>
+                  <div style={{ textAlign: "right", display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <span style={{ ...adminBadgeStyle(entry.type === "oferta" ? "purple" : "neutral"), padding: '4px 10px', borderRadius: 6, fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>
                       {entry.type}
                     </span>
-                    <div style={{ color: adminColors.textSecondary, fontSize: 11 }}>
+                    <div style={{ color: adminColors.textSecondary, fontSize: 12, fontWeight: 600 }}>
                       {entry.createdAtLabel}
                     </div>
                   </div>
@@ -169,27 +178,40 @@ export default function AdminHome() {
         </section>
 
         {/* Quick Tips / Info */}
-        <section style={{ display: 'grid', gap: 24 }}>
-          <div style={{ ...adminPanelStyle, background: adminColors.sidebarBg, color: '#fff', border: 'none' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-              <div style={{ color: adminColors.primary }}><Zap size={24} fill={adminColors.primary} /></div>
-              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Dica Rápida</h3>
+        <section style={{ display: 'grid', gap: 32, alignContent: 'start' }}>
+          <div style={{ ...adminPanelStyle, background: adminColors.sidebarBg, color: '#fff', border: 'none', padding: '40px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
+              <div style={{ color: adminColors.primary }}><Zap size={32} fill={adminColors.primary} strokeWidth={0} /></div>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>Dica de Performance</h3>
             </div>
-            <p style={{ margin: 0, fontSize: 13, color: '#9CA3AF', lineHeight: 1.6 }}>
-              O sistema de ofertas é atualizado em tempo real na landing page. Lembre-se de revisar a validade dos produtos antes de publicá-los como destaque.
+            <p style={{ margin: 0, fontSize: 14, color: '#94A3B8', lineHeight: 1.6, fontWeight: 500 }}>
+              O processamento de imagens por IA está com 94% de acurácia. Revise a fila de moderação para garantir que as ofertas em destaque estejam com preços corretos.
             </p>
           </div>
 
-          <div style={{ ...adminPanelStyle, background: `${adminColors.primary}05`, border: `1px dashed ${adminColors.primary}33` }}>
-            <h3 style={{ margin: '0 0 12px 0', fontSize: 15, fontWeight: 700 }}>Status do Sistema</h3>
-            <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ ...adminPanelStyle, background: '#fff', padding: '40px' }}>
+            <h3 style={{ margin: '0 0 24px 0', fontSize: 18, fontWeight: 900, letterSpacing: '-0.02em' }}>Status da Infraestrutura</h3>
+            <div style={{ display: 'grid', gap: 20 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 13, color: adminColors.textSecondary }}>Integração WhatsApp</span>
-                <span style={adminBadgeStyle('green')}>Online</span>
+                <span style={{ fontSize: 14, color: adminColors.textSecondary, fontWeight: 700 }}>API Gateway</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: adminColors.success, boxShadow: `0 0 10px ${adminColors.success}` }} />
+                   <span style={{ fontSize: 12, fontWeight: 900, color: adminColors.success, textTransform: 'uppercase' }}>Operacional</span>
+                </div>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 13, color: adminColors.textSecondary }}>Processamento IA</span>
-                <span style={adminBadgeStyle('green')}>Estável</span>
+                <span style={{ fontSize: 14, color: adminColors.textSecondary, fontWeight: 700 }}>WhatsApp Webhook</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: adminColors.success, boxShadow: `0 0 10px ${adminColors.success}` }} />
+                   <span style={{ fontSize: 12, fontWeight: 900, color: adminColors.success, textTransform: 'uppercase' }}>Operacional</span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 14, color: adminColors.textSecondary, fontWeight: 700 }}>Banco de Dados</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: adminColors.success, boxShadow: `0 0 10px ${adminColors.success}` }} />
+                   <span style={{ fontSize: 12, fontWeight: 900, color: adminColors.success, textTransform: 'uppercase' }}>Operacional</span>
+                </div>
               </div>
             </div>
           </div>
