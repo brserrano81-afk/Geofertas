@@ -9,7 +9,7 @@ import { adminDb as serverDb } from '../lib/firebase-admin';
 const db = isServer ? (serverDb as any) : clientDb;
 import { calculateTransportCost, type TransportMode } from '../app/utils/geoUtils';
 import { geoDecisionEngine } from './GeoDecisionEngine';
-import { normalizeCatalogText, productCatalogService } from './ProductCatalogService';
+import { normalizeCatalogText, productCatalogService, BRAND_DICTIONARY } from './ProductCatalogService';
 import { offerHygieneService } from './OfferHygieneService';
 import { categoryMetadataService } from './CategoryMetadataService';
 import { seasonalityService } from './SeasonalityService';
@@ -157,27 +157,13 @@ class OfferEngine {
     ): Promise<string> {
         console.log(`[OfferEngine] lookupSingle: ${productName} (geo: ${!!userLocation})`);
         try {
-            const searchContext = await productCatalogService.resolveSearch(productName);
-            const catalogMatch = await productCatalogService.matchProductName(productName);
-            const mentionedBrand = await productCatalogService.findMentionedBrand(productName);
-            const normalizedInput = normalizeCatalogText(productName);
-            const exactCatalogTerms = catalogMatch.product
-                ? new Set([
-                    normalizeCatalogText(catalogMatch.product.name),
-                    ...(catalogMatch.product.synonyms || []).map((synonym) => normalizeCatalogText(synonym)),
-                ].filter(Boolean))
-                : new Set<string>();
-            const matchedCatalogBase = catalogMatch.product
-                ? normalizeCatalogText(catalogMatch.product.name)
-                : undefined;
-            const isExactCatalogTerm = exactCatalogTerms.has(normalizedInput);
-            const hasSpecificDescriptor = Boolean(mentionedBrand) || Boolean(
-                normalizedInput &&
-                matchedCatalogBase &&
-                !isExactCatalogTerm &&
-                normalizedInput.includes(matchedCatalogBase),
-            );
-            const shouldExpandCatalogSearch = !hasSpecificDescriptor;
+            const searchModeData = productCatalogService.detectSearchMode(productName);
+            const expectedBrandNorm = searchModeData.brand ? normalizeCatalogText(searchModeData.brand) : null;
+
+            // To ensure we get the category hint for "café melitta" using just "café"
+            const queryToResolve = searchModeData.productQuery || productName;
+            const searchContext = await productCatalogService.resolveSearch(queryToResolve);
+
             let snap;
             if (isServer) {
                 let queryRef: any = (db as any).collection('offers');
@@ -195,7 +181,7 @@ class OfferEngine {
 
             const matches: OfferResult[] = [];
             const searchTerms = new Set([
-                normalize(productName),
+                normalize(queryToResolve),
                 ...searchContext.searchTerms,
             ]);
 
@@ -203,27 +189,62 @@ class OfferEngine {
                 const data = doc.data();
                 if (!offerHygieneService.isOfferUsableForSearch(data)) return;
                 const pName = data.productName || data.name || '';
-                const searchableOfferText = [pName, data.brand || ''].join(' ');
                 const mName = data.marketName || data.networkName || '';
                 const price = data.price || data.promoPrice || 0;
                 if (isBadOfferName(pName)) return;
 
-                const isCatalogMatch = shouldExpandCatalogSearch &&
-                    Array.from(searchTerms).some((term) => fuzzyMatch(term, searchableOfferText));
+                const offerBrandNorm = data.brand ? normalizeCatalogText(data.brand) : null;
+                const pNameNorm = normalizeCatalogText(pName);
 
-                if (fuzzyMatch(productName, searchableOfferText) || isCatalogMatch) {
-                    // Checar validade
-                    if (data.expiresAt) {
-                        const expires = new Date(data.expiresAt);
-                        if (expires < new Date()) return; // Expirada
+                // STRICT BRAND FILTERING for brand_specific and brand_only
+                if (searchModeData.mode === 'brand_specific' || searchModeData.mode === 'brand_only') {
+                    if (!expectedBrandNorm) return;
+
+                    let hasTargetBrand = false;
+
+                    if (offerBrandNorm) {
+                        if (offerBrandNorm === expectedBrandNorm) {
+                            hasTargetBrand = true;
+                        } else {
+                            // If explicit brand is different, reject
+                            return;
+                        }
+                    } else {
+                        // Brand is empty/null. Check if productName contains the target brand
+                        if (pNameNorm.includes(expectedBrandNorm)) {
+                            // Check for conflicting known brands
+                            let hasConflict = false;
+                            for (const key of Object.keys(BRAND_DICTIONARY)) {
+                                const knownBrandNorm = normalizeCatalogText(key);
+                                if (knownBrandNorm !== expectedBrandNorm && pNameNorm.includes(knownBrandNorm)) {
+                                    hasConflict = true;
+                                    break;
+                                }
+                            }
+                            if (!hasConflict) {
+                                hasTargetBrand = true;
+                            }
+                        }
                     }
 
-                    // Filtrar ofertas sem dados essenciais
-                    if (!mName || price <= 0) {
-                        console.log(`[OfferEngine] SKIP bad offer: ${doc.id} (market: "${mName}", price: ${price})`);
-                        return;
-                    }
+                    if (!hasTargetBrand) return; // Reject
+                }
 
+                let isMatch = false;
+
+                if (searchModeData.mode === 'brand_only') {
+                    // For brand_only, the brand filter above is enough
+                    isMatch = true;
+                } else {
+                    const searchableOfferText = [pName, data.brand || ''].join(' ');
+                    const isCatalogMatch = Array.from(searchTerms).some((term) => fuzzyMatch(term, searchableOfferText));
+
+                    if (fuzzyMatch(queryToResolve, searchableOfferText) || isCatalogMatch) {
+                        isMatch = true;
+                    }
+                }
+
+                if (isMatch) {
                     console.log(`[OfferEngine] MATCH: ${pName} @ ${mName} = R$${price} (doc: ${doc.id})`);
 
                     matches.push({
@@ -238,18 +259,10 @@ class OfferEngine {
                 }
             });
 
-            const localBrandVariety = new Set(
-                matches.map((match) => normalizeCatalogText(inferOfferLabel(productName, matchedCatalogBase, match))),
-            ).size;
-            if (matches.length < 3 || (!hasSpecificDescriptor && localBrandVariety < 2)) {
-                if (shouldUseWebFallback()) {
-                    console.log(`[OfferEngine] Poucos resultados locais (${matches.length}). Web fallback liberado por configuracao.`);
-                } else {
-                    console.log(`[OfferEngine] Poucos resultados locais (${matches.length}). Web fallback desativado em modo WhatsApp-first.`);
-                }
-            }
-
             if (matches.length === 0) {
+                if (searchModeData.mode === 'brand_only') {
+                    return `Não encontrei ofertas vigentes para a marca **${searchModeData.brand}** hoje.`;
+                }
                 return `Não encontrei ofertas vigentes para **${productName}** hoje.`;
             }
 
@@ -270,188 +283,89 @@ class OfferEngine {
             }
             // ─────────────────────────────────────────────────────────────────
 
-            // Identificar se é uma busca "genérica" analisando as marcas ou nomes
-            const genericLabels = matches
-                .map((match) => inferOfferLabel(productName, matchedCatalogBase, match))
-                .filter(Boolean);
-            const distinctGenericLabels = new Set(genericLabels.map((label) => normalizeCatalogText(label)));
-            const shouldShowBrandOptions = shouldExpandCatalogSearch && distinctGenericLabels.size > 1;
-
-            if (shouldShowBrandOptions) {
-                const groupedByLabel = new Map<string, { label: string; offers: OfferResult[] }>();
-
-                for (const match of matches) {
-                    const label = inferOfferLabel(productName, matchedCatalogBase, match);
-                    const groupKey = normalizeCatalogText(label);
-                    if (!groupedByLabel.has(groupKey)) {
-                        groupedByLabel.set(groupKey, { label, offers: [] });
-                    }
-                    groupedByLabel.get(groupKey)!.offers.push(match);
-                }
-
-                const brandLines: string[] = [];
-                const bestPerBrand: Array<{ label: string; offer: OfferResult }> = [];
-
-                for (const [, groupData] of groupedByLabel.entries()) {
-                    groupData.offers.sort((a, b) => a.price - b.price);
-                    bestPerBrand.push({ label: groupData.label, offer: groupData.offers[0] });
-                }
-
-                bestPerBrand.sort((a, b) => a.offer.price - b.offer.price);
-
-                const topBrands = bestPerBrand.slice(0, 6);
-                for (const [index, item] of topBrands.entries()) {
-                    const best = item.offer;
-                    if (userLocation) {
-                        await this.enrichWithDistance([best], userLocation, transportMode || 'car', consumption || 10);
-                    }
-
-                    const icon = index === 0 ? '🟢' : index === 1 ? '🟡' : '🔴';
-                    brandLines.push(`${icon} ${formatCurrency(best.price)} - ${item.label} (${best.marketName})`);
-                }
-
-                const cheapest = topBrands[0];
-                const priciest = topBrands[topBrands.length - 1];
-                const savings = cheapest && priciest
-                    ? Math.max(0, priciest.offer.price - cheapest.offer.price)
-                    : 0;
-
-                const annualSavings = savings * 12;
-                const annualFormatted = annualSavings.toFixed(2).replace('.', ',');
-
-                let result = `☕ ${productName.toUpperCase()} — comparação de marcas\n\n${brandLines.join('\n')}\n\n💡 Trocando para **${cheapest?.label || 'a opção mais barata'}**:\n📉 Economia de **R$ ${savings.toFixed(2).replace('.', ',')}** por unidade\n💰 **R$ ${annualFormatted} de economia por ano!** 🚀\n\nQuer que eu troque na sua lista? 🛒`;
-
-                const seasonalityTip = seasonalityService.formatTrendMessage(productName);
-                if (seasonalityTip) {
-                    result = `${result}\n\n${seasonalityTip}`;
-                }
-
-                return result;
-            }
-
-            const distinctBrands = new Set<string>();
-            matches.forEach(m => {
-                if (m.brandName) {
-                    distinctBrands.add(m.brandName.toLowerCase());
-                } else {
-                    // Tenta adivinhar a marca via substring após o termo
-                    const termNormalized = normalize(productName);
-                    const nameNormalized = normalize(m.productName);
-                    if (nameNormalized !== termNormalized) {
-                        const words = nameNormalized.replace(termNormalized, '').trim().split(' ');
-                        if (words.length > 0 && words[0].length > 2) {
-                            distinctBrands.add(words[0]);
-                        }
-                    }
-                }
-            });
-
-            const isGenericSearch = false && distinctBrands.size > 1;
-
-            if (isGenericSearch) {
-                // AGRUPAMENTO INTELIGENTE POR MARCA / VARIAÇÃO
-                const grouped = new Map<string, OfferResult[]>();
+            // BRAND ONLY MODE
+            if (searchModeData.mode === 'brand_only') {
+                const deduped = new Map<string, OfferResult>();
                 for (const m of matches) {
-                    let groupKey = m.brandName || m.productName.split(' ').slice(0, 3).join(' ');
-                    if (!grouped.has(groupKey)) grouped.set(groupKey, []);
-                    grouped.get(groupKey)!.push(m);
-                }
-
-                const brandLines: string[] = [];
-
-                // Para cada marca, mostrar o mercado mais barato
-                const sortedGroups = Array.from(grouped.entries());
-
-                const bestPerBrand: OfferResult[] = [];
-                for (const [, groupMatches] of sortedGroups) {
-                    groupMatches.sort((a, b) => a.price - b.price);
-                    bestPerBrand.push(groupMatches[0]);
-                }
-
-                // Sort all top brands by price
-                bestPerBrand.sort((a, b) => a.price - b.price);
-
-                for (const best of bestPerBrand) {
-                    if (userLocation) {
-                        await this.enrichWithDistance([best], userLocation, transportMode || 'car', consumption || 10);
-                    }
-
-                    const priceStr = `R$ ${best.price.toFixed(2).replace('.', ',')}`;
-                    const label = best.brandName ? capitalize(best.brandName) : capitalize(best.productName);
-                    
-                    if (best.realCost && best.distance) {
-                         brandLines.push(`🏷️ **${label}**: ${priceStr} no ${best.marketName} (Total Real: R$ ${best.realCost.toFixed(2).replace('.', ',')})`);
-                    } else {
-                         brandLines.push(`🏷️ **${label}**: ${priceStr} no ${best.marketName}`);
+                    const key = `${normalizeCatalogText(m.productName)}-${m.marketName}`.toLowerCase();
+                    if (!deduped.has(key) || m.price < deduped.get(key)!.price) {
+                        deduped.set(key, m);
                     }
                 }
+                const uniqueMatches = Array.from(deduped.values()).sort((a, b) => a.price - b.price);
 
-                return `🔍 **Múltiplas marcas encontradas para ${productName.toUpperCase()}!**\nAqui estão as opções ordenadas pelo menor preço:\n\n${brandLines.join('\n')}`;
+                const distinctProducts = new Set(uniqueMatches.map(m => m.productName.split(' ')[0].toLowerCase()));
+                if (distinctProducts.size > 2 && uniqueMatches.length > 5) {
+                    return `Encontrei ${searchModeData.brand}. Você quer ver preço de qual produto?\nExemplo: café ${searchModeData.brand}`;
+                }
+
+                const topList = uniqueMatches.slice(0, 5);
+                const lines = topList.map(m => `• ${titleCase(m.productName)} — ${formatCurrency(m.price)} — ${m.marketName}`);
+                return `${searchModeData.brand?.toUpperCase()}\n\nEncontrei estas ofertas:\n${lines.join('\n')}`;
             }
 
-            // FLUXO ORIGINAL (Item Específico)
-            // Deduplicar por mercado (manter o mais barato de cada)
+            // BRAND SPECIFIC MODE
+            if (searchModeData.mode === 'brand_specific') {
+                const deduped = new Map<string, OfferResult>();
+                for (const m of matches) {
+                    const key = `${normalizeCatalogText(m.productName)}-${m.marketName}`.toLowerCase();
+                    if (!deduped.has(key) || m.price < deduped.get(key)!.price) {
+                        deduped.set(key, m);
+                    }
+                }
+                const uniqueMatches = Array.from(deduped.values());
+                if (userLocation) {
+                    await this.enrichWithDistance(uniqueMatches, userLocation, transportMode || 'car', consumption || 10);
+                    uniqueMatches.sort((a, b) => (a.realCost || a.price) - (b.realCost || b.price));
+                } else {
+                    uniqueMatches.sort((a, b) => a.price - b.price);
+                }
+
+                const topMatches = uniqueMatches.slice(0, 5);
+                const lineIcons = ['🟢', '🟡', '🔴', '⚫', '⚫'];
+                const lines = topMatches.map((result, index) => {
+                    const icon = lineIcons[index] || '•';
+                    return `${icon} ${formatCurrency(result.price)} — ${titleCase(result.productName)}\n📍 ${result.marketName}`;
+                });
+
+                return `${productName.toUpperCase()}\n\nEncontrei estas opções:\n${lines.join('\n\n')}`;
+            }
+
+            // GENERIC PRODUCT MODE
             const deduped = new Map<string, OfferResult>();
             for (const m of matches) {
-                const key = m.marketName.toLowerCase();
+                // Deduplicate by normalized product name + market
+                const key = `${normalizeCatalogText(m.productName)}-${m.marketName}`.toLowerCase();
                 if (!deduped.has(key) || m.price < deduped.get(key)!.price) {
                     deduped.set(key, m);
                 }
             }
             const uniqueMatches = Array.from(deduped.values());
 
-            if (uniqueMatches.length === 0) {
-                return `Não encontrei ofertas vigentes para **${productName}** hoje.`;
-            }
-
-            // Se o usuário tem localização, calcular custo real
             if (userLocation) {
                 await this.enrichWithDistance(uniqueMatches, userLocation, transportMode || 'car', consumption || 10);
-            }
-
-            // Ordenar por custo real (preço + transporte) ou só preço
-            if (userLocation) {
                 uniqueMatches.sort((a, b) => (a.realCost || a.price) - (b.realCost || b.price));
             } else {
                 uniqueMatches.sort((a, b) => a.price - b.price);
             }
 
-            const top3 = uniqueMatches.slice(0, 3);
+            const cheapest = uniqueMatches[0];
+            const others = uniqueMatches.slice(1, 4);
 
-            const lineIcons = ['🟢', '🟡', '🔴'];
-            const lines = top3.map((result, index) => {
-                const icon = lineIcons[index] || '•';
-                const distText = result.distance !== undefined ? ` _(${result.distance} km)_` : '';
-                const label = result.brandName?.trim()
-                    ? `${titleCase(result.brandName)} (**${result.marketName}**)`
-                    : `**${result.marketName}**`;
-                return `${icon} ${formatCurrency(result.price)} - ${label}${distText}`;
-            });
+            let response = `${productName.toUpperCase()}\nMais barato encontrado:\n🟢 ${formatCurrency(cheapest.price)} — ${titleCase(cheapest.productName)}\n📍 ${cheapest.marketName}\n`;
 
-            const economy = top3.length > 1
-                ? Math.max(0, top3[top3.length - 1].price - top3[0].price)
-                : 0;
-
-            const annualSavings = economy * 12;
-            const annualFormatted = annualSavings.toFixed(2).replace('.', ',');
-
-            let result = `${this.formatProductHeader(productName)}\n\n${lines.join('\n')}\n\n💰 Você economiza: **${formatCurrency(economy)}** por unidade\n🎉 **Economia de R$ ${annualFormatted} por ano!** 🚀`;
-
-            if (userLocation) {
-                const best = top3[0];
-                if (best && best.transportCost !== undefined && best.transportCost > 0) {
-                    result += `\n\n⛽ _Custo de ida e volta (combustível): R$ ${best.transportCost.toFixed(2).replace('.', ',')}_`;
-                }
+            if (others.length > 0) {
+                response += `\nOutras opções:\n` + others.map(m => {
+                    const brandDisplay = m.brandName ? titleCase(m.brandName) : titleCase(m.productName);
+                    return `• ${formatCurrency(m.price)} — ${brandDisplay} — ${m.marketName}`;
+                }).join('\n');
             }
-
-            result += `\n\nQuer saber se vale ir de carro? 🚗`;
 
             const seasonalityTip = seasonalityService.formatTrendMessage(productName);
             if (seasonalityTip) {
-                result = `${result}\n\n${seasonalityTip}`;
+                response = `${response}\n\n${seasonalityTip}`;
             }
-
-            return result;
+            return response;
         } catch (err) {
             console.error('[OfferEngine] Firestore error:', err);
             return `Erro ao buscar ofertas para ${productName}. Tente novamente.`;
@@ -825,7 +739,7 @@ class OfferEngine {
         try {
             const catalogByItem = await Promise.all(items.map((item) => productCatalogService.resolveSearch(item.name)));
             const categoryHints = Array.from(new Set(catalogByItem.map((search) => search.matchedCategory).filter(Boolean)));
-            
+
             let snap: any;
             if (isServer) {
                 let queryRef: any = (db as any).collection('offers');

@@ -27,6 +27,12 @@ export interface CatalogMatchResult {
     score: number;
 }
 
+export interface SearchModeResult {
+    mode: 'generic_product' | 'brand_specific' | 'brand_only';
+    productQuery: string | null;
+    brand: string | null;
+}
+
 export function normalizeCatalogText(str: string): string {
     return String(str || '')
         .toLowerCase()
@@ -65,6 +71,21 @@ export const CATEGORY_ALIASES: Record<string, string[]> = {
     padaria: ['padaria', 'pao', 'pão', 'bolo', 'torrada'],
     hortifruti: ['hortifruti', 'hortifruti', 'fruta', 'frutas', 'verdura', 'verduras', 'legume', 'legumes', 'banana', 'tomate', 'alface', 'batata', 'cebola'],
     bazar: ['bazar', 'utilidades'],
+};
+
+export const BRAND_DICTIONARY: Record<string, string> = {
+    'melita': 'Melitta',
+    'melitta': 'Melitta',
+    'pilao': 'Pilão',
+    'pilão': 'Pilão',
+    'nescafe': 'Nescafé',
+    'nescafé': 'Nescafé',
+    'tres coracoes': '3 Corações',
+    'três corações': '3 Corações',
+    '3 coracoes': '3 Corações',
+    '3 corações': '3 Corações',
+    'cafe do dia': 'Café do Dia',
+    'café do dia': 'Café do Dia'
 };
 
 class ProductCatalogService {
@@ -197,6 +218,50 @@ class ProductCatalogService {
         }
 
         return undefined;
+    }
+
+    public detectSearchMode(term: string): SearchModeResult {
+        const normalizedTerm = normalizeCatalogText(term);
+        if (!normalizedTerm) {
+            return { mode: 'generic_product', productQuery: term, brand: null };
+        }
+
+        let detectedBrand: string | null = null;
+        let detectedBrandKey: string | null = null;
+
+        const sortedKeys = Object.keys(BRAND_DICTIONARY).sort((a, b) => b.length - a.length);
+
+        for (const key of sortedKeys) {
+            const normalizedKey = normalizeCatalogText(key);
+            // Search word-bounded to avoid matching part of a word?
+            // E.g. "pilao" -> " cafe pilao "
+            // The normalized term has spaces separating words, so we can check boundary
+            const pattern = new RegExp(`(?:^|\\s)${normalizedKey}(?:\\s|$)`);
+            if (pattern.test(normalizedTerm)) {
+                detectedBrand = BRAND_DICTIONARY[key];
+                detectedBrandKey = normalizedKey;
+                break;
+            }
+        }
+
+        if (!detectedBrand || !detectedBrandKey) {
+            return { mode: 'generic_product', productQuery: term, brand: null };
+        }
+
+        if (normalizedTerm === detectedBrandKey) {
+            return { mode: 'brand_only', productQuery: null, brand: detectedBrand };
+        }
+
+        const productQueryStr = normalizedTerm
+            .replace(new RegExp(`(?:^|\\s)${detectedBrandKey}(?:\\s|$)`), ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        if (!productQueryStr) {
+            return { mode: 'brand_only', productQuery: null, brand: detectedBrand };
+        }
+
+        return { mode: 'brand_specific', productQuery: productQueryStr, brand: detectedBrand };
     }
 
     /**

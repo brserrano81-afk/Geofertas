@@ -132,6 +132,16 @@ class OfferHygieneService {
         const isTestOffer = isTestSeedOffer(offer);
 
         if (offer.active === false) return false;
+
+        if (offer.expiresAt || offer.validUntil) {
+            const expires = new Date((offer.expiresAt || offer.validUntil) as string | number);
+            if (expires < new Date()) {
+                return false;
+            }
+        }
+        // TODO: Em um futuro proximo, ofertas sem data de validade devem ser tratadas de forma diferente ou expiradas automaticamente.
+        // Para este P1, aceitar a oferta sem expiresAt para não quebrar a base inteira.
+
         if (dataMode === 'real' && isTestOffer) return false;
         if (dataMode === 'test' && !isTestOffer) return false;
         if (!canonicalName || !marketName || !(numericPrice > 0)) return false;
