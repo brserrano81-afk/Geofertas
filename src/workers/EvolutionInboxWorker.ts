@@ -1,14 +1,11 @@
 import dotenv from 'dotenv';
-dotenv.config();
-
-console.log('[SYSTEM] Deploy Version: 1.0.5 - Stability & Gemini Fix');
 import { adminDb as db, admin } from '../lib/firebase-admin';
 const serverTimestamp = admin.firestore.FieldValue.serverTimestamp;
 import { chatService } from '../services/ChatService';
 import { isMasterAdmin, masterAdminService } from '../services/MasterAdminService';
 import { maskIdentifier } from '../utils/maskSensitiveData';
 
-
+dotenv.config();
 
 interface InboxMessage {
     correlationId?: string;
@@ -28,11 +25,6 @@ interface InboxMessage {
     event?: string;
     source?: string;
     receivedAtIso?: string;
-    location?: {
-        lat?: number | string | null;
-        lng?: number | string | null;
-        address?: string | null;
-    } | null;
     leaseOwner?: string | null;
     leaseAcquiredAtIso?: string | null;
     leaseExpiresAtIso?: string | null;
@@ -121,14 +113,12 @@ const POLL_INTERVAL_MS = Number(process.env.EVOLUTION_WORKER_POLL_MS || 4000);
 const RUN_ONCE = process.argv.includes('--once');
 const VERBOSE = process.argv.includes('--verbose');
 const EVOLUTION_SEND_FORMAT = (process.env.EVOLUTION_SEND_FORMAT || 'auto').toLowerCase();
-const EVOLUTION_PRESENCE_FORMAT = (process.env.EVOLUTION_PRESENCE_FORMAT || 'auto').toLowerCase();
 const EVOLUTION_TYPING_ENABLED = process.env.EVOLUTION_TYPING_ENABLED !== 'false';
 const EVOLUTION_TYPING_MS = Number(process.env.EVOLUTION_TYPING_MS || 1500);
 const MAX_SEND_RETRIES = Number(process.env.EVOLUTION_MAX_SEND_RETRIES || 3);
 const RETRY_BASE_DELAY_MS = Number(process.env.EVOLUTION_RETRY_BASE_DELAY_MS || 15000);
 const PROCESSING_LEASE_MS = Number(process.env.EVOLUTION_PROCESSING_LEASE_MS || 120000);
 const WORKER_INSTANCE_ID = process.env.EVOLUTION_WORKER_INSTANCE_ID || `worker-${process.pid}`;
-const WORKER_USER_FILTER = process.env.EVOLUTION_WORKER_USER_ID?.trim() || '';
 
 function nowIso(): string {
     return new Date().toISOString();
@@ -253,14 +243,16 @@ function getEvolutionPresenceUrl(): string | null {
 }
 
 async function loadPendingMessages(): Promise<Array<{ id: string; data: InboxMessage }>> {
-    let queryRef = db.collection('message_inbox')
-        .where('status', '==', 'pending');
+    const workerUserId = process.env.EVOLUTION_WORKER_USER_ID;
+    let query = db.collection('message_inbox')
+        .where('status', 'in', ['pending', 'pending_test']);
 
-    if (WORKER_USER_FILTER) {
-        queryRef = queryRef.where('userId', '==', WORKER_USER_FILTER);
+    if (workerUserId) {
+        console.log(`[EvolutionInboxWorker] Isolamento ativado: processando apenas mensagens do usuário ${workerUserId}`);
+        query = query.where('userId', '==', workerUserId);
     }
 
-    const snapshot = await queryRef.limit(10).get();
+    const snapshot = await query.limit(10).get();
 
     if (snapshot.empty) return [];
 
@@ -277,14 +269,10 @@ async function loadPendingMessages(): Promise<Array<{ id: string; data: InboxMes
 }
 
 async function loadPendingOutboxMessages(): Promise<Array<{ id: string; data: OutboxMessage }>> {
-    let queryRef = db.collection('message_outbox')
-        .where('sendStatus', 'in', ['pending_send', 'retrying']);
-
-    if (WORKER_USER_FILTER) {
-        queryRef = queryRef.where('userId', '==', WORKER_USER_FILTER);
-    }
-
-    const snapshot = await queryRef.limit(10).get();
+    const snapshot = await db.collection('message_outbox')
+        .where('sendStatus', 'in', ['pending_send', 'retrying'])
+        .limit(10)
+        .get();
 
     return snapshot.docs
         .map((docSnap: any) => ({
@@ -449,64 +437,21 @@ async function sendPresenceViaEvolution(remoteJid: string) {
         headers[apiKeyHeader] = apiKey;
     }
 
-    const requestBodies =
-        EVOLUTION_PRESENCE_FORMAT === 'root'
-            ? [{
-                number,
+    const response = await fetch(presenceUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+            number,
+            options: {
                 delay: EVOLUTION_TYPING_MS,
                 presence: 'composing',
-            }]
-            : EVOLUTION_PRESENCE_FORMAT === 'options'
-                ? [{
-                    number,
-                    options: {
-                        delay: EVOLUTION_TYPING_MS,
-                        presence: 'composing',
-                    },
-                }]
-                : [
-                    {
-                        number,
-                        delay: EVOLUTION_TYPING_MS,
-                        presence: 'composing',
-                    },
-                    {
-                        number,
-                        options: {
-                            delay: EVOLUTION_TYPING_MS,
-                            presence: 'composing',
-                        },
-                    },
-                    {
-                        number,
-                        options: {
-                            number,
-                            delay: EVOLUTION_TYPING_MS,
-                            presence: 'composing',
-                        },
-                    },
-                ];
+            },
+        }),
+    });
 
-    let lastFailure: { statusCode: number; rawText: string } | null = null;
-    for (const candidateBody of requestBodies) {
-        const response = await fetch(presenceUrl, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(candidateBody),
-        });
-
-        if (response.ok) {
-            return;
-        }
-
-        lastFailure = {
-            statusCode: response.status,
-            rawText: await response.text(),
-        };
-    }
-
-    if (lastFailure && VERBOSE) {
-        console.warn(`[EvolutionInboxWorker] sendPresence falhou (${lastFailure.statusCode}): ${lastFailure.rawText}`);
+    if (!response.ok && VERBOSE) {
+        const rawText = await response.text();
+        console.warn(`[EvolutionInboxWorker] sendPresence falhou (${response.status}): ${rawText}`);
     }
 }
 
@@ -697,7 +642,7 @@ async function downloadAudioViaEvolution(
 }
 
 async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBuildResult> {
-    const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
     if (!GEMINI_API_KEY) {
         console.error(`[AudioProcessor] user=${message.userId} — GEMINI_API_KEY não configurada`);
         return {
@@ -995,7 +940,6 @@ async function buildResponse(rawMessage: InboxMessage): Promise<ResponseBuildRes
             new Uint8Array(buffer),
             message.userId,
             message.storageUserId || message.userId,
-            message.bsuid,
         );
         console.log(`[INTENT_RESOLVED] user=${message.userId} channel=whatsapp source=imageMessage`);
         return {
@@ -1033,7 +977,6 @@ async function buildResponse(rawMessage: InboxMessage): Promise<ResponseBuildRes
             locationMessage,
             message.userId,
             message.storageUserId || message.userId,
-            message.bsuid,
         );
 
         if (!String(response.text || '').trim()) {
@@ -1081,12 +1024,7 @@ async function buildResponse(rawMessage: InboxMessage): Promise<ResponseBuildRes
         }
     }
 
-    const response = await chatService.processMessage(
-        text, 
-        message.userId, 
-        message.storageUserId || message.userId,
-        message.bsuid
-    );
+    const response = await chatService.processMessage(text, message.userId, message.storageUserId || message.userId);
     if (!String(response.text || '').trim()) {
         console.warn(`[FALLBACK_TRIGGERED] user=${message.userId} reason=empty_chat_response`);
         return {
@@ -1116,7 +1054,14 @@ async function claimInboxItem(id: string): Promise<InboxMessage | null> {
         }
 
         const data = docSnap.data() as InboxMessage;
+        const workerUserId = process.env.EVOLUTION_WORKER_USER_ID;
+
         if (data.status !== 'pending' && data.status !== 'pending_test') {
+            return null;
+        }
+
+        if (workerUserId && data.userId !== workerUserId) {
+            console.log(`[EvolutionInboxWorker] [ISOLATION] Ignorando claim para inbox ${id}: usuário ${data.userId} não coincide com o isolamento ${workerUserId}.`);
             return null;
         }
 
@@ -1237,10 +1182,8 @@ async function processInboxItem(item: { id: string; data: InboxMessage }) {
         }
 
         const responseText = responseBuild.text;
-        console.log(`[EvolutionInboxWorker] [${correlationId}] Gerou resposta: "${responseText.slice(0, 50)}..."`);
         try {
             const sendResult = await sendTextViaEvolution(data.remoteJid, responseText);
-            console.log(`[EvolutionInboxWorker] [${correlationId}] Resultado do envio: ${sendResult.status}`);
             const outboxId = await persistOutboxMessage(id, {
                 correlationId,
                 sourceMessageId,
@@ -1290,7 +1233,6 @@ async function processInboxItem(item: { id: string; data: InboxMessage }) {
             return;
         } catch (sendErr: any) {
             const errorMessage = sendErr?.message || 'unknown_send_error';
-            console.error(`[EvolutionInboxWorker] [${correlationId}] FALHA CRITICA NO ENVIO para ${data.remoteJid}:`, errorMessage);
             const outboxId = await scheduleOutboxRetry({
                 inboxId: id,
                 correlationId,
@@ -1361,9 +1303,7 @@ async function processInboxItem(item: { id: string; data: InboxMessage }) {
 }
 
 async function processPendingBatch() {
-    console.log('[HEARTBEAT] Worker checking for pending messages...');
     const pending = await loadPendingMessages();
-    if (pending.length > 0) console.log(`[DEBUG] Found ${pending.length} pending messages.`);
     if (VERBOSE) {
         console.log(`[EvolutionInboxWorker] Pending inbox count: ${pending.length}`);
     }
@@ -1502,9 +1442,8 @@ async function flushPendingOutboxBatch() {
 
 async function main() {
     console.log(
-        `[EvolutionInboxWorker] Iniciado. Poll interval: ${POLL_INTERVAL_MS}ms${RUN_ONCE ? ' | modo: once' : ''}${WORKER_USER_FILTER ? ` | userFilter: ${WORKER_USER_FILTER}` : ''}${VERBOSE ? ' | verbose' : ''}`,
+        `[EvolutionInboxWorker] Iniciado. Poll interval: ${POLL_INTERVAL_MS}ms${RUN_ONCE ? ' | modo: once' : ''}${VERBOSE ? ' | verbose' : ''}`,
     );
-    console.log('[DEBUG] Worker main loop started.');
 
     await processPendingBatch();
     await flushPendingOutboxBatch();

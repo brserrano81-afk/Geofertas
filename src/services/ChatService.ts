@@ -8,7 +8,6 @@ import { diagnosticService } from './DiagnosticService.ts';
 import { aiService, type Intent } from './AiService';
 import { offerEngine } from './OfferEngine';
 import { ListManager } from './ListManager';
-import { identityResolutionService } from './IdentityResolutionService';
 import { PurchaseManager } from './PurchaseManager';
 import { ingestionPipeline, type PipelineResult } from './IngestionPipeline';
 import { matchReceiptToList, type MatchResult } from './ReceiptMatcher';
@@ -162,7 +161,7 @@ function looksLikeNeighborhoodFallback(message: string): boolean {
     if (/\d/.test(trimmed)) return false;
     if (/\b(ajuda|help|socorro|nao sei|não sei|sei la|sei lá)\b/.test(normalized)) return false;
 
-    return !/\b(quanto|valor|preco|precos|oferta|ofertas|lista|mercado|mercados|comprar|compra|quero|produto|produtos|adiciona|coloca|poe|arroz|feijao|cafe|leite|ovos|pao)\b/.test(normalized) && !normalized.includes(',') && !normalized.includes(' e ');
+    return !/\b(quanto|valor|preco|precos|oferta|ofertas|lista|mercado|mercados|comprar|compra|quero|produto|produtos)\b/.test(normalized);
 }
 
 function normalizeTextListEntry(value: string): string {
@@ -206,13 +205,13 @@ class ChatSession {
 
     private context: ChatContext;
     private readonly conversationState = new ConversationStateService();
-    private listManager: ListManager;
-    private purchaseManager: PurchaseManager;
-    private purchaseAnalytics: PurchaseAnalyticsService;
+    private readonly listManager: ListManager;
+    private readonly purchaseManager: PurchaseManager;
+    private readonly purchaseAnalytics: PurchaseAnalyticsService;
     private readonly ready: Promise<void>;
     private lastContextRefreshAt = 0;
 
-    constructor(userId: string = 'default_user', storageUserId: string = userId, bsuid?: string | null) {
+    constructor(userId: string = 'default_user', storageUserId: string = userId) {
         this.context = {
             shoppingList: [],
             userId,
@@ -231,25 +230,10 @@ class ChatSession {
             ChatSession.diagnosticsChecked = true;
         }
 
-        this.ready = this.init(bsuid);
+        this.ready = this.init();
     }
 
-    private async init(bsuid?: string | null) {
-        // Se houver BSUID, resolver identidade canÃ´nica
-        if (bsuid) {
-            console.log(`[ChatService] BSUID Detectado: ${bsuid}. Resolvendo identidade...`);
-            const identity = await identityResolutionService.resolveWhatsAppIdentity({ 
-                remoteJid: this.context.userId, 
-                bsuid 
-            });
-            console.log(`[ChatService] Identidade Resolvida: canonical=${identity.canonicalUserId}, storage=${identity.storageUserId}`);
-            this.context.storageUserId = identity.storageUserId;
-            // Reinicializar managers com o novo storageUserId se mudou
-            this.listManager = new ListManager(this.context.storageUserId);
-            this.purchaseManager = new PurchaseManager(this.context.storageUserId, this.context.userId);
-            this.purchaseAnalytics = new PurchaseAnalyticsService(this.context.storageUserId);
-        }
-
+    private async init() {
         const { profile, recentInteractions } = await userProfileService.bootstrapUser(this.context.userId);
         this.context.shoppingList = await this.listManager.loadActiveList();
 
@@ -262,8 +246,7 @@ class ChatSession {
         if (prefs.optimizationPreference) this.context.optimizationPreference = prefs.optimizationPreference;
         if (prefs.userLocation) this.context.userLocation = prefs.userLocation;
         if (prefs.neighborhood) this.context.neighborhood = prefs.neighborhood;
-        const hasKnownLocation = Boolean(this.context.userLocation || this.context.neighborhood);
-        this.context.isFirstContact = recentInteractions.length === 0 && !hasKnownLocation;
+        this.context.isFirstContact = recentInteractions.length === 0;
         recentInteractions.forEach((interaction) => {
             this.conversationState.addMessage(this.context.userId, interaction.role, interaction.content);
         });
@@ -342,11 +325,6 @@ class ChatSession {
         const conversationState = this.conversationState;
         conversationState.incrementTurn();
         const normalizedMessage = normalizeText(message);
-
-        if (conversationState.current === 'AWAITING_INITIAL_LOCATION' && this.hasKnownLocationContext()) {
-            console.log(`[ChatService] Clearing stale location gate for user=${this.context.userId}: location already known.`);
-            conversationState.reset();
-        }
 
         // â”€â”€â”€ 0. GPS: TRATAMENTO DE COORDENADAS DIRETAS â”€â”€â”€
         if (message.startsWith('COORDENADAS:') || message.startsWith('[GPS_LOCATION_UPDATE]')) {
@@ -468,11 +446,16 @@ class ChatSession {
             this.context.isFirstContact = false;
         }
 
-        // â”€â”€â”€ 0.5. PRIMEIRO CONTATO: PEDIR LOCALIZACAO SEM TRAVAR â”€â”€â”€
+        // ─── 0.5. PRIMEIRO CONTATO: PEDIR LOCALIZACAO SEM TRAVAR ───
         if (this.context.isFirstContact && conversationState.current === 'IDLE' && !actionableIntent) {
             this.context.isFirstContact = false;
-            conversationState.transition('AWAITING_INITIAL_LOCATION', 'initial_location', null, 'Me manda sua localização para eu buscar mercados perto de você.');
-            return this.handleSaudacao();
+            // GARANTIA: Se já temos a localização (GPS ou Bairro), não precisamos travar o usuário no loop
+            if (this.context.userLocation || this.context.neighborhood) {
+                console.log(`[ChatService] Primeiro contato detectado para ${this.context.userId}, mas localização já conhecida. Pulando loop de GPS.`);
+            } else {
+                conversationState.transition('AWAITING_INITIAL_LOCATION', 'initial_location', null, 'Me manda sua localização para eu buscar mercados perto de você.');
+                return this.handleSaudacao();
+            }
         }
 
         // â”€â”€â”€ 1. RESOLVER ESTADO PENDENTE (antes do NLP) â”€â”€â”€
@@ -481,6 +464,12 @@ class ChatSession {
         if (conversationState.current === 'AWAITING_INITIAL_LOCATION') {
             if (actionableIntent) {
                 console.log(`[FIRST_CONTACT_LOCATION_SKIPPED] user=${this.context.userId} reason=actionable_message`);
+                conversationState.reset();
+            }
+
+            // NOVO: Se a localização já está presente no contexto (ex: carregada no init), limpamos o estado
+            if (this.context.userLocation || this.context.neighborhood) {
+                console.log(`[ChatService] Localização detectada durante AWAITING_INITIAL_LOCATION para ${this.context.userId}. Resetando estado.`);
                 conversationState.reset();
             }
 
@@ -524,7 +513,7 @@ class ChatSession {
             }
         }
 
-        const fallbackIntent = (explicitPreference && interpretation.intent === 'desconhecido')
+        const fallbackIntent = explicitPreference
             ? 'definir_preferencia_usuario'
             : asksForProfile
                 ? 'ver_perfil_usuario'
@@ -844,7 +833,7 @@ class ChatSession {
         }
 
         // â”€â”€â”€ 2.6. MULTI-PRODUTO: Perguntar "preÃ§o ou lista?" â”€â”€â”€
-        const rawMultiProducts = (interpretation.products || interpretation.nlpResult.entities.map(e => e.value)).filter((v): v is string => typeof v === 'string' && v.length > 0);
+        const rawMultiProducts = interpretation.products || interpretation.nlpResult.entities.map(e => e.value);
         const multiProducts = cleanProductList(rawMultiProducts);
         const hasMultipleProducts = multiProducts.length >= 2;
         const msgLower = message.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -1018,8 +1007,7 @@ class ChatSession {
             case 'limpar_lista':
                 await this.listManager.archiveActiveList();
                 this.context.shoppingList = [];
-                this.conversationState.reset();
-                return { text: "✅ Lista limpa com sucesso! 🛒\nSua lista agora está vazia. Quando quiser começar uma nova, é só me falar os itens!" };
+                return { text: "Lista limpa com sucesso! Quando quiser comeÃ§ar uma nova, Ã© sÃ³ me falar os itens." };
 
             case 'ver_ultima_lista':
                 return this.listManager.getLastList();
@@ -1094,10 +1082,11 @@ class ChatSession {
                 if (addItems.length === 0) return { text: "Quais itens vocÃª quer adicionar?" };
                 addItems.forEach((name, idx) => {
                     if (!this.context.shoppingList.find(i => i.name === name)) {
-                const newItem: any = { name };
-                if (addEntities[idx]?.quantity !== undefined) newItem.quantity = addEntities[idx].quantity;
-                if (addEntities[idx]?.unit !== undefined) newItem.unit = addEntities[idx].unit;
-                this.context.shoppingList.push(newItem);
+                        this.context.shoppingList.push({
+                            name,
+                            quantity: addEntities[idx]?.quantity,
+                            unit: addEntities[idx]?.unit
+                        });
                     }
                 });
                 await this.listManager.persistList(this.context.shoppingList);
@@ -1223,14 +1212,6 @@ class ChatSession {
     // â”€â”€â”€ Extras & SaudaÃ§Ãµes â”€â”€â”€
 
     private handleSaudacao(): ChatResponse {
-        if (this.hasKnownLocationContext()) {
-            return {
-                text:
-                    'Olá! Eu sou o Economiza Fácil 💚\n\n' +
-                    'Pode mandar um produto, sua lista ou pedir ofertas de um mercado que eu te ajudo a comparar.',
-            };
-        }
-
         return {
             text:
                 'Olá! Eu sou o Economiza Fácil 💚\n\n' +
@@ -1239,10 +1220,6 @@ class ChatSession {
                 'Assim eu já busco os mercados mais próximos e as melhores ofertas pra você.',
             requestLocation: true,
         };
-    }
-
-    private hasKnownLocationContext(): boolean {
-        return Boolean(this.context.userLocation || this.context.neighborhood);
     }
 
     private handleLocation(): ChatResponse {
@@ -1970,22 +1947,20 @@ class ChatSession {
         }
 
         if (items.length === 0) {
-            this.moveToListCreation('Me fala os produtos que eu monto sua lista rapidinho. 🛒');
+            this.moveToListCreation('Me dÃª os produtos que eu crio uma lista pra vocÃª bem rÃ¡pida e econÃ´mica!');
             return { text: 'Me fala os produtos que eu monto sua lista rapidinho. 🛒' };
         }
 
-        this.context.shoppingList = []; // Start fresh if it's a new list
-        const { duplicates } = this.addProductsToShoppingList(items);
+        const entities = interpretation.nlpResult.entities;
+        this.context.shoppingList = items.map((name, index) => ({
+            name,
+            quantity: entities[index]?.quantity,
+            unit: entities[index]?.unit,
+        }));
         await this.listManager.persistList(this.context.shoppingList);
 
-        const createdResult = await this.listManager.recoverActiveListItemsOnly();
-        let response = `✅ Lista criada com sucesso! 🛒\n\n${createdResult.text}`;
-        if (duplicates.length > 0) {
-            response += `\n⚠️ Obs: ${duplicates.join(', ')} já estavam na lista.`;
-        }
-        response += `\nDeseja adicionar mais alguma coisa ou já quer comparar preços?`;
-        
-        return { text: response };
+        this.moveToListCreation('Diga os itens');
+        return { text: `✅ Adicionado à sua lista:\n${items.map((item) => `• ${item}`).join('\n')}\n\nDigite minha lista pra ver tudo! 🛒` };
     }
 
     private async handleAddItemsIntent(interpretation: Awaited<ReturnType<typeof aiService.interpret>>): Promise<ChatResponse> {
@@ -1996,19 +1971,20 @@ class ChatSession {
                 ? [interpretation.product]
                 : entities.map((entity) => entity.value);
         const addItems = cleanProductList(rawItems);
-        if (addItems.length === 0) return { text: 'Quais itens você quer adicionar? 🛒' };
+        if (addItems.length === 0) return { text: 'Quais itens vocÃª quer adicionar?' };
 
-        const { addedCount, duplicates } = this.addProductsToShoppingList(addItems);
+        addItems.forEach((name, index) => {
+            if (!this.context.shoppingList.find((item) => item.name === name)) {
+                this.context.shoppingList.push({
+                    name,
+                    quantity: entities[index]?.quantity,
+                    unit: entities[index]?.unit,
+                });
+            }
+        });
+
         await this.listManager.persistList(this.context.shoppingList);
-        const addedResult = await this.listManager.recoverActiveListItemsOnly();
-        
-        let response = addedCount > 0 ? `✅ Adicionado à sua lista!\n\n` : '';
-        if (duplicates.length > 0) {
-            response += `⚠️ **${duplicates.join(', ')}** já ${duplicates.length === 1 ? 'está' : 'estão'} na sua lista.\n\n`;
-        }
-        response += `${addedResult.text}Deseja adicionar mais alguma coisa? 🛒`;
-        
-        return { text: response };
+        return { text: `✅ Adicionado à sua lista:\n${addItems.map((item) => `• ${item}`).join('\n')}\n\nDigite minha lista pra ver tudo! 🛒` };
     }
 
     private async handleRemoveItemsIntent(interpretation: Awaited<ReturnType<typeof aiService.interpret>>): Promise<ChatResponse> {
@@ -2019,25 +1995,13 @@ class ChatSession {
                 : interpretation.nlpResult.entities.map((entity) => entity.value);
         if (removeItems.length === 0) return { text: 'Quais itens vocÃª quer tirar da lista?' };
 
-        const beforeCount = this.context.shoppingList.length;
         this.context.shoppingList = this.context.shoppingList.filter((item) =>
-            !removeItems.some((removeItem) => {
-                const itemNorm = normalizeTextListEntry(item.name);
-                const removeNorm = normalizeTextListEntry(removeItem);
-                return itemNorm.includes(removeNorm) || removeNorm.includes(itemNorm);
-            }),
+            !removeItems.some((removeItem) => normalizeTextListEntry(item.name).includes(normalizeTextListEntry(removeItem))),
         );
-        const removedCount = beforeCount - this.context.shoppingList.length;
-
         await this.listManager.persistList(this.context.shoppingList);
         const removedResult = await this.listManager.recoverActiveListItemsOnly();
-        
-        let response = removedCount > 0 
-            ? `✅ Removi **${removedCount} item(ns)** da sua lista!\n\n` 
-            : `❓ Não encontrei esses itens na sua lista.\n\n`;
-            
-        response += `${removedResult.text}Quer ajustar mais alguma coisa? 😉`;
-        return { text: response };
+        this.conversationState.transition('AWAITING_LIST_CONFIRMATION', 'confirm_list', this.context.shoppingList, 'Finalizar lista?');
+        return { text: `✅ Removi da sua lista.\n\n${removedResult.text}Quer ajustar mais alguma coisa?` };
     }
 
     private async handleSinglePriceIntent(term?: string): Promise<ChatResponse> {
@@ -2140,22 +2104,22 @@ class ChatSession {
 class ChatService {
     private readonly sessions = new Map<string, ChatSession>();
 
-    private getSession(userId: string = 'default_user', storageUserId: string = userId, bsuid?: string | null): ChatSession {
+    private getSession(userId: string = 'default_user', storageUserId: string = userId): ChatSession {
         const normalizedUserId = userId || 'default_user';
 
         if (!this.sessions.has(normalizedUserId)) {
-            this.sessions.set(normalizedUserId, new ChatSession(normalizedUserId, storageUserId || normalizedUserId, bsuid));
+            this.sessions.set(normalizedUserId, new ChatSession(normalizedUserId, storageUserId || normalizedUserId));
         }
 
         return this.sessions.get(normalizedUserId)!;
     }
 
-    public async processMessage(message: string, userId: string = 'default_user', storageUserId: string = userId, bsuid?: string | null): Promise<ChatResponse> {
-        return this.getSession(userId, storageUserId, bsuid).processMessage(message);
+    public async processMessage(message: string, userId: string = 'default_user', storageUserId: string = userId): Promise<ChatResponse> {
+        return this.getSession(userId, storageUserId).processMessage(message);
     }
 
-    public async processImage(imageData: Uint8Array, userId: string = 'default_user', storageUserId: string = userId, bsuid?: string | null): Promise<ChatResponse> {
-        return this.getSession(userId, storageUserId, bsuid).processImage(imageData);
+    public async processImage(imageData: Uint8Array, userId: string = 'default_user', storageUserId: string = userId): Promise<ChatResponse> {
+        return this.getSession(userId, storageUserId).processImage(imageData);
     }
 }
 

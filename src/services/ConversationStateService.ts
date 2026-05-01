@@ -111,7 +111,12 @@ export class ConversationStateService {
                 this.action = data.action || '';
                 this.data = data.data || null;
                 this.prompt = data.prompt || '';
-                this.updatedAt = data.updatedAt || Date.now();
+                const updatedAtRaw = data.updatedAt;
+                if (updatedAtRaw && typeof updatedAtRaw === 'object' && 'toMillis' in updatedAtRaw) {
+                    this.updatedAt = (updatedAtRaw as any).toMillis();
+                } else {
+                    this.updatedAt = updatedAtRaw || Date.now();
+                }
                 this.turnCount = data.turnCount || 0;
             }
         } catch (err) {
