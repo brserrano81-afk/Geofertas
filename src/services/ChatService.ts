@@ -424,7 +424,7 @@ class ChatSession {
         }
 
         const explicitPreference = detectOptimizationPreference(message);
-        const asksForProfile = /\b(o que (voce|vc) sabe sobre mim|o que lembra de mim|me fala meu historico|me fala meu historico)\b/.test(normalizedMessage);
+        const asksForProfile = /\b(o que (voce|vc) sabe sobre mim|o que sabe sobre mim|o que lembra de mim|me fala meu historico|meu perfil|meu historico|me fala meu historico)\b/.test(normalizedMessage);
 
         // ─── INTERCEPTOR DE BAIRRO (Antes do AI para evitar instabilidades) ───
         if (conversationState.current === 'AWAITING_INITIAL_LOCATION') {
@@ -1472,36 +1472,56 @@ class ChatSession {
     }
 
     private async handleShowUserProfile(): Promise<ChatResponse> {
-        const [prefs, profile, richContext] = await Promise.all([
+        const [prefs, richContext] = await Promise.all([
             userPreferencesService.getPreferences(this.context.userId),
-            userProfileService.ensureUser(this.context.userId),
             userContextService.buildRichContext(this.context.storageUserId, this.context.userName),
         ]);
 
-        const favoriteMarket = richContext.favoriteMarkets[0] || 'ainda aprendendo';
-        const frequentProducts = richContext.frequentProducts.length > 0
-            ? richContext.frequentProducts.slice(0, 5).map((item) => capitalize(item)).join(', ')
-            : 'ainda aprendendo';
-        const transport = prefs.transportMode || this.context.transportMode || 'carro';
-        const consumption = prefs.consumption || this.context.consumption || 10;
-        const neighborhood = prefs.neighborhood || 'nÃ£o informado';
-        const preference = formatPreferenceLabel(prefs.optimizationPreference || this.context.optimizationPreference);
-        const interactions = Number(profile.interactionCount || 0);
-        const productLines = frequentProducts === 'ainda aprendendo'
-            ? 'â€¢ ainda aprendendo'
-            : `â€¢ ${frequentProducts.replace(/, /g, '\nâ€¢ ')}`;
+        // 1. Localização
+        let locationStr = 'ainda não informado';
+        if (prefs.neighborhood) {
+            if (prefs.locationDeclaredAt) {
+                locationStr = `Localização aproximada salva: ${capitalize(prefs.neighborhood)}`;
+            } else {
+                locationStr = `Tenho uma localização salva anteriormente: ${capitalize(prefs.neighborhood)}. Quer atualizar?`;
+            }
+        }
+
+        // 2. Transporte
+        const transportStr = prefs.transportMode
+            ? capitalize(String(prefs.transportMode))
+            : 'ainda não informado';
+
+        // 3. Consumo
+        const consumptionStr = prefs.consumption
+            ? `${prefs.consumption} km/l`
+            : 'ainda não informado';
+
+        // 4. Preferência
+        const preferenceStr = prefs.optimizationPreference
+            ? formatPreferenceLabel(prefs.optimizationPreference)
+            : 'ainda não informada';
+
+        // 5. Inferências (Produtos e Mercados)
+        const productsStr = richContext.frequentProducts.length > 0
+            ? richContext.frequentProducts.slice(0, 5).map(p => capitalize(p)).join(', ')
+            : 'ainda estou aprendendo';
+
+        const marketsStr = richContext.favoriteMarkets.length > 0
+            ? richContext.favoriteMarkets.join(', ')
+            : 'ainda estou aprendendo';
 
         return {
             text:
-                `👤 O que eu sei sobre você:\n\n` +
-                `📍 Bairro: ${capitalize(neighborhood)}\n` +
-                `🏪 Mercado favorito: ${favoriteMarket}\n` +
-                `🚗 Transporte: ${capitalize(String(transport))} (${consumption} km/l)\n` +
-                `💚 Preferência: ${preference}\n\n` +
-                `🛒 Produtos mais comprados:\n${productLines}\n\n` +
-                `💰 Gasto médio mensal: R$ ${richContext.averageMonthlySpend.toFixed(2).replace('.', ',')}\n` +
-                `📦 Interações registradas: ${interactions}\n\n` +
-                `Quer corrigir alguma informaÃ§Ã£o?`,
+                `O que tenho salvo sobre você:\n\n` +
+                `📍 Localização: ${locationStr}\n` +
+                `🚗 Transporte: ${transportStr}\n` +
+                `⛽ Consumo do carro: ${consumptionStr}\n` +
+                `💚 Preferência: ${preferenceStr}\n\n` +
+                `Pelo seu uso:\n` +
+                `🛒 Produtos frequentes: ${productsStr}\n` +
+                `🏪 Mercados frequentes: ${marketsStr}\n\n` +
+                `Quer atualizar localização, transporte ou preferência?`,
         };
     }
 

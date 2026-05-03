@@ -31,29 +31,17 @@ class UserPreferencesService {
             const compatibleUserIds = await identityResolutionService.getCompatibleUserIds(userId);
 
             for (const targetUserId of compatibleUserIds) {
+                let data: Record<string, any>;
                 if (isServer) {
                     const snap = await db.collection('users').doc(targetUserId).get();
                     if (!snap.exists) continue;
-                    const data = snap.data() as Record<string, unknown>;
-                    const nestedPreferences = (data.preferences || {}) as Record<string, unknown>;
-                    return {
-                        name: String(data.name || nestedPreferences.name || '').trim() || undefined,
-                        transportMode: String(data.transportMode || nestedPreferences.transportMode || '').trim() || undefined,
-                        consumption: Number(data.consumption || nestedPreferences.consumption || 0) || undefined,
-                        busTicket: Number(data.busTicket || nestedPreferences.busTicket || 0) || undefined,
-                        fuelPrice: Number(data.fuelPrice || nestedPreferences.fuelPrice || 0) || undefined,
-                        optimizationPreference: (data.optimizationPreference || nestedPreferences.optimizationPreference || undefined) as UserPreferences['optimizationPreference'],
-                        neighborhood: String(data.neighborhood || nestedPreferences.neighborhood || '').trim() || undefined,
-                        userLocation: this.parseUserLocation(data.userLocation || nestedPreferences.userLocation),
-                    };
+                    data = snap.data();
+                } else {
+                    const snap = await getDoc(doc(db, 'users', targetUserId));
+                    if (!snap.exists()) continue;
+                    data = snap.data();
                 }
 
-                const snap = await getDoc(doc(db, 'users', targetUserId));
-                if (!snap.exists()) {
-                    continue;
-                }
-
-                const data = snap.data() as Record<string, unknown>;
                 const nestedPreferences = (data.preferences || {}) as Record<string, unknown>;
 
                 return {
@@ -65,6 +53,8 @@ class UserPreferencesService {
                     optimizationPreference: (data.optimizationPreference || nestedPreferences.optimizationPreference || undefined) as UserPreferences['optimizationPreference'],
                     neighborhood: String(data.neighborhood || nestedPreferences.neighborhood || '').trim() || undefined,
                     userLocation: this.parseUserLocation(data.userLocation || nestedPreferences.userLocation),
+                    locationDeclaredAt: data.locationDeclaredAt || nestedPreferences.locationDeclaredAt || data.updatedAt,
+                    locationSource: (data.locationSource || nestedPreferences.locationSource) as UserPreferences['locationSource'],
                 };
             }
 
