@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import { adminDb as db, admin } from '../lib/firebase-admin';
 const serverTimestamp = admin.firestore.FieldValue.serverTimestamp;
 import { chatService } from '../services/ChatService';
+import { aiService } from '../services/AiService';
 import { isMasterAdmin, masterAdminService } from '../services/MasterAdminService';
 import { maskIdentifier } from '../utils/maskSensitiveData';
 
@@ -17,6 +18,7 @@ interface InboxMessage {
     remoteJid: string;
     messageType?: string;
     text?: string;
+    location?: { lat: number; lng: number; address?: string | null } | null;
     mediaBase64?: string | null;
     mediaUrl?: string | null;
     /** Objeto 'data' do webhook serializado — usado para chamar /message/downloadMedia/{instance} */
@@ -55,6 +57,20 @@ interface ResponseBuildResult {
     shouldSend: boolean;
     usedFallback: boolean;
     reason: string;
+}
+
+function truncateForLog(value: string, maxLength = 120): string {
+    const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+    return normalized.length > maxLength
+        ? `${normalized.slice(0, maxLength)}...`
+        : normalized;
+}
+
+function responseTypeForReason(reason: string): string {
+    if (reason === 'audio_transcribed') return 'audio_transcribed';
+    if (reason === 'audio_empty') return 'audio_empty';
+    if (reason.startsWith('audio_')) return 'audio_failed';
+    return reason;
 }
 
 function extractInboxLocation(message: InboxMessage): { lat: number; lng: number; address?: string } | null {
@@ -541,7 +557,7 @@ async function sendTextViaEvolution(remoteJid: string, text: string) {
 async function downloadAudioViaEvolution(
     rawMessageJson: string,
     userId: string,
-): Promise<{ base64: string; mimeType: string } | null> {
+): Promise<{ base64: string; mimeType: string; source: 'downloadMedia' | 'getBase64FromMediaMessage' } | null> {
     const instance = getEvolutionInstance();
     const baseUrl = process.env.EVOLUTION_API_BASE_URL?.trim();
 
@@ -600,7 +616,7 @@ async function downloadAudioViaEvolution(
                     const rawMime = (json.mimetype || json.mediaType || '').split(';')[0].trim();
                     const mimeType = (rawMime && rawMime !== 'application/octet-stream') ? rawMime : knownMimeType;
                     console.log(`[AudioProcessor] user=${userId} — [1] OK — mimeType: ${mimeType}, base64 len: ${json.base64.length}`);
-                    return { base64: json.base64, mimeType };
+                    return { base64: json.base64, mimeType, source: 'downloadMedia' };
                 }
                 console.warn(`[AudioProcessor] user=${userId} — [1] OK mas sem campo base64. Keys: ${Object.keys(json).join(', ')}`);
             }
@@ -628,7 +644,7 @@ async function downloadAudioViaEvolution(
                     const rawMime = (json.mimetype || json.mediaType || '').split(';')[0].trim();
                     const mimeType = (rawMime && rawMime !== 'application/octet-stream') ? rawMime : knownMimeType;
                     console.log(`[AudioProcessor] user=${userId} — [2] OK — mimeType: ${mimeType}, base64 len: ${json.base64.length}`);
-                    return { base64: json.base64, mimeType };
+                    return { base64: json.base64, mimeType, source: 'getBase64FromMediaMessage' };
                 }
                 console.warn(`[AudioProcessor] user=${userId} — [2] OK mas sem campo base64. Keys: ${Object.keys(json).join(', ')}`);
             }
@@ -642,17 +658,6 @@ async function downloadAudioViaEvolution(
 }
 
 async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBuildResult> {
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (!GEMINI_API_KEY) {
-        console.error(`[AudioProcessor] user=${message.userId} — GEMINI_API_KEY não configurada`);
-        return {
-            text: 'Ainda não consigo processar áudio por aqui. Pode me mandar em texto?',
-            shouldSend: true,
-            usedFallback: true,
-            reason: 'audio_gemini_key_missing',
-        };
-    }
-
     // ── Obtenção do áudio descriptografado ───────────────────────────────────
     // Prioridade 1: mediaBase64 salvo diretamente no inbox (campo data.base64
     //               do webhook — Evolution com "Send Base64" habilitado).
@@ -664,6 +669,7 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
     //               é criptografado (.enc) e inutilizável sem a mediaKey.
     let audioBase64: string;
     let mimeType = 'audio/ogg';
+    let audioSource: 'mediaBase64' | 'rawMessageJson' | 'downloadMedia' | 'getBase64FromMediaMessage' | 'none' = 'none';
 
     // Tenta extrair base64 do rawMessageJson antes de qualquer requisição
     let rawBase64FromJson: string | null = null;
@@ -695,16 +701,21 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
     if (message.mediaBase64) {
         console.log(`[AudioProcessor] user=${message.userId} — [fonte: mediaBase64 do inbox]`);
         audioBase64 = message.mediaBase64;
+        audioSource = 'mediaBase64';
         // MIME type: tenta extrair do rawMessageJson se disponível
         mimeType = rawMimeFromJson || mimeType;
     } else if (rawBase64FromJson) {
         console.log(`[AudioProcessor] user=${message.userId} — [fonte: base64 dentro do rawMessageJson]`);
         audioBase64 = rawBase64FromJson;
+        audioSource = 'rawMessageJson';
         mimeType = rawMimeFromJson || mimeType;
     } else if (message.rawMessageJson) {
         console.log(`[AudioProcessor] user=${message.userId} — [fonte: Evolution download API]`);
         const downloaded = await downloadAudioViaEvolution(message.rawMessageJson, message.userId);
         if (!downloaded) {
+            console.warn(
+                `[AudioProcessor] user=${message.userId} messageType=audioMessage audioSource=downloadMedia transcriptionStatus=failed transcriptionLength=0 responseType=audio_failed`,
+            );
             return {
                 text: 'Recebi seu áudio, mas não consegui acessá-lo. Pode tentar de novo?',
                 shouldSend: true,
@@ -714,8 +725,12 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
         }
         audioBase64 = downloaded.base64;
         mimeType = downloaded.mimeType;
+        audioSource = downloaded.source;
     } else {
         console.error(`[AudioProcessor] user=${message.userId} — Sem base64 nem rawMessageJson no inbox`);
+        console.warn(
+            `[AudioProcessor] user=${message.userId} messageType=audioMessage audioSource=none transcriptionStatus=failed transcriptionLength=0 responseType=audio_failed`,
+        );
         return {
             text: 'Recebi seu áudio, mas não consegui acessá-lo. Pode tentar de novo?',
             shouldSend: true,
@@ -725,202 +740,67 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
     }
     // ─────────────────────────────────────────────────────────────────────────
 
-    // ── Classificador de intenção + extração de produtos via Gemini ─────────────
-    const systemPrompt = `Você é o assistente de voz do Economiza Fácil, um app de comparação de preços de supermercado.
-
-Ouça o áudio e retorne APENAS um JSON com dois campos:
-
-1. "intent": classifique a intenção do usuário em uma dessas opções:
-   - "ADD_LIST"    → usuário quer adicionar produtos à lista de compras
-                     (ex: "coloca arroz", "preciso de feijão", "anota leite e ovos")
-   - "CHECK_PRICE" → usuário quer saber preço, oferta ou comparar mercados
-                     (ex: "quanto tá o arroz?", "onde o café tá mais barato?", "qual o preço do leite?")
-
-2. "produtos": lista de produtos mencionados, independente da intenção.
-   Formato: [{"nome": "nome do produto", "qtd": "quantidade ou vazio"}]
-   Se nenhum produto for identificado, retorne lista vazia.
-
-Exemplos:
-- "coloca 2 kg de arroz na lista" → {"intent":"ADD_LIST","produtos":[{"nome":"arroz","qtd":"2"}]}
-- "quanto tá o feijão?" → {"intent":"CHECK_PRICE","produtos":[{"nome":"feijão","qtd":""}]}
-- "preciso de leite, ovos e manteiga" → {"intent":"ADD_LIST","produtos":[{"nome":"leite","qtd":""},{"nome":"ovos","qtd":""},{"nome":"manteiga","qtd":""}]}
-
-Retorne SOMENTE o JSON, sem texto adicional.`;
-
-    const geminiPayload = {
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: 'user', parts: [{ inline_data: { mime_type: mimeType, data: audioBase64 } }] }],
-        generationConfig: { responseMimeType: 'application/json' },
-    };
-
-    let geminiJson: any;
+    let transcriptionText: string | null = null;
     try {
-        console.log(`[AudioProcessor] user=${message.userId} — Chamando Gemini 2.5 Flash...`);
-        const geminiResp = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(geminiPayload) },
+        const audioBuffer = Buffer.from(audioBase64, 'base64');
+        transcriptionText = await aiService.transcribeAudio(new Uint8Array(audioBuffer), mimeType);
+    } catch (err: any) {
+        console.error(`[AudioProcessor] user=${message.userId} - Falha ao transcrever audio:`, err?.message || err);
+    }
+
+    const cleanTranscription = String(transcriptionText || '').trim();
+    if (!cleanTranscription) {
+        const status = transcriptionText === null ? 'failed' : 'empty';
+        const reason = transcriptionText === null ? 'audio_transcription_failed' : 'audio_empty';
+        console.warn(
+            `[AudioProcessor] user=${message.userId} messageType=audioMessage audioSource=${audioSource} transcriptionStatus=${status} transcriptionLength=0 responseType=${status === 'empty' ? 'audio_empty' : 'audio_failed'}`,
         );
-        if (!geminiResp.ok) {
-            const errText = await geminiResp.text();
-            console.error(`[AudioProcessor] user=${message.userId} — Gemini API erro HTTP ${geminiResp.status}:`, errText);
+        return {
+            text: status === 'empty'
+                ? 'Ouvi seu áudio, mas não consegui entender bem. Pode repetir ou mandar em texto?'
+                : 'Tive um problema ao processar seu áudio. Pode repetir em texto?',
+            shouldSend: true,
+            usedFallback: true,
+            reason,
+        };
+    }
+
+    console.log(
+        `[AudioProcessor] user=${message.userId} messageType=audioMessage audioSource=${audioSource} transcriptionStatus=success transcriptionLength=${cleanTranscription.length} responseType=audio_transcribed textPreview="${truncateForLog(cleanTranscription)}"`,
+    );
+
+    try {
+        const response = await chatService.processMessage(
+            cleanTranscription,
+            message.userId,
+            message.storageUserId || message.userId,
+        );
+        const responseText = String(response.text || '').trim();
+        if (!responseText) {
             return {
-                text: 'Tive um problema ao processar seu áudio. Pode repetir em texto?',
+                text: 'Recebi seu áudio, mas ainda não consegui montar uma resposta. Pode tentar em texto?',
                 shouldSend: true,
                 usedFallback: true,
-                reason: 'audio_gemini_api_error',
+                reason: 'audio_chat_empty_response',
             };
         }
-        geminiJson = await geminiResp.json();
+
+        return {
+            text: responseText,
+            shouldSend: true,
+            usedFallback: false,
+            reason: 'audio_transcribed',
+        };
     } catch (err: any) {
-        console.error(`[AudioProcessor] user=${message.userId} — Erro na chamada Gemini:`, err);
+        console.error(`[AudioProcessor] user=${message.userId} - Falha ao processar transcricao via ChatService:`, err?.message || err);
         return {
             text: 'Tive um problema ao processar seu áudio. Pode repetir em texto?',
             shouldSend: true,
             usedFallback: true,
-            reason: 'audio_gemini_fetch_error',
+            reason: 'audio_chat_error',
         };
     }
 
-    // Parseia resposta com intent + produtos
-    let intent: string = 'ADD_LIST';
-    let produtos: Array<{ nome: string; qtd: string }> = [];
-    try {
-        const rawText: string = geminiJson?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-        console.log(`[AudioProcessor] user=${message.userId} — Gemini respondeu:`, rawText);
-        const parsed = JSON.parse(rawText);
-        intent = String(parsed.intent || 'ADD_LIST').toUpperCase();
-        produtos = Array.isArray(parsed.produtos) ? parsed.produtos : [];
-    } catch (err: any) {
-        console.error(`[AudioProcessor] user=${message.userId} — Falha ao parsear JSON do Gemini:`, err);
-        return {
-            text: 'Entendi seu áudio mas não identifiquei o que você precisa. Pode me mandar em texto?',
-            shouldSend: true,
-            usedFallback: true,
-            reason: 'audio_gemini_parse_error',
-        };
-    }
-
-    console.log(`[AudioProcessor] user=${message.userId} — intent: ${intent}, produtos: ${produtos.length}`);
-
-    if (!produtos.length) {
-        return {
-            text: 'Ouvi seu áudio mas não identifiquei produtos. Pode repetir ou mandar em texto?',
-            shouldSend: true,
-            usedFallback: false,
-            reason: 'audio_no_products',
-        };
-    }
-
-    const parsedItems = produtos
-        .map((p, i) => ({
-            id: `audio_${Date.now()}_${i}`,
-            name: String(p.nome || '').trim(),
-            quantity: p.qtd ? (parseFloat(String(p.qtd).replace(',', '.')) || 1) : 1,
-        }))
-        .filter((item) => item.name);
-
-    if (!parsedItems.length) {
-        return {
-            text: 'Ouvi seu áudio mas não identifiquei produtos válidos. Pode tentar de novo?',
-            shouldSend: true,
-            usedFallback: false,
-            reason: 'audio_invalid_products',
-        };
-    }
-
-    // ── CHECK_PRICE: reusa a mesma trilha de texto para buscar preço/oferta ────
-    if (intent === 'CHECK_PRICE') {
-        const itemNames = parsedItems.map((i) => i.name).filter(Boolean).join(', ');
-        if (!itemNames) {
-            return {
-                text: 'Ouvi seu áudio, mas não consegui identificar o produto para consultar o preço. Pode repetir?',
-                shouldSend: true,
-                usedFallback: false,
-                reason: 'audio_check_price_no_items',
-            };
-        }
-
-        const priceQuery = `consultar preço de ${itemNames}`;
-        console.log(`[AudioProcessor] user=${message.userId} — CHECK_PRICE reroteado para ChatService: ${priceQuery}`);
-
-        try {
-            const response = await chatService.processMessage(
-                priceQuery,
-                message.userId,
-                message.storageUserId || message.userId,
-            );
-
-            const responseText = String(response.text || '').trim();
-            if (!responseText) {
-                return {
-                    text: 'Entendi que você quer saber o preço, mas não consegui montar a consulta agora. Pode tentar de novo em texto?',
-                    shouldSend: true,
-                    usedFallback: true,
-                    reason: 'audio_check_price_empty_response',
-                };
-            }
-
-            return {
-                text: responseText,
-                shouldSend: true,
-                usedFallback: false,
-                reason: 'audio_check_price_routed_to_chat',
-            };
-        } catch (err) {
-            console.error(`[AudioProcessor] user=${message.userId} — Falha ao consultar preço via ChatService:`, err);
-            return {
-                text: 'Tive um problema ao consultar o preço agora. Pode tentar novamente em texto?',
-                shouldSend: true,
-                usedFallback: true,
-                reason: 'audio_check_price_chat_error',
-            };
-        }
-    }
-
-    // ── ADD_LIST: salva na lista ativa do usuário no Firestore ──────────────────
-    const newItems = parsedItems;
-    const userId = message.storageUserId || message.userId;
-    try {
-        const listsRef = db.collection('users').doc(userId).collection('lists');
-        const activeSnap = await listsRef.where('status', '==', 'active').limit(1).get();
-
-        if (!activeSnap.empty) {
-            const activeDoc = activeSnap.docs[0];
-            const existingItems: unknown[] = activeDoc.data().items || [];
-            await activeDoc.ref.update({
-                items: [...existingItems, ...newItems],
-                updatedAt: serverTimestamp(),
-            });
-        } else {
-            await listsRef.add({
-                items: newItems,
-                status: 'active',
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-            });
-        }
-    } catch (err: any) {
-        console.error(`[AudioProcessor] user=${message.userId} — Erro ao salvar itens no Firestore:`, err);
-        return {
-            text: 'Identifiquei os produtos mas não consegui salvar na sua lista. Tente novamente.',
-            shouldSend: true,
-            usedFallback: true,
-            reason: 'audio_firestore_error',
-        };
-    }
-
-    const itemLines = newItems
-        .map((i) => `• ${i.name}${i.quantity !== 1 ? ` (${i.quantity})` : ''}`)
-        .join('\n');
-
-    console.log(`[AudioProcessor] user=${message.userId} — ${newItems.length} item(ns) adicionado(s) à lista`);
-
-    return {
-        text: `✅ Adicionei à sua lista:\n${itemLines}\n\nDigite *minha lista* para ver tudo! 🛒`,
-        shouldSend: true,
-        usedFallback: false,
-        reason: 'audio_processed_gemini',
-    };
 }
 
 async function buildResponse(rawMessage: InboxMessage): Promise<ResponseBuildResult> {
@@ -1173,6 +1053,7 @@ async function processInboxItem(item: { id: string; data: InboxMessage }) {
                 userId: data.userId,
                 sourceMessageId,
                 reason: responseBuild.reason,
+                metadata: { responseType: responseTypeForReason(responseBuild.reason), reason: responseBuild.reason },
             });
 
             console.log(
@@ -1226,7 +1107,11 @@ async function processInboxItem(item: { id: string; data: InboxMessage }) {
                 userId: data.userId,
                 sourceMessageId,
                 durationMs: inboxToOutboxMs,
-                metadata: responseBuild.usedFallback ? { responseType: 'fallback', reason: responseBuild.reason } : { responseType: 'resolved' },
+                metadata: {
+                    responseType: responseTypeForReason(responseBuild.reason),
+                    reason: responseBuild.reason,
+                    usedFallback: responseBuild.usedFallback,
+                },
             });
 
             console.log(`[EvolutionInboxWorker] [${correlationId}] Inbox ${id} processada para ${maskIdentifier(data.remoteJid)} (${sendResult.status}).`);

@@ -36,26 +36,31 @@ function extractFunctionSource(source, functionName) {
     throw new Error(`Nao foi possivel delimitar ${functionName}.`);
 }
 
-function extractCheckPriceBranch(source) {
-    const marker = "if (intent === 'CHECK_PRICE')";
-    const start = source.indexOf(marker);
+function extractFunctionBlock(source, functionName) {
+    const signature = `function ${functionName}`;
+    const start = source.indexOf(signature);
     if (start < 0) {
-        throw new Error('Nao foi possivel localizar o ramo CHECK_PRICE no worker.');
+        throw new Error(`Nao foi possivel localizar ${functionName} no worker.`);
     }
 
-    const nextMarker = '\n    const newItems = parsedItems;';
-    const end = source.indexOf(nextMarker, start);
-    if (end < 0) {
-        throw new Error('Nao foi possivel delimitar o ramo CHECK_PRICE no worker.');
+    const openBrace = source.indexOf('{', start);
+    let depth = 0;
+    for (let i = openBrace; i < source.length; i += 1) {
+        if (source[i] === '{') depth += 1;
+        if (source[i] === '}') {
+            depth -= 1;
+            if (depth === 0) return source.slice(start, i + 1);
+        }
     }
 
-    return source.slice(start, end);
+    throw new Error(`Nao foi possivel delimitar ${functionName}.`);
 }
 
 function buildAudioProcessor() {
     const workerSource = readFileSync(workerPath, 'utf8');
+    const helperSource = extractFunctionBlock(workerSource, 'truncateForLog');
     const functionSource = extractFunctionSource(workerSource, 'processAudioWithGemini');
-    const transpiled = ts.transpileModule(functionSource, {
+    const transpiled = ts.transpileModule(`${helperSource}\n${functionSource}`, {
         compilerOptions: {
             target: ts.ScriptTarget.ES2022,
             module: ts.ModuleKind.ES2022,
@@ -71,49 +76,25 @@ function buildAudioProcessor() {
             };
         },
     };
-
-    const fetchStub = async () => ({
-        ok: true,
-        async json() {
-            return {
-                candidates: [
-                    {
-                        content: {
-                            parts: [
-                                {
-                                    text: JSON.stringify({
-                                        intent: 'CHECK_PRICE',
-                                        produtos: [{ nome: 'arroz', qtd: '' }],
-                                    }),
-                                },
-                            ],
-                        },
-                    },
-                ],
-            };
+    const aiService = {
+        async transcribeAudio() {
+            return 'consultar preço de arroz';
         },
-        async text() {
-            return 'ok';
-        },
-    });
+    };
 
     const processAudioWithGemini = new Function(
+        'aiService',
         'chatService',
-        'fetch',
-        'console',
-        'process',
-        'db',
-        'serverTimestamp',
         'downloadAudioViaEvolution',
+        'Buffer',
+        'console',
         `${transpiled}\nreturn processAudioWithGemini;`,
     )(
+        aiService,
         chatService,
-        fetchStub,
-        { log() {}, warn() {}, error() {} },
-        { env: { GEMINI_API_KEY: 'test-key' } },
-        undefined,
-        undefined,
         async () => null,
+        Buffer,
+        { log() {}, warn() {}, error() {} },
     );
 
     return { processAudioWithGemini, capturedQueries };
@@ -131,18 +112,17 @@ test('CHECK_PRICE no audio deve ser roteado para o motor de consulta e retornar 
 
     assert.equal(capturedQueries.length, 1);
     assert.equal(capturedQueries[0], 'consultar preço de arroz');
-    assert.equal(result.reason, 'audio_check_price_routed_to_chat');
+    assert.equal(result.reason, 'audio_transcribed');
     assert.equal(result.text, 'R$ 9,99 no Atacadão');
     assert.equal(result.shouldSend, true);
     assert.equal(result.usedFallback, false);
     assert.ok(!result.text.includes('Vou buscar as ofertas'));
 });
 
-test('o ramo CHECK_PRICE nao pode voltar a parar na mensagem intermediaria', () => {
+test('audio deve transcrever antes de delegar intencao ao ChatService', () => {
     const workerSource = readFileSync(workerPath, 'utf8');
-    const branch = extractCheckPriceBranch(workerSource);
 
-    assert.match(branch, /chatService\.processMessage\(/);
-    assert.match(branch, /audio_check_price_routed_to_chat/);
-    assert.ok(!branch.includes('Vou buscar as ofertas'));
+    assert.match(workerSource, /aiService\.transcribeAudio\(/);
+    assert.match(workerSource, /chatService\.processMessage\(\s*cleanTranscription,/);
+    assert.doesNotMatch(workerSource, /audio_no_products/);
 });

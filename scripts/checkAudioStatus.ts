@@ -3,7 +3,7 @@ import { adminDb as db } from '../src/lib/firebase-admin';
 async function checkAudio() {
     console.log('--- BUSCANDO MENSAGENS DE ÁUDIO RECENTES ---');
     const snap = await db.collection('message_inbox')
-        .where('messageType', 'in', ['ptt', 'audio'])
+        .where('messageType', 'in', ['audioMessage', 'ptt', 'audio'])
         .orderBy('receivedAtIso', 'desc')
         .limit(3)
         .get();
@@ -16,7 +16,8 @@ async function checkAudio() {
     for (const doc of snap.docs) {
         const data = doc.data();
         console.log(`\n🔊 Áudio recebido em: ${data.receivedAtIso} | ID: ${doc.id}`);
-        console.log(`👤 Usuário: ${data.userId} | Status Inbox: ${data.status}`);
+        console.log(`👤 Usuário: ${data.userId} | Tipo: ${data.messageType} | Status Inbox: ${data.status}`);
+        console.log(`📎 Fonte: mediaBase64=${Boolean(data.mediaBase64)} | mediaUrl=${Boolean(data.mediaUrl)} | rawMessageJson=${Boolean(data.rawMessageJson)}`);
         
         // Busca resposta no outbox
         const outSnap = await db.collection('message_outbox')
