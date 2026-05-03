@@ -109,45 +109,6 @@ function categoryMatch(category: string, productName: string): boolean {
     return false;
 }
 
-function inferOfferLabel(query: string, matchedBase: string | undefined, offer: OfferResult): string {
-    if (offer.brandName?.trim()) {
-        return titleCase(offer.brandName);
-    }
-
-    const normalizedOfferName = normalizeCatalogText(offer.productName);
-    const baseCandidates = [query, matchedBase]
-        .map((value) => normalizeCatalogText(value || ''))
-        .filter(Boolean)
-        .sort((a, b) => b.length - a.length);
-
-    let remainder = normalizedOfferName;
-    for (const base of baseCandidates) {
-        if (remainder.startsWith(`${base} `)) {
-            remainder = remainder.slice(base.length).trim();
-            break;
-        }
-        if (remainder.includes(base)) {
-            remainder = remainder.replace(base, '').trim();
-        }
-    }
-
-    const inferred = remainder.split(/\s+/).filter(Boolean).slice(0, 2).join(' ');
-    return titleCase(inferred || offer.productName);
-}
-
-function shouldUseWebFallback(): boolean {
-    try {
-        const viteFlag = import.meta.env?.VITE_ALLOW_WEB_FALLBACK;
-        if (viteFlag !== undefined) {
-            return String(viteFlag).trim().toLowerCase() === 'true';
-        }
-    } catch {
-        // ignore import.meta access outside vite
-    }
-
-    return String(process.env.ALLOW_WEB_FALLBACK || '').trim().toLowerCase() === 'true';
-}
-
 class OfferEngine {
     async lookupSingle(
         productName: string,
@@ -726,10 +687,6 @@ class OfferEngine {
         } catch (err) {
             return `Erro ao buscar histórico de ${productName}.`;
         }
-    }
-
-    private formatProductHeader(productName: string): string {
-        return `🛒 ${productName.toUpperCase()}`;
     }
 
     // Usado pelo ListManager e pelo ShoppingComparisonService para comparar preços entre mercados.
