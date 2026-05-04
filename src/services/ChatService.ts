@@ -216,8 +216,8 @@ class ChatSession {
             shoppingList: [],
             userId,
             storageUserId,
-            transportMode: 'car',
-            consumption: 10,
+            transportMode: undefined,
+            consumption: undefined,
             isFirstContact: true,
         };
 
@@ -300,6 +300,20 @@ class ChatSession {
         
         const rawResponse = await this._generateRawResponse(message);
         
+        // ─── BLINDAGEM PERFIL CONFIÁVEL: Bypass IA para perfil ───
+        const isProfileIntent = this.context.lastIntent === 'ver_perfil_usuario';
+
+        if (isProfileIntent) {
+            console.log(`[ChatService] Blindagem: Bypass IA para perfil detectado.`);
+            conversationState.addMessage(this.context.userId, 'assistant', rawResponse.text);
+            await userProfileService.recordInteraction(this.context.userId, {
+                role: 'assistant',
+                content: rawResponse.text,
+                intent: this.context.lastIntent,
+            });
+            return rawResponse;
+        }
+
         const history = conversationState.getHistory(this.context.userId);
         const historyForGemini = history.slice(0, -1); 
         

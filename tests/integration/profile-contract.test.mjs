@@ -65,6 +65,19 @@ async function generateProfileResponse(prefs, richContext) {
            `Quer atualizar localização, transporte ou preferência?`;
 }
 
+/**
+ * Mock behavior of UserContextService.buildRichContext summary
+ */
+function generateRichContextSummary(prefs, favoriteMarkets = [], frequentProducts = []) {
+    return [
+        `USUARIO: Cliente`,
+        `TRANSPORTE: ${prefs.transportMode || 'não informado'} | CONSUMO: ${prefs.consumption || 'não informado'} | PASSAGEM: R$ 4.50`,
+        `PREFERENCIA: ${prefs.optimizationPreference || 'não informada'}`,
+        `MERCADOS FAVORITOS: ${favoriteMarkets.join(', ') || 'sem historico'}`,
+        `PRODUTOS FREQUENTES: ${frequentProducts.join(', ') || 'sem historico'}`,
+    ].join('\n');
+}
+
 function normalizeText(value) {
     return String(value || '')
         .toLowerCase()
@@ -152,5 +165,27 @@ describe('Profile Trusted Contract', () => {
         
         assert.strictEqual(response.includes('interações'), false);
         assert.strictEqual(response.includes('373'), false);
+    });
+
+    test('RichContextSummary: não deve conter defaults de carro/10/equilibrar se vazio', () => {
+        const prefs = {};
+        const summary = generateRichContextSummary(prefs);
+
+        assert.ok(summary.includes('TRANSPORTE: não informado'));
+        assert.ok(summary.includes('CONSUMO: não informado'));
+        assert.ok(summary.includes('PREFERENCIA: não informada'));
+
+        assert.strictEqual(summary.includes('carro'), false);
+        assert.strictEqual(summary.includes('10 km/l'), false);
+        assert.strictEqual(summary.includes('equilibrar'), false);
+    });
+
+    test('RichContextSummary: mantém dados confirmados', () => {
+        const prefs = { transportMode: 'moto', consumption: 35, optimizationPreference: 'economizar' };
+        const summary = generateRichContextSummary(prefs);
+
+        assert.ok(summary.includes('TRANSPORTE: moto'));
+        assert.ok(summary.includes('CONSUMO: 35'));
+        assert.ok(summary.includes('PREFERENCIA: economizar'));
     });
 });

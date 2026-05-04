@@ -98,8 +98,8 @@ class UserContextService {
 
         const summary = [
             `USUARIO: ${userName || preferences.name || 'Cliente'}`,
-            `TRANSPORTE: ${preferences.transportMode || 'carro'} | CONSUMO: ${preferences.consumption || 10} km/l | PASSAGEM: R$ ${Number(preferences.busTicket || 4.5).toFixed(2)}`,
-            `PREFERENCIA: ${preferences.optimizationPreference || 'equilibrar'}`,
+            `TRANSPORTE: ${preferences.transportMode || 'não informado'} | CONSUMO: ${preferences.consumption || 'não informado'} | PASSAGEM: R$ ${Number(preferences.busTicket || 4.5).toFixed(2)}`,
+            `PREFERENCIA: ${preferences.optimizationPreference || 'não informada'}`,
             `MERCADOS FAVORITOS: ${favoriteMarkets.join(', ') || 'sem historico'}`,
             `PRODUTOS FREQUENTES: ${frequentProducts.join(', ') || 'sem historico'}`,
             `PRODUTOS PERTO DE ACABAR: ${predictedNeeds.map((item) => `${item.product} (${item.daysRemaining}d)`).join(', ') || 'nenhum'}`,
