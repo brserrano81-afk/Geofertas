@@ -55,6 +55,12 @@ interface UserLocation {
     address?: string;
 }
 
+interface PendingGpsLocation {
+    type: 'gps_location';
+    lat: number;
+    lng: number;
+}
+
 interface ChatContext {
     shoppingList: ListItem[];
     lastProduct?: string;
@@ -200,6 +206,27 @@ function shouldAutoSaveReceipt(pipelineResult: PipelineResult, receiptData: any)
     return Number(receiptData?.confidence || 0) >= RECEIPT_AUTO_SAVE_THRESHOLD;
 }
 
+function parseGpsLocationUpdate(message: string): PendingGpsLocation | null {
+    const coordsMatch = message.match(/\[GPS_LOCATION_UPDATE\]\s*([\d.-]+),\s*([\d.-]+)/);
+    if (!coordsMatch) return null;
+
+    const lat = parseFloat(coordsMatch[1]);
+    const lng = parseFloat(coordsMatch[2]);
+    if (isNaN(lat) || isNaN(lng)) return null;
+
+    return { type: 'gps_location', lat, lng };
+}
+
+function isPendingGpsLocation(value: unknown): value is PendingGpsLocation {
+    if (!value || typeof value !== 'object') return false;
+    const data = value as Partial<PendingGpsLocation>;
+    return data.type === 'gps_location'
+        && typeof data.lat === 'number'
+        && typeof data.lng === 'number'
+        && !isNaN(data.lat)
+        && !isNaN(data.lng);
+}
+
 class ChatSession {
     private static diagnosticsChecked = false;
 
@@ -263,6 +290,20 @@ class ChatSession {
 
         // LGPD: Interceptar comando de exclusao de dados
         const normalizedForLgpd = message.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+        const gpsLocationUpdate = message.startsWith('[GPS_LOCATION_UPDATE]')
+            ? parseGpsLocationUpdate(message)
+            : null;
+
+        if (gpsLocationUpdate && !(await lgpdConsentService.hasConsented(this.context.userId))) {
+            const consentGate = await lgpdConsentService.evaluateConsentGate(this.context.userId, message);
+            conversationState.transition(
+                'AWAITING_LGPD_CONSENT',
+                'lgpd_consent',
+                gpsLocationUpdate,
+                'Aguardando aceite LGPD',
+            );
+            return { text: consentGate.responseText || '' };
+        }
 
         // 📍 Interceptar comando nativo de localização enviado pela Bridge
         if (message.startsWith('[GPS_LOCATION_UPDATE]')) {
@@ -288,6 +329,18 @@ class ChatSession {
         }
 
         const consentGate = await lgpdConsentService.evaluateConsentGate(this.context.userId, message);
+        if (consentGate.justConsented && conversationState.current === 'AWAITING_LGPD_CONSENT') {
+            const pendingLocation = isPendingGpsLocation(conversationState.data)
+                ? conversationState.data
+                : null;
+            if (pendingLocation) {
+                return this.handleCoords(pendingLocation.lat, pendingLocation.lng);
+            }
+
+            conversationState.reset();
+            return { text: 'Aceite registrado. Pode mandar um produto, sua lista ou pedir ofertas de um mercado.' };
+        }
+
         if (!consentGate.allowed) {
             return { text: consentGate.responseText || '' };
         }

@@ -19,7 +19,7 @@ export const CONSENT_ONBOARDING_MESSAGE =
 export const CONSENT_REQUIRED_MESSAGE =
     'Para usar o Economiza Fácil, preciso do seu aceite para o tratamento dos dados necessários ao funcionamento do serviço. Se desejar, posso te enviar nossa Política de Privacidade.';
 
-const ACCEPTANCE_WORDS = new Set(['sim', 'aceito', 'ok', 'concordo']);
+const ACCEPTANCE_WORDS = new Set(['sim', 'aceito', 'ok', 'concordo', 'continuar']);
 
 export interface UserConsent {
     lgpdConsent?: boolean;
