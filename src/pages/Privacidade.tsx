@@ -1,140 +1,160 @@
 import { Link } from "react-router-dom";
 
-const policySections = [
+interface PolicySection {
+  title: string;
+  paragraphs: string[];
+  bullets?: string[];
+  note?: string;
+}
+
+const sections: PolicySection[] = [
   {
-    title: "Quais dados podemos coletar",
-    bullets: [
-      "identificador do WhatsApp",
-      "BSUID",
-      "listas de compras",
-      "histórico de interações",
-      "preferências de mercado",
-      "informações necessárias para personalizar sua experiência no serviço",
-    ],
-  },
-  {
-    title: "Para que usamos esses dados",
-    bullets: [
-      "comparar preços e ofertas",
-      "salvar listas e histórico",
-      "personalizar recomendações e respostas",
-      "melhorar a experiência do usuário",
-      "gerar análises internas e métricas de uso de forma compatível com a LGPD",
-    ],
-  },
-  {
-    title: "Armazenamento e proteção",
+    title: "1. Quem somos",
     paragraphs: [
-      "Os dados são armazenados com medidas de segurança adequadas e tratados conforme a Lei Geral de Proteção de Dados Pessoais (LGPD).",
+      "O Economiza Fácil é um assistente via WhatsApp que ajuda usuários a montar listas de compras, comparar preços e encontrar mercados próximos.",
     ],
   },
   {
-    title: "Retenção e anonimização",
-    paragraphs: [
-      "Dados inativos podem ser anonimizados após 365 dias, conforme regras internas de retenção e necessidade operacional do serviço.",
-    ],
-  },
-  {
-    title: "Direitos do usuário",
+    title: "2. Quais dados usamos",
+    paragraphs: ["Podemos tratar:"],
     bullets: [
-      "acesso aos seus dados",
-      "correção de informações",
-      "exclusão dos seus dados",
-      "esclarecimentos sobre o tratamento realizado",
+      "número de WhatsApp;",
+      "mensagens enviadas ao bot;",
+      "listas de compras;",
+      "produtos pesquisados;",
+      "localização aproximada ou localização enviada pelo usuário;",
+      "preferências informadas, como transporte, mercado favorito ou objetivo de economia;",
+      "registros técnicos necessários para segurança, auditoria e funcionamento.",
+    ],
+    note: "Não pedimos CPF, documento, senha bancária ou dados de pagamento pelo WhatsApp.",
+  },
+  {
+    title: "3. Para que usamos seus dados",
+    paragraphs: ["Usamos os dados para:"],
+    bullets: [
+      "responder suas mensagens;",
+      "salvar sua lista de compras;",
+      "comparar preços;",
+      "encontrar mercados próximos;",
+      "personalizar a experiência;",
+      "melhorar o serviço;",
+      "cumprir obrigações legais e de segurança.",
     ],
   },
   {
-    title: "Solicitação de exclusão",
+    title: "4. Base legal",
     paragraphs: [
-      "A exclusão dos dados pode ser solicitada pelo WhatsApp ou por nosso canal oficial de atendimento.",
+      "O tratamento pode ocorrer com base no consentimento do usuário e na execução do serviço solicitado, conforme a LGPD.",
     ],
   },
   {
-    title: "Contato para privacidade",
-    paragraphs: ["privacidade@economizafacil.com.br"],
+    title: "5. Compartilhamento",
+    paragraphs: [
+      "Não vendemos seus dados pessoais.",
+      "Dados agregados e sem identificação pessoal podem ser usados para análises internas e melhoria do serviço.",
+      "Algumas integrações técnicas podem ser usadas para manter o serviço funcionando, como infraestrutura, mensageria, banco de dados e recursos de IA.",
+    ],
+  },
+  {
+    title: "6. Localização",
+    paragraphs: [
+      "A localização é usada para encontrar mercados próximos e calcular distância.",
+      "Você pode atualizar ou apagar sua localização quando quiser.",
+    ],
+  },
+  {
+    title: "7. Seus direitos",
+    paragraphs: ["Você pode solicitar:"],
+    bullets: [
+      "confirmação de tratamento;",
+      "acesso aos dados;",
+      "correção;",
+      "exclusão;",
+      "revogação do consentimento;",
+      "informações sobre uso e compartilhamento.",
+    ],
+  },
+  {
+    title: "8. Como pedir exclusão ou correção",
+    paragraphs: ["Pelo próprio WhatsApp, você pode mandar:"],
+    bullets: [
+      '"o que sabe sobre mim?"',
+      '"corrigir meus dados"',
+      '"apagar meus dados"',
+      '"privacidade"',
+    ],
+  },
+  {
+    title: "9. Segurança",
+    paragraphs: [
+      "Adotamos medidas técnicas para proteger os dados e evitar acesso indevido.",
+      "Alguns registros técnicos podem ser mantidos pelo tempo necessário para segurança, auditoria e funcionamento do serviço.",
+    ],
+  },
+  {
+    title: "10. Contato",
+    paragraphs: [
+      "Para dúvidas sobre privacidade, entre em contato pelo WhatsApp oficial do Economiza Fácil ou pelo canal informado no site.",
+    ],
   },
 ];
 
 export default function Privacidade() {
   return (
-    <div
+    <main
       style={{
-        width: "min(960px, 100%)",
+        width: "min(920px, 100%)",
         margin: "0 auto",
-        display: "grid",
-        gap: 20,
+        padding: "clamp(20px, 4vw, 40px) 0",
       }}
     >
-      <section
+      <article
         style={{
-          padding: "clamp(24px, 4vw, 40px)",
-          borderRadius: 30,
-          background:
-            "linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(246,250,248,0.96) 100%)",
-          border: "1px solid rgba(18,51,46,0.08)",
-          boxShadow: "0 24px 60px rgba(12,63,56,0.08)",
-          display: "grid",
-          gap: 18,
+          background: "#ffffff",
+          border: "1px solid rgba(18,51,46,0.10)",
+          borderRadius: 8,
+          boxShadow: "0 18px 50px rgba(12,63,56,0.08)",
+          padding: "clamp(24px, 5vw, 48px)",
         }}
       >
-        <span
-          style={{
-            display: "inline-flex",
-            width: "fit-content",
-            minHeight: 34,
-            padding: "0 14px",
-            alignItems: "center",
-            borderRadius: 999,
-            background: "rgba(15,111,94,0.10)",
-            color: "#0d6f5e",
-            fontSize: 12,
-            fontWeight: 900,
-            letterSpacing: 1,
-            textTransform: "uppercase",
-          }}
-        >
-          Privacidade
-        </span>
-
-        <div style={{ display: "grid", gap: 12 }}>
+        <header style={{ display: "grid", gap: 12, marginBottom: 30 }}>
+          <p
+            style={{
+              margin: 0,
+              color: "#0d6f5e",
+              fontSize: 13,
+              fontWeight: 800,
+              textTransform: "uppercase",
+            }}
+          >
+            Documento público
+          </p>
           <h1
             style={{
               margin: 0,
               color: "#112a26",
-              fontSize: "clamp(2.2rem, 5vw, 4rem)",
-              lineHeight: 0.96,
-              letterSpacing: -1.6,
+              fontSize: "clamp(2rem, 5vw, 3.4rem)",
+              lineHeight: 1.05,
             }}
           >
             Política de Privacidade — Economiza Fácil
           </h1>
-          <p style={{ margin: 0, color: "rgba(17,42,38,0.74)", lineHeight: 1.8, fontSize: 17 }}>
-            No Economiza Fácil, tratamos seus dados para oferecer uma experiência mais útil,
-            personalizada e segura na comparação de preços e gestão da sua lista de compras.
+          <p style={{ margin: 0, color: "rgba(17,42,38,0.70)", lineHeight: 1.7 }}>
+            Última atualização: 4 de maio de 2026
           </p>
-        </div>
+        </header>
 
-        <div style={{ display: "grid", gap: 18 }}>
-          {policySections.map((section) => (
-            <article
-              key={section.title}
-              style={{
-                padding: "20px 22px",
-                borderRadius: 24,
-                background: "#ffffff",
-                border: "1px solid rgba(16,50,45,0.08)",
-                display: "grid",
-                gap: 12,
-              }}
-            >
-              <h2 style={{ margin: 0, color: "#12322d", fontSize: 24, lineHeight: 1.1 }}>
+        <div style={{ display: "grid", gap: 22 }}>
+          {sections.map((section) => (
+            <section key={section.title} style={{ display: "grid", gap: 10 }}>
+              <h2 style={{ margin: 0, color: "#12322d", fontSize: 22, lineHeight: 1.2 }}>
                 {section.title}
               </h2>
 
-              {section.paragraphs?.map((paragraph) => (
+              {section.paragraphs.map((paragraph) => (
                 <p
                   key={paragraph}
-                  style={{ margin: 0, color: "rgba(17,42,38,0.76)", lineHeight: 1.8, fontSize: 16 }}
+                  style={{ margin: 0, color: "rgba(17,42,38,0.78)", lineHeight: 1.75 }}
                 >
                   {paragraph}
                 </p>
@@ -146,9 +166,7 @@ export default function Privacidade() {
                     margin: 0,
                     paddingLeft: 22,
                     color: "rgba(17,42,38,0.78)",
-                    lineHeight: 1.9,
-                    display: "grid",
-                    gap: 2,
+                    lineHeight: 1.8,
                   }}
                 >
                   {section.bullets.map((bullet) => (
@@ -156,42 +174,57 @@ export default function Privacidade() {
                   ))}
                 </ul>
               ) : null}
-            </article>
+
+              {section.note ? (
+                <p
+                  style={{
+                    margin: 0,
+                    color: "#12322d",
+                    fontWeight: 700,
+                    lineHeight: 1.7,
+                  }}
+                >
+                  {section.note}
+                </p>
+              ) : null}
+            </section>
           ))}
         </div>
 
-        <div
+        <footer
           style={{
+            borderTop: "1px solid rgba(18,51,46,0.10)",
+            marginTop: 34,
+            paddingTop: 22,
             display: "flex",
             justifyContent: "space-between",
             gap: 14,
             alignItems: "center",
             flexWrap: "wrap",
-            paddingTop: 8,
           }}
         >
-          <div style={{ color: "rgba(17,42,38,0.60)", lineHeight: 1.7 }}>
-            Documento público de privacidade do Economiza Fácil.
-          </div>
+          <p style={{ margin: 0, color: "rgba(17,42,38,0.62)", lineHeight: 1.6 }}>
+            Esta página resume como o Economiza Fácil trata dados pessoais.
+          </p>
           <Link
             to="/"
             style={{
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
-              minHeight: 48,
-              padding: "0 18px",
-              borderRadius: 16,
-              background: "linear-gradient(135deg, #0f6f60 0%, #11a288 100%)",
-              color: "white",
+              minHeight: 44,
+              padding: "0 16px",
+              borderRadius: 8,
+              background: "#0f6f60",
+              color: "#ffffff",
               textDecoration: "none",
-              fontWeight: 900,
+              fontWeight: 800,
             }}
           >
-            Voltar para a landing
+            Voltar para o início
           </Link>
-        </div>
-      </section>
-    </div>
+        </footer>
+      </article>
+    </main>
   );
 }

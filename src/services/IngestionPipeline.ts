@@ -1,4 +1,4 @@
-﻿// IngestionPipeline - Chain of Responsibility para entrada do usuario
+// IngestionPipeline - Chain of Responsibility para entrada do usuario
 // Detecta tipo de input: link SEFAZ, imagem, QR code
 
 import { visionService } from './VisionService';
@@ -107,12 +107,19 @@ class IngestionPipeline {
 
             if (result && result.type === 'receipt' && (result.items?.length > 0 || result.total > 0)) {
                 console.log('[IngestionPipeline] Cupom fiscal identificado via visao.');
-                return { success: true, data: result, source: 'receipt_vision' };
+                return { 
+                    success: true, 
+                    data: { ...result, isReadable: result.isReadable ?? true }, 
+                    source: 'receipt_vision' 
+                };
             }
 
             return {
                 success: false,
-                error: 'Não consegui extrair dados da imagem. Tente uma foto mais nítida do cupom ou da oferta.',
+                data: result,
+                error: result?.isReadable === false 
+                    ? 'A imagem está um pouco difícil de ler. Pode tirar outra foto mais nítida ou digitar os itens?' 
+                    : 'Não consegui extrair dados da imagem. Tente uma foto mais nítida do cupom ou da oferta.',
             };
         } catch {
             return { success: false, error: 'Erro ao processar a imagem.' };
@@ -140,11 +147,17 @@ class IngestionPipeline {
                         cnpj: data.cnpj || '',
                         total: data.totalValue || 0,
                         confidence: 0.99,
+                        isReadable: true,
                         type: 'receipt',
                         items: data.items.map((item: any) => ({
+                            productName: item.name,
                             name: item.name,
+                            brand: '', // SEFAZ raramente traz marca explicitamente
                             price: item.totalPrice || item.unitPrice || 0,
+                            unitPrice: item.unitPrice || 0,
                             quantity: item.quantity || 1,
+                            unit: item.unit || 'un',
+                            type: (item.unit?.toLowerCase() === 'kg' || item.unit?.toLowerCase() === 'g') ? 'peso' : 'unidade'
                         })),
                     },
                     source: 'receipt_sefaz',

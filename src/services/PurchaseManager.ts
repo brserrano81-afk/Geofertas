@@ -46,10 +46,19 @@ class PurchaseManager {
         return { text };
     }
 
-    async saveConfirmedPurchase(receiptData: any, items?: Array<{ name: string; price: number }>) {
-        const safeItems = Array.isArray(items) && items.length > 0
+    async saveConfirmedPurchase(receiptData: any, items?: Array<any>) {
+        const safeItems = (Array.isArray(items) && items.length > 0
             ? items
-            : Array.isArray(receiptData.items) ? receiptData.items : [];
+            : Array.isArray(receiptData.items) ? receiptData.items : [])
+            .map(item => ({
+                name: item.productName || item.name || 'Produto desconhecido',
+                brand: item.brand || '',
+                price: Number(item.price || 0),
+                unitPrice: Number(item.unitPrice || 0),
+                quantity: Number(item.quantity || 1),
+                unit: item.unit || 'un',
+                type: item.type || 'unidade'
+            }));
 
         const totalAmount = Number(
             receiptData.total ||
@@ -58,26 +67,21 @@ class PurchaseManager {
             0,
         );
 
+        const purchaseData = {
+            marketName: receiptData.marketName || 'Mercado',
+            cnpj: receiptData.cnpj || '',
+            items: safeItems,
+            totalAmount,
+            savedAt: new Date().toISOString(),
+            createdAt: serverTimestamp(),
+            source: receiptData.type || 'receipt',
+            confidence: Number(receiptData.confidence || 0) || null,
+        };
+
         if (isServer) {
-            await db.collection('users').doc(this.userId).collection('purchases').add({
-                marketName: receiptData.marketName || 'Mercado',
-                items: safeItems,
-                totalAmount,
-                savedAt: new Date().toISOString(),
-                createdAt: serverTimestamp(),
-                source: receiptData.type || 'receipt',
-                confidence: Number(receiptData.confidence || 0) || null,
-            });
+            await db.collection('users').doc(this.userId).collection('purchases').add(purchaseData);
         } else {
-            await addDoc(collection(db, 'users', this.userId, 'purchases'), {
-                marketName: receiptData.marketName || 'Mercado',
-                items: safeItems,
-                totalAmount,
-                savedAt: new Date().toISOString(),
-                createdAt: serverTimestamp(),
-                source: receiptData.type || 'receipt',
-                confidence: Number(receiptData.confidence || 0) || null,
-            });
+            await addDoc(collection(db, 'users', this.userId, 'purchases'), purchaseData);
         }
 
         // ── Analytics anônimo (fire-and-forget, sem PII) ─────────────────────

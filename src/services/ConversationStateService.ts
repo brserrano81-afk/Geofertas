@@ -34,6 +34,14 @@ export type ConversationStatus =
     | 'AWAITING_ONBOARDING_ANSWER'
     | 'AWAITING_LIST_RECOVERY'
     | 'AWAITING_LGPD_CONSENT'
+    | 'AWAITING_MARKET_NAME'
+    | 'AWAITING_RECEIPT_CORRECTION'
+    | 'AWAITING_LOCATION_CONFIRMATION'
+    | 'AWAITING_TABLOID_CONFIRMATION'
+    | 'AWAITING_TRANSPORT_CONFIRMATION'
+    | 'AWAITING_CONSUMPTION_CONFIRMATION'
+    | 'AWAITING_NAME_CONFIRMATION'
+    | 'AWAITING_PREFERENCE_CONFIRMATION'
     | 'CRIANDO_LISTA';
 
 export class ConversationStateService {
@@ -63,6 +71,14 @@ export class ConversationStateService {
         'AWAITING_LIST_RECOVERY',
         'AWAITING_LGPD_CONSENT',
         'AWAITING_SHARE_TARGET',
+        'AWAITING_MARKET_NAME',
+        'AWAITING_RECEIPT_CORRECTION',
+        'AWAITING_LOCATION_CONFIRMATION',
+        'AWAITING_TABLOID_CONFIRMATION',
+        'AWAITING_TRANSPORT_CONFIRMATION',
+        'AWAITING_CONSUMPTION_CONFIRMATION',
+        'AWAITING_NAME_CONFIRMATION',
+        'AWAITING_PREFERENCE_CONFIRMATION',
     ];
 
     addMessage(userId: string, role: 'user' | 'assistant', content: string) {
@@ -202,7 +218,9 @@ export class ConversationStateService {
         return state === 'AWAITING_NAME'
             || state === 'AWAITING_TRANSPORT_FOR_LIST'
             || state === 'AWAITING_TRANSPORT_CONSUMPTION'
-            || state === 'AWAITING_SHARE_TARGET';
+            || state === 'AWAITING_SHARE_TARGET'
+            || state === 'AWAITING_MARKET_NAME'
+            || state === 'AWAITING_RECEIPT_CORRECTION';
     }
 
     private shouldResolveHotState(isYes: boolean, isNo: boolean): boolean {

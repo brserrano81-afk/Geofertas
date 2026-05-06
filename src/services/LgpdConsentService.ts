@@ -10,14 +10,27 @@ import { identityResolutionService } from './IdentityResolutionService';
 export const CURRENT_CONSENT_VERSION = 'v1';
 export const DEFAULT_RETENTION_DAYS = 365;
 export const LOCATION_TTL_DAYS = 90;
+export const PRIVACY_POLICY_URL = 'https://economizafacil.ia.br/privacidade';
 
 export const CONSENT_ONBOARDING_MESSAGE =
-    'Antes de começarmos, preciso te informar que utilizamos seus dados para salvar listas e histórico, comparar preços, personalizar sua experiência e gerar análises internas compatíveis com a LGPD.\n' +
-    'Ao continuar, você concorda com nossa Política de Privacidade.\n' +
-    'Responda SIM para continuar.';
+    'Antes de começarmos, preciso do seu OK. 🔐\n\n' +
+    'Para funcionar bem, o Economiza Fácil usa alguns dados seus, como:\n' +
+    '📍 localização aproximada, para achar mercados perto de você;\n' +
+    '🛒 listas e produtos pesquisados, para comparar preços;\n' +
+    '💬 histórico de conversa, para melhorar sua experiência.\n\n' +
+    'Seus dados são usados apenas para operar e melhorar o Economiza Fácil.\n' +
+    'Você não precisa informar CPF, documento ou dados bancários.\n\n' +
+    'Você pode pedir para ver, corrigir ou apagar seus dados quando quiser.\n\n' +
+    'Ao continuar, você concorda com nossa Política de Privacidade:\n' +
+    `${PRIVACY_POLICY_URL}\n\n` +
+    'Responda SIM, OK ou ACEITO para continuar.';
 
-export const CONSENT_REQUIRED_MESSAGE =
-    'Para usar o Economiza Fácil, preciso do seu aceite para o tratamento dos dados necessários ao funcionamento do serviço. Se desejar, posso te enviar nossa Política de Privacidade.';
+export const PRIVACY_COMMAND_MESSAGE =
+    '🔐 Política de Privacidade do Economiza Fácil\n\n' +
+    'Usamos dados como número de WhatsApp, mensagens, listas, produtos pesquisados e localização aproximada para operar e melhorar o serviço.\n' +
+    'Não pedimos CPF, documento ou dados bancários pelo WhatsApp.\n\n' +
+    'Você pode pedir para ver, corrigir ou apagar seus dados quando quiser.\n\n' +
+    `Leia a política completa aqui:\n${PRIVACY_POLICY_URL}`;
 
 const ACCEPTANCE_WORDS = new Set(['sim', 'aceito', 'ok', 'concordo', 'continuar']);
 
@@ -114,7 +127,7 @@ class LgpdConsentService {
         return {
             allowed: false,
             justConsented: false,
-            responseText: CONSENT_ONBOARDING_MESSAGE + '\n\n' + CONSENT_REQUIRED_MESSAGE,
+            responseText: CONSENT_ONBOARDING_MESSAGE,
         };
     }
 

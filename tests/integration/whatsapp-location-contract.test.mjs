@@ -321,3 +321,33 @@ test('LGPD deve aceitar continuar como aceite explicito', () => {
 
     assert.match(lgpdSource, /ACCEPTANCE_WORDS = new Set\(\[[^\]]*'continuar'[^\]]*\]\)/);
 });
+
+test('mensagem LGPD deve explicar dados usados e apontar para /privacidade', () => {
+    const lgpdSource = readFileSync(lgpdConsentServicePath, 'utf8');
+
+    assert.match(lgpdSource, /Antes de começarmos, preciso do seu OK/);
+    assert.match(lgpdSource, /localização aproximada/);
+    assert.match(lgpdSource, /listas e produtos pesquisados/);
+    assert.match(lgpdSource, /histórico de conversa/);
+    assert.match(lgpdSource, /CPF, documento ou dados bancários/);
+    assert.match(lgpdSource, /ver, corrigir ou apagar seus dados/);
+    assert.match(lgpdSource, /https:\/\/economizafacil\.ia\.br\/privacidade/);
+    assert.match(lgpdSource, /Responda SIM, OK ou ACEITO para continuar/);
+});
+
+test('comandos de privacidade devem retornar link da politica antes do gate normal', () => {
+    const chatSource = readFileSync(chatServicePath, 'utf8');
+    const lgpdSource = readFileSync(lgpdConsentServicePath, 'utf8');
+    const processBlock = extractSlice(
+        chatSource,
+        'const isDeletionCommand =',
+        'const consentGate = await lgpdConsentService.evaluateConsentGate(this.context.userId, message);',
+    );
+
+    assert.match(lgpdSource, /PRIVACY_COMMAND_MESSAGE/);
+    assert.match(lgpdSource, /https:\/\/economizafacil\.ia\.br\/privacidade/);
+    assert.match(chatSource, /isPrivacyInfoCommand\(normalizedMessage: string\)/);
+    assert.match(chatSource, /privacidade\|politica de privacidade\|politica privacidade\|lgpd\|meus dados/);
+    assert.match(processBlock, /isPrivacyInfoCommand\(normalizedForLgpd\)/);
+    assert.match(processBlock, /PRIVACY_COMMAND_MESSAGE/);
+});

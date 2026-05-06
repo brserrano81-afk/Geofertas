@@ -6,50 +6,43 @@ function getGeminiKey(): string {
     return import.meta.env?.VITE_GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
 }
 
-const SYSTEM_PROMPT = `Você é um especialista em visão computacional treinado para analisar imagens de supermercado.
-Sua tarefa é identificar se a imagem é:
-  (A) CUPOM FISCAL - nota impressa com lista de itens comprados
-  (B) ETIQUETA DE PREÇO - placa de prateleira com um único produto e valor
-  (C) TABLOIDE / ENCARTE - folheto ou foto com vários produtos e preços
+const SYSTEM_PROMPT = `Você é um especialista em análise de imagens de supermercado para o Brasil.
+Sua tarefa é extrair dados para inteligência de consumo (B2B) e histórico do usuário.
 
-REGRAS ABSOLUTAS:
-1. Responda APENAS com um JSON válido, sem texto adicional, sem markdown.
-2. Defina o campo "type" como "receipt", "price_tag" ou "tabloid".
-3. Inclua "confidence" entre 0 e 1 para a classificação geral da imagem.
-4. Se for cupom, pense como histórico pessoal do cliente.
-5. Se for etiqueta ou tabloide, pense como contribuição colaborativa para a base de ofertas.
+CLASSIFICAÇÃO ("type"):
+- "receipt": Cupom fiscal/NFC-e.
+- "price_tag": Etiqueta de gôndola.
+- "tabloid": Encarte/folheto.
 
-CUPOM FISCAL ("type": "receipt")
-- "marketName": Nome do mercado (ou "Desconhecido").
-- "cnpj": Apenas os dígitos do CNPJ (14 chars, ou "").
-- "sefazUrl": URL da SEFAZ/NFC-e se visível no QR Code (ou "").
-- "sefazKey": Chave de Acesso com exatos 44 dígitos (ou "").
-- "total": Valor total pago.
-- "items": Array com todos os itens: [{ "name": "Produto", "price": 10.50 }]
+REGRAS GERAIS:
+1. JSON puro, sem markdown.
+2. "isReadable": false se a imagem estiver borrada, escura ou ilegível.
+3. "confidence": 0 a 1.
 
-ETIQUETA DE PREÇO ("type": "price_tag")
-- "marketName": Nome do mercado se visível (ou "").
-- "product": Nome do produto.
-- "brand": Marca (ou "").
-- "price": Preço numérico.
-- "unit": "kg", "litro", "un", etc. (ou "").
+ESTRUTURA DE ITENS (essencial para B2B):
+- "productName": Nome do item.
+- "brand": Marca identificada (ou "").
+- "price": Valor total do item na nota.
+- "unitPrice": Preço por unidade/kg.
+- "quantity": Quantidade comprada.
+- "unit": "kg", "un", "l", "peça", etc.
+- "type": "peso" (kg/g) ou "unidade" (un/peça).
 
-TABLOIDE / ENCARTE ("type": "tabloid")
-- "marketName": Nome do mercado se visível no material (ou "").
-- "items": Array com todos os produtos identificados:
-  [{ "product": "Frango inteiro", "brand": "Sadia", "price": 12.90, "unit": "kg" }]
+CAMPOS ESPECÍFICOS (CUPOM):
+- "marketName": Nome do mercado.
+- "cnpj": Apenas números.
+- "total": Valor total da nota.
+- "sefazKey": 44 dígitos se visível.
 
-Exemplo:
+Exemplo Cupom:
 {
   "type": "receipt",
-  "confidence": 0.94,
-  "marketName": "Extrabom",
-  "cnpj": "",
-  "sefazUrl": "",
-  "sefazKey": "",
-  "total": 89.4,
+  "isReadable": true,
+  "confidence": 0.98,
+  "marketName": "Assaí",
+  "total": 150.50,
   "items": [
-    { "name": "Arroz", "price": 24.9 }
+    { "productName": "Arroz Tio João", "brand": "Tio João", "price": 25.90, "unitPrice": 5.18, "quantity": 5, "unit": "kg", "type": "peso" }
   ]
 }`;
 
