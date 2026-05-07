@@ -3,7 +3,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 function getGeminiKey(): string {
-    return import.meta.env?.VITE_GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
+    return import.meta.env?.VITE_GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
 }
 
 const SYSTEM_PROMPT = `Você é um especialista em análise de imagens de supermercado para o Brasil.
@@ -75,7 +75,16 @@ class VisionService {
 
             const responseText = result.response.text();
             const cleaned = responseText.replace(/```json\s*/g, '').replace(/```/g, '').trim();
-            const parsed = JSON.parse(cleaned);
+
+            let parsed: any;
+            try {
+                parsed = JSON.parse(cleaned);
+            } catch (parseError: any) {
+                console.error('[VisionService] JSON parsing failed:', parseError.message);
+                console.error('[VisionService] Response text:', responseText);
+                console.error('[VisionService] Cleaned text:', cleaned);
+                return null;
+            }
 
             if (typeof parsed.confidence !== 'number') {
                 parsed.confidence = 0.7;
@@ -97,11 +106,19 @@ class VisionService {
     }
 
     private uint8ToBase64(uint8Array: Uint8Array): string {
-        let binary = '';
-        for (let i = 0; i < uint8Array.length; i++) {
-            binary += String.fromCharCode(uint8Array[i]);
+        if (typeof btoa === 'function') {
+            let binary = '';
+            for (let i = 0; i < uint8Array.length; i++) {
+                binary += String.fromCharCode(uint8Array[i]);
+            }
+            return btoa(binary);
         }
-        return btoa(binary);
+
+        if (typeof Buffer !== 'undefined') {
+            return Buffer.from(uint8Array).toString('base64');
+        }
+
+        throw new Error('Unable to encode image to base64.');
     }
 }
 
