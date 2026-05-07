@@ -275,7 +275,6 @@ class ChatSession {
             this.conversationState.addMessage(this.context.userId, interaction.role, interaction.content);
         });
         await this.refreshRichContext(true);
-        console.log(`[ChatService] Preferences loaded for ${this.context.userId}:`, prefs);
     }
 
     public async processMessage(message: string): Promise<ChatResponse> { await this.conversationState.load(this.context.userId); const res = await this._processMessageInternal(message); await this.conversationState.save(this.context.userId); return res; }
@@ -283,7 +282,6 @@ class ChatSession {
         await this.ready;
         await this.refreshRichContext();
         const conversationState = this.conversationState;
-        console.log(`[ChatService] >>> INCOMING: "${message}"`);
 
         // LGPD: Interceptar comando de exclusao de dados
         const normalizedForLgpd = message.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
@@ -304,7 +302,6 @@ class ChatSession {
 
         // 📍 Interceptar comando nativo de localização enviado pela Bridge
         if (message.startsWith('[GPS_LOCATION_UPDATE]')) {
-            console.log(`[ChatService] Bypass de NLP para Localização detectado.`);
             const coordsMatch = message.match(/\[GPS_LOCATION_UPDATE\]\s*([\d.-]+),\s*([\d.-]+)/);
             if (coordsMatch) {
                 const lat = parseFloat(coordsMatch[1]);
@@ -314,13 +311,11 @@ class ChatSession {
                 await userPreferencesService.savePreferences(this.context.userId, {
                     userLocation: { lat, lng },
                 });
-                console.log(`[ChatService] Localização salva no contexto: ${lat}, ${lng}`);
                 return this.handleCoords(lat, lng); // Redireciona para o handler correto de processamento de coordenadas
             }
         }
         const isDeletionCommand = /\b(apagar|excluir|deletar|remover|esquece|esqueca)\s+(meus\s+)?dados\b/.test(normalizedForLgpd);
         if (isDeletionCommand) {
-            console.log('[ChatService] [LGPD] Exclusao de dados solicitada: ' + this.context.userId);
             const result = await userDataDeletionService.anonymizeUser(this.context.userId);
             return { text: result.message };
         }
@@ -368,7 +363,6 @@ class ChatSession {
         const isProfileIntent = this.context.lastIntent === 'ver_perfil_usuario';
 
         if (isProfileIntent) {
-            console.log(`[ChatService] Blindagem: Bypass IA para perfil detectado.`);
             conversationState.addMessage(this.context.userId, 'assistant', rawResponse.text);
             await userProfileService.recordInteraction(this.context.userId, {
                 role: 'assistant',
@@ -431,7 +425,6 @@ class ChatSession {
             const isNegative = negativeWords.some(w => lowMsg === w || lowMsg.startsWith(`${w} `));
 
             if (isConfirm && this.context.pendingPurchase) {
-                console.log(`[ChatService] Early Return: Bypassing NLP for Purchase Confirmation.`);
                 const allItems = this.context.pendingMatchResult
                     ? [...this.context.pendingMatchResult.matched, ...this.context.pendingMatchResult.impulse]
                     : undefined;
@@ -462,7 +455,6 @@ class ChatSession {
         // â”€â”€â”€ 0.1 FAST GREETING INTERCEPT â”€â”€â”€
         const veryShort = message.trim().toLowerCase();
         if (veryShort === '.' || veryShort === '?' || veryShort === '!' || veryShort === 'kole' || veryShort === 'koÃ©') {
-            console.log(`[ChatService] Fast-intercepting greeting: "${veryShort}"`);
             return this.handleSaudacao();
         }
 
@@ -514,7 +506,6 @@ class ChatSession {
                 && (this.conversationState.isConfirmation(message) || this.conversationState.isNegation(message));
             
             if (looksLikeNeighborhoodFallback(message) && !isCourtesy && !isConfirmOrDeny) {
-                console.log(`[ChatService] Neighborhood Fallback Detectado (PRE-AI): ${message}`);
                 return await this.handleNeighborhoodFallback(message);
             }
         }
@@ -533,7 +524,7 @@ class ChatSession {
             this.context.isFirstContact = false;
             // GARANTIA: Se já temos a localização (GPS ou Bairro), não precisamos travar o usuário no loop
             if (this.context.userLocation || this.context.neighborhood) {
-                console.log(`[ChatService] Primeiro contato detectado para ${this.context.userId}, mas localização já conhecida. Pulando loop de GPS.`);
+                // Location already known — skip GPS loop
             } else {
                 conversationState.transition('AWAITING_INITIAL_LOCATION', 'initial_location', null, 'Me manda sua localização para eu buscar mercados perto de você.');
                 return this.handleSaudacao();
@@ -545,18 +536,15 @@ class ChatSession {
 
         if (conversationState.current === 'AWAITING_INITIAL_LOCATION') {
             if (actionableIntent) {
-                console.log(`[FIRST_CONTACT_LOCATION_SKIPPED] user=${this.context.userId} reason=actionable_message`);
                 conversationState.reset();
             }
 
             // NOVO: Se a localização já está presente no contexto (ex: carregada no init), limpamos o estado
             if (this.context.userLocation || this.context.neighborhood) {
-                console.log(`[ChatService] Localização detectada durante AWAITING_INITIAL_LOCATION para ${this.context.userId}. Resetando estado.`);
                 conversationState.reset();
             }
 
             if (/\b(nao|não|depois|agora nao|agora não|sem localizacao|sem localização)\b/.test(normalizedMessage)) {
-                console.log(`[FIRST_CONTACT_LOCATION_SKIPPED] user=${this.context.userId} reason=user_declined`);
                 conversationState.reset();
                 return {
                     text: 'Sem problema 👍\n\nVocê também pode me mandar o nome de um produto, sua lista ou uma foto de oferta que eu já começo a te ajudar.',
@@ -574,7 +562,6 @@ class ChatSession {
             const viewListWords = ['ver lista', 'mostrar lista', 'minha lista', 'ver a lista', 'mostra a lista', 'mostra lista', 'exibir lista'];
             const isViewList = viewListWords.some(w => lowMsgRaw === w || lowMsgRaw.startsWith(`${w}`));
             if (isViewList) {
-                console.log(`[ChatService] Interceptando 'ver lista' durante CRIANDO_LISTA`);
                 const curList = await this.listManager.recoverActiveListItemsOnly();
                 if (curList.items.length > 0) {
                     return { text: `${curList.text}Quer adicionar mais itens ou **FINALIZAR**?` };
@@ -584,7 +571,6 @@ class ChatSession {
 
             // HOTFIX 2: Finalizar deve ser exclusivo de CRIANDO_LISTA
             if (isFinish) {
-                console.log(`[ChatService] Gatilho de saÃ­da ativado: ${message}`);
                 conversationState.transition('AWAITING_TRANSPORT_MODE_FOR_LIST', 'choose_transport_for_list', null, 'Como vocÃª vai pro mercado?');
                 return { text: "Massa, lista fechada! ðŸ›’\nPra eu te dar a rota com o preÃ§o **REAL** (somando passagem ou gasolina), me diga: como vocÃª vai pro mercado?\nðŸš— Carro\nðŸšŒ Ã”nibus\nðŸš¶ A pÃ©\nðŸš² Bike" };
             }
@@ -613,7 +599,6 @@ class ChatSession {
         // forÃ§a a repetiÃ§Ã£o do estado pendente ou trata como resposta ao estado.
         // E ESPECIAL: Se o LLM disse CANCEL_OR_EXIT (convertido para desconhecido mas validado em AiService)
         if (intent === 'desconhecido' && interpretation.nlpResult?.intent === 'CANCEL_OR_EXIT') {
-            console.log(`[ChatService] Cancel or Exit detected. Clearing State.`);
             conversationState.reset();
             return { text: "Tudo bem! Se precisar de algo mais, Ã© sÃ³ chamar. ðŸ‘‹" };
         }
@@ -622,11 +607,9 @@ class ChatSession {
         const isLocationState = conversationState.current === 'AWAITING_LOCATION_CONFIRMATION'
             || conversationState.current === 'AWAITING_INITIAL_LOCATION';
         if (conversationState.current !== 'IDLE' && (intent === 'saudacao' || intent === 'desconhecido') && !isLocationState) {
-            console.log(`[ChatService] Amnesia Guard: State "${conversationState.current}" blocked intent "${intent}".`);
             return { text: `Desculpe, ainda estou aguardando sua resposta anterior: **${conversationState.prompt}**` };
         }
 
-        console.log(`[ChatService] Intent: ${intent} | Batch: ${interpretation.isBatch} | Confidence: ${interpretation.confidence}`);
         if (isIntentResolved(intent, interpretation.confidence, hasProducts)) {
             console.log(`[INTENT_RESOLVED] user=${this.context.userId} intent=${intent} confidence=${interpretation.confidence.toFixed(2)}`);
         }
@@ -752,8 +735,7 @@ class ChatSession {
                 case 'multi_choice': {
                     const savedProducts: string[] = pending.data || [];
                     if (pending.confirmed) {
-                        // UsuÃ¡rio escolheu PREÃ‡O â†’ buscar preÃ§o de cada produto
-                        console.log(`[ChatService] Multi-choice: PREÃ‡O para ${savedProducts.length} produtos`);
+                        // UsuÃ¡rio escolheu PREÃ‡O â†' buscar preÃ§o de cada produto
                         const batchResult = await offerEngine.lookupBatch(savedProducts);
                         this.context.pendingAllProducts = savedProducts; // Salvar TODOS para add na lista depois
                         if (batchResult.products.length > 0) {
@@ -762,13 +744,13 @@ class ChatSession {
                         }
                         return { text: batchResult.text };
                     } else {
-                        // UsuÃ¡rio escolheu LISTA â†’ criar lista de compras
-                        console.log(`[ChatService] Multi-choice: LISTA com ${savedProducts.length} produtos`);
+                        // UsuÃ¡rio escolheu LISTA â†' criar lista de compras
                         await this.listManager.archiveActiveList();
                         this.context.shoppingList = savedProducts.map(name => ({ name }));
                         await this.listManager.persistList(this.context.shoppingList);
                         const createdList = await this.listManager.recoverActiveListItemsOnly();
                         conversationState.transition('AWAITING_LIST_CONFIRMATION', 'confirm_list', this.context.shoppingList, 'Finalizar lista?');
+
                         return { text: `Lista com ${savedProducts.length} itens criada com sucesso! ðŸ›’\n\n${createdList.text}Finalizar lista?` };
                     }
                 }
@@ -905,13 +887,12 @@ class ChatSession {
             if (searchTerm.length >= 2) {
                 const matchedMarket = KNOWN_MARKETS.find(m => searchTerm.includes(m) || m.includes(searchTerm));
                 if (matchedMarket && searchTerm.length <= 20) {
-                    console.log(`[ChatService] Market Fallback: "${searchTerm}" â†’ ofertas_mercado (matched: ${matchedMarket})`);
                     const purchases = await this.purchaseAnalytics.getFrequentProducts(30);
                     const marketVitrine = await offerEngine.getTopOffersByMarket(searchTerm, purchases);
                     if (marketVitrine.startsWith("Poxa, nÃ£o encontrei") || marketVitrine.includes("ativas para o mercado agora")) {
                         return { text: marketVitrine };
                     }
-                    conversationState.transition('AWAITING_ADD_TO_LIST', 'add_to_list', 'variados', 'Quer que eu adicione as melhores ofertas?');
+
                     return { text: `${marketVitrine}\n\n**Quer que eu coloque algum desses na sua lista de compras?** ðŸ›’\n(Diga 'Sim' e depois cite os nomes)` };
                 }
             }
@@ -926,7 +907,6 @@ class ChatSession {
 
         if (hasMultipleProducts && !hasExplicitListKeyword &&
             (intent === 'criar_lista' || intent === 'consultar_preco_multiplos_produtos' || intent === 'comparar_menor_preco_multiplos_produtos')) {
-            console.log(`[ChatService] Multi-product question: ${multiProducts.length} products, asking user intent`);
             conversationState.transition('AWAITING_MULTI_CHOICE', 'multi_choice', multiProducts, '1 ou 2?');
             const productList = multiProducts.map(p => `â€¢ ${p}`).join('\n');
             return { text: `Encontrei ${multiProducts.length} produtos:\n${productList}\n\nO que vocÃª prefere?\n1ï¸âƒ£ Ver o **preÃ§o** de cada um\n2ï¸âƒ£ Criar uma **lista de compras**` };
@@ -1130,7 +1110,6 @@ class ChatSession {
                 // Verificar se jÃ¡ existe uma lista ativa nÃ£o-finalizada
                 const existingList = await this.listManager.loadActiveList();
                 if (existingList.length > 0) {
-                    console.log(`[ChatService] Lista ativa encontrada com ${existingList.length} itens. Perguntando ao usuÃ¡rio.`);
                     conversationState.transition('AWAITING_LIST_RECOVERY', 'list_recovery', { products: items }, 'Manter ou criar nova?');
                     const preview = existingList.slice(0, 5).map(i => i.name).join(', ');
                     const moreText = existingList.length > 5 ? ` e mais ${existingList.length - 5}` : '';
@@ -1251,7 +1230,6 @@ class ChatSession {
         await this.ready;
         await this.refreshRichContext();
         const conversationState = this.conversationState;
-        console.log(`[ChatService] >>> INCOMING IMAGE mimeType=${mimeType}`);
         this.context.isFirstContact = false;
         conversationState.incrementTurn();
         this.context.lastIntent = 'processar_comprovante_compra';
@@ -1355,7 +1333,6 @@ class ChatSession {
         // Tentar Geocoding via Gemini
         const geoResult = await aiService.geocodeAddress(neighborhood);
         if (geoResult) {
-            console.log(`[ChatService] Geocoding success: ${geoResult.address} (${geoResult.lat}, ${geoResult.lng})`);
             return this.handleCoords(geoResult.lat, geoResult.lng);
         }
 
@@ -1707,7 +1684,6 @@ class ChatSession {
         const isNegative = negativeWords.some((word) => lowMsg === normalizeText(word) || lowMsg.startsWith(`${normalizeText(word)} `));
 
         if (isConfirm && this.context.pendingPurchase) {
-            console.log('[ChatService] Early Return: Bypassing NLP for Purchase Confirmation.');
             return this.confirmPendingPurchase();
         }
 
@@ -1840,7 +1816,6 @@ class ChatSession {
         if (!this.context.pendingPurchase) return { text: 'Poxa, perdi o contexto da sua compra. Pode mandar a nota de novo?' };
         const marketName = message.trim();
         this.context.pendingPurchase.marketName = marketName;
-        console.log(`[ChatService] Mercado identificado manualmente: ${marketName}`);
         return this.confirmPendingPurchase();
     }
 
@@ -1953,7 +1928,6 @@ class ChatSession {
     private async handlePendingMultiChoice(pending: PendingResolution): Promise<ChatResponse> {
         const savedProducts: string[] = pending.data || [];
         if (pending.confirmed) {
-            console.log(`[ChatService] Multi-choice: PREÃ‡O para ${savedProducts.length} produtos`);
             const batchResult = await offerEngine.lookupBatch(savedProducts);
             this.context.pendingAllProducts = savedProducts;
             if (batchResult.products.length > 0) {
@@ -1963,13 +1937,12 @@ class ChatSession {
             return { text: batchResult.text };
         }
 
-        console.log(`[ChatService] Multi-choice: LISTA com ${savedProducts.length} produtos`);
         await this.listManager.archiveActiveList();
         this.context.shoppingList = savedProducts.map((name) => ({ name }));
         await this.listManager.persistList(this.context.shoppingList);
         const createdList = await this.listManager.recoverActiveListItemsOnly();
         this.conversationState.transition('AWAITING_LIST_CONFIRMATION', 'confirm_list', this.context.shoppingList, 'Finalizar lista?');
-        return { text: `Lista com ${savedProducts.length} itens criada com sucesso! ðŸ›’\n\n${createdList.text}Finalizar lista?` };
+        return { text: `Lista com ${savedProducts.length} itens criada com sucesso! ðŸ›'\n\n${createdList.text}Finalizar lista?` };
     }
 
     private async handlePendingExpenseConfirmation(pending: PendingResolution): Promise<ChatResponse> {
@@ -2143,10 +2116,10 @@ class ChatSession {
         const existingList = await this.listManager.loadActiveList();
 
         if (existingList.length > 0) {
-            console.log(`[ChatService] Lista ativa encontrada com ${existingList.length} itens. Perguntando ao usuÃ¡rio.`);
             this.conversationState.transition('AWAITING_LIST_RECOVERY', 'list_recovery', { products: items }, 'Manter ou criar nova?');
             const preview = existingList.slice(0, 5).map((item) => item.name).join(', ');
             const moreText = existingList.length > 5 ? ` e mais ${existingList.length - 5}` : '';
+
             return { text: `ðŸ“‹ VocÃª jÃ¡ tem uma lista com **${existingList.length} itens** (${preview}${moreText}).\n\nQuer **manter** essa lista e continuar adicionando ou **criar uma nova** do zero?` };
         }
 

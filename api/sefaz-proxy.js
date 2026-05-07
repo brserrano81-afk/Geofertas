@@ -367,12 +367,6 @@ function normalizeEvolutionEvent(payload = {}, routeEvent = null) {
     const fromMe = Boolean(key.fromMe ?? data.fromMe);
     const event = routeEvent || payload.event || payload.type || 'unknown';
 
-    // DEBUG — remover após identificar estrutura real do payload Evolution v2
-    console.log('[DEBUG WEBHOOK] Raw Message Keys:', Object.keys(message));
-    console.log('[DEBUG WEBHOOK] Full Message Content:', JSON.stringify(message, null, 2));
-    console.log('[DEBUG WEBHOOK] data.messageType:', data.messageType);
-    console.log('[DEBUG WEBHOOK] data keys:', Object.keys(data));
-
     // Mapeamento robusto de tipo de mensagem
     // Object.keys(message)[0] é frágil — messageContextInfo costuma ser a primeira chave
     // no Evolution API v2, mascarando o tipo real. Buscamos na ordem de prioridade.
@@ -733,14 +727,6 @@ function extractAudioMediaUrl(normalizedEvent) {
     const data = Array.isArray(rawData) ? (rawData[0] || {}) : rawData;
     const message = data.message || {};
 
-    // Log diagnóstico: mostra todos os campos disponíveis para localizar a URL
-    console.log('[AudioProcessor] extractAudioMediaUrl — data keys:', Object.keys(data));
-    console.log('[AudioProcessor] extractAudioMediaUrl — message keys:', Object.keys(message));
-    console.log('[AudioProcessor] extractAudioMediaUrl — data.url:', data.url);
-    console.log('[AudioProcessor] extractAudioMediaUrl — data.mediaUrl:', data.mediaUrl);
-    console.log('[AudioProcessor] extractAudioMediaUrl — message.audioMessage:', JSON.stringify(message.audioMessage ?? null));
-    console.log('[AudioProcessor] extractAudioMediaUrl — message.ptt:', JSON.stringify(message.ptt ?? null));
-
     const resolved = (
         message.audioMessage?.url ||
         message.ptt?.url ||
@@ -750,7 +736,6 @@ function extractAudioMediaUrl(normalizedEvent) {
         null
     );
 
-    console.log('[AudioProcessor] extractAudioMediaUrl — URL resolvida:', resolved ?? '(nenhuma)');
     return resolved;
 }
 
@@ -771,7 +756,6 @@ async function processAudioMessage(normalizedEvent) {
     let audioBase64;
     let mimeType = 'audio/ogg'; // padrão WhatsApp
     try {
-        console.log('[AudioProcessor] Baixando áudio de:', mediaUrl);
         const audioResp = await fetch(mediaUrl);
         if (!audioResp.ok) {
             const body = await audioResp.text().catch(() => '');
@@ -782,7 +766,6 @@ async function processAudioMessage(normalizedEvent) {
         if (contentType) mimeType = contentType.split(';')[0].trim();
         const buffer = await audioResp.arrayBuffer();
         audioBase64 = Buffer.from(buffer).toString('base64');
-        console.log(`[AudioProcessor] Áudio baixado OK — mimeType: ${mimeType}, tamanho: ${buffer.byteLength} bytes`);
     } catch (err) {
         console.error('[AudioProcessor] Erro ao baixar áudio:', err);
         return null;
@@ -802,7 +785,6 @@ async function processAudioMessage(normalizedEvent) {
 
     let geminiResponseJson;
     try {
-        console.log('[AudioProcessor] Chamando Gemini 1.5 Flash...');
         const geminiResp = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
             {
@@ -817,7 +799,6 @@ async function processAudioMessage(normalizedEvent) {
             return null;
         }
         geminiResponseJson = await geminiResp.json();
-        console.log('[AudioProcessor] Resposta bruta do Gemini:', JSON.stringify(geminiResponseJson));
     } catch (err) {
         console.error('[AudioProcessor] Erro na chamada ao Gemini:', err);
         return null;
@@ -827,7 +808,6 @@ async function processAudioMessage(normalizedEvent) {
     let produtos = [];
     try {
         const rawText = geminiResponseJson?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-        console.log('[AudioProcessor] Texto bruto do Gemini para parse:', rawText);
         const parsed = JSON.parse(rawText);
         produtos = Array.isArray(parsed.produtos) ? parsed.produtos : [];
     } catch (err) {

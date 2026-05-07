@@ -553,10 +553,6 @@ async function downloadAudioViaEvolution(
     const instance = getEvolutionInstance();
     const baseUrl = process.env.EVOLUTION_API_BASE_URL?.trim();
 
-    // Log de diagnóstico de configuração — visível mesmo se nada mais funcionar
-    console.log(`[AudioProcessor] user=${userId} — EVOLUTION_API_BASE_URL: ${baseUrl || '(NÃO CONFIGURADO)'}`);
-    console.log(`[AudioProcessor] user=${userId} — EVOLUTION_INSTANCE: ${instance || '(NÃO CONFIGURADO)'}`);
-
     if (!instance || !baseUrl) {
         console.error(`[AudioProcessor] user=${userId} — Abortando download: env vars ausentes`);
         return null;
@@ -566,13 +562,13 @@ async function downloadAudioViaEvolution(
     try {
         const parsed = JSON.parse(rawMessageJson);
         msgData = Array.isArray(parsed) ? (parsed[0] || {}) : parsed;
-        console.log(`[AudioProcessor] user=${userId} — rawMessageData keys: ${Object.keys(msgData).join(', ')}`);
     } catch (err) {
         console.error(`[AudioProcessor] user=${userId} — Falha ao parsear rawMessageJson:`, err);
         return null;
     }
 
     const apiKey = process.env.EVOLUTION_API_KEY || process.env.EVOLUTION_APIKEY || '';
+
     const apiKeyHeader = process.env.EVOLUTION_API_KEY_HEADER || 'apikey';
     const base = baseUrl.replace(/\/+$/, '');
     const enc = encodeURIComponent(instance);
@@ -590,24 +586,20 @@ async function downloadAudioViaEvolution(
         msgData?.message?.voice?.mimetype ||
         ''
     ).split(';')[0].trim() || 'audio/ogg';
-    console.log(`[AudioProcessor] user=${userId} — MIME type do audioMessage: ${knownMimeType}`);
 
     // ── Tentativa 1: POST /message/downloadMedia/{instance} ───────────────────
     // Body: o objeto data do webhook (contém key + message + messageType)
     {
         const url = `${base}/message/downloadMedia/${enc}`;
-        console.log(`[AudioProcessor] user=${userId} — [1] POST ${url}`);
         try {
             const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(msgData) });
             const text = await resp.text();
-            console.log(`[AudioProcessor] user=${userId} — [1] HTTP ${resp.status}: ${text.slice(0, 400)}`);
             if (resp.ok) {
                 const json = JSON.parse(text);
                 if (json.base64) {
                     // Prefere o mimetype da resposta; cai no do audioMessage se vier genérico
                     const rawMime = (json.mimetype || json.mediaType || '').split(';')[0].trim();
                     const mimeType = (rawMime && rawMime !== 'application/octet-stream') ? rawMime : knownMimeType;
-                    console.log(`[AudioProcessor] user=${userId} — [1] OK — mimeType: ${mimeType}, base64 len: ${json.base64.length}`);
                     return { base64: json.base64, mimeType, source: 'downloadMedia' };
                 }
                 console.warn(`[AudioProcessor] user=${userId} — [1] OK mas sem campo base64. Keys: ${Object.keys(json).join(', ')}`);
@@ -625,17 +617,14 @@ async function downloadAudioViaEvolution(
     {
         const url = `${base}/chat/getBase64FromMediaMessage/${enc}`;
         const body = { message: msgData };
-        console.log(`[AudioProcessor] user=${userId} — [2] POST ${url}`);
         try {
             const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
             const text = await resp.text();
-            console.log(`[AudioProcessor] user=${userId} — [2] HTTP ${resp.status}: ${text.slice(0, 400)}`);
             if (resp.ok) {
                 const json = JSON.parse(text);
                 if (json.base64) {
                     const rawMime = (json.mimetype || json.mediaType || '').split(';')[0].trim();
                     const mimeType = (rawMime && rawMime !== 'application/octet-stream') ? rawMime : knownMimeType;
-                    console.log(`[AudioProcessor] user=${userId} — [2] OK — mimeType: ${mimeType}, base64 len: ${json.base64.length}`);
                     return { base64: json.base64, mimeType, source: 'getBase64FromMediaMessage' };
                 }
                 console.warn(`[AudioProcessor] user=${userId} — [2] OK mas sem campo base64. Keys: ${Object.keys(json).join(', ')}`);
@@ -651,6 +640,7 @@ async function downloadAudioViaEvolution(
 
 async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBuildResult> {
     // ── Obtenção do áudio descriptografado ───────────────────────────────────
+
     // Prioridade 1: mediaBase64 salvo diretamente no inbox (campo data.base64
     //               do webhook — Evolution com "Send Base64" habilitado).
     // Prioridade 2: base64 dentro do rawMessageJson em posições alternativas
@@ -683,7 +673,6 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
                     d?.mimetype ||
                     ''
                 ).split(';')[0].trim() || 'audio/ogg';
-                console.log(`[AudioProcessor] user=${message.userId} — base64 encontrado no rawMessageJson (fonte: rawMessageJson)`);
             }
         } catch {
             // ignorado — rawMessageJson inválido será tratado depois
@@ -691,18 +680,15 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
     }
 
     if (message.mediaBase64) {
-        console.log(`[AudioProcessor] user=${message.userId} — [fonte: mediaBase64 do inbox]`);
         audioBase64 = message.mediaBase64;
         audioSource = 'mediaBase64';
         // MIME type: tenta extrair do rawMessageJson se disponível
         mimeType = rawMimeFromJson || mimeType;
     } else if (rawBase64FromJson) {
-        console.log(`[AudioProcessor] user=${message.userId} — [fonte: base64 dentro do rawMessageJson]`);
         audioBase64 = rawBase64FromJson;
         audioSource = 'rawMessageJson';
         mimeType = rawMimeFromJson || mimeType;
     } else if (message.rawMessageJson) {
-        console.log(`[AudioProcessor] user=${message.userId} — [fonte: Evolution download API]`);
         const downloaded = await downloadAudioViaEvolution(message.rawMessageJson, message.userId);
         if (!downloaded) {
             console.warn(
