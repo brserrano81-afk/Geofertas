@@ -47,8 +47,8 @@ Exemplo Cupom:
 }`;
 
 class VisionService {
-    async extractFromImage(imageData: Uint8Array): Promise<any> {
-        console.log(`[VisionService] Processing image: ${imageData.length} bytes via Gemini`);
+    async extractFromImage(imageData: Uint8Array, mimeType: string = 'image/jpeg'): Promise<any> {
+        console.log(`[VisionService] Processing image: ${imageData.length} bytes via Gemini mimeType=${mimeType}`);
 
         const apiKey = getGeminiKey();
         if (!apiKey) {
@@ -64,7 +64,7 @@ class VisionService {
             const imagePart = {
                 inlineData: {
                     data: base64,
-                    mimeType: 'image/jpeg',
+                    mimeType,
                 },
             };
 

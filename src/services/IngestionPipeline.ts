@@ -44,9 +44,9 @@ function resolveApiBaseUrl(): string {
 }
 
 class IngestionPipeline {
-    async processUserSubmission(input: string | Uint8Array): Promise<PipelineResult> {
+    async processUserSubmission(input: string | Uint8Array, mimeType: string = 'image/jpeg'): Promise<PipelineResult> {
         if (input instanceof Uint8Array) {
-            return this.processImage(input);
+            return this.processImage(input, mimeType);
         }
 
         const text = input as string;
@@ -69,10 +69,10 @@ class IngestionPipeline {
         };
     }
 
-    private async processImage(imageData: Uint8Array): Promise<PipelineResult> {
-        console.log(`[IngestionPipeline] Processing image: ${imageData.length} bytes`);
+    private async processImage(imageData: Uint8Array, mimeType: string): Promise<PipelineResult> {
+        console.log(`[IngestionPipeline] Processing image: ${imageData.length} bytes mimeType=${mimeType}`);
         try {
-            const result = await visionService.extractFromImage(imageData);
+            const result = await visionService.extractFromImage(imageData, mimeType);
 
             if (result && result.sefazKey) {
                 const cleanKey = result.sefazKey.replace(/\D/g, '');

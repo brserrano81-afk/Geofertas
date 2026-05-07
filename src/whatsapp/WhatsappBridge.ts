@@ -81,7 +81,7 @@ client.on('message', async (msg: Message) => {
             const media = await msg.downloadMedia();
             const buffer = Buffer.from(media.data, 'base64');
             const array = new Uint8Array(buffer);
-            const response = await chatService.processImage(array, userId);
+            const response = await chatService.processImage(array, userId, userId, media.mimetype || 'image/jpeg');
             if (response?.text) {
                 await sendReply(response.text);
             }

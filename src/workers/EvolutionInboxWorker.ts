@@ -99,16 +99,8 @@ function extractInboxLocation(message: InboxMessage): { lat: number; lng: number
             return null;
         }
 
-        const lat = Number(
-            rawLocation.degreesLatitude ??
-            rawLocation.latitude ??
-            rawLocation.lat,
-        );
-        const lng = Number(
-            rawLocation.degreesLongitude ??
-            rawLocation.longitude ??
-            rawLocation.lng,
-        );
+        const lat = Number(String(rawLocation.degreesLatitude ?? rawLocation.latitude ?? rawLocation.lat ?? '').replace(',', '.').trim());
+        const lng = Number(String(rawLocation.degreesLongitude ?? rawLocation.longitude ?? rawLocation.lng ?? '').replace(',', '.').trim());
 
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
             return null;
@@ -803,6 +795,115 @@ async function processAudioWithGemini(message: InboxMessage): Promise<ResponseBu
 
 }
 
+function extractMediaBase64FromRawMessage(rawMessageJson: string, messageType: string): { base64: string | null; mimeType: string | null } {
+    if (!rawMessageJson) {
+        return { base64: null, mimeType: null };
+    }
+
+    try {
+        const parsed = JSON.parse(rawMessageJson);
+        const data = Array.isArray(parsed) ? (parsed[0] || {}) : parsed;
+        const base64 =
+            data?.base64 ||
+            data?.message?.base64 ||
+            data?.message?.[messageType]?.base64 ||
+            null;
+        const mimeType = (
+            data?.message?.[messageType]?.mimetype ||
+            data?.mimetype ||
+            ''
+        ).split(';')[0].trim() || null;
+        return { base64, mimeType };
+    } catch {
+        return { base64: null, mimeType: null };
+    }
+}
+
+async function fetchMediaUrlAsBase64(mediaUrl: string, mimeTypeFallback = 'application/octet-stream') {
+    try {
+        const response = await fetch(mediaUrl);
+        if (!response.ok) {
+            console.warn(`[ImageFetcher] Falha ao baixar mediaUrl ${mediaUrl}: HTTP ${response.status}`);
+            return null;
+        }
+        const buffer = Buffer.from(await response.arrayBuffer());
+        const contentType = response.headers.get('content-type') || mimeTypeFallback;
+        return {
+            base64: buffer.toString('base64'),
+            mimeType: contentType.split(';')[0].trim() || mimeTypeFallback,
+        };
+    } catch (err: any) {
+        console.error(`[ImageFetcher] Erro ao baixar mediaUrl ${mediaUrl}:`, err?.message || err);
+        return null;
+    }
+}
+
+async function downloadMediaViaEvolution(
+    rawMessageJson: string,
+    userId: string,
+    defaultMimeType = 'application/octet-stream',
+): Promise<{ base64: string; mimeType: string; source: 'downloadMedia' | 'getBase64FromMediaMessage' } | null> {
+    const instance = getEvolutionInstance();
+    const baseUrl = process.env.EVOLUTION_API_BASE_URL?.trim();
+
+    if (!instance || !baseUrl) {
+        console.error(`[ImageFetcher] user=${userId} — Abortando download: env vars ausentes`);
+        return null;
+    }
+
+    let msgData: any;
+    try {
+        const parsed = JSON.parse(rawMessageJson);
+        msgData = Array.isArray(parsed) ? (parsed[0] || {}) : parsed;
+    } catch (err) {
+        console.error(`[ImageFetcher] user=${userId} — Falha ao parsear rawMessageJson:`, err);
+        return null;
+    }
+
+    const apiKey = process.env.EVOLUTION_API_KEY || process.env.EVOLUTION_APIKEY || '';
+    const apiKeyHeader = process.env.EVOLUTION_API_KEY_HEADER || 'apikey';
+    const base = baseUrl.replace(/\/+$/, '');
+    const enc = encodeURIComponent(instance);
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (apiKey) headers[apiKeyHeader] = apiKey;
+
+    const knownMimeType = (
+        msgData?.message?.imageMessage?.mimetype ||
+        msgData?.message?.videoMessage?.mimetype ||
+        msgData?.message?.documentMessage?.mimetype ||
+        msgData?.message?.audioMessage?.mimetype ||
+        msgData?.mimetype ||
+        defaultMimeType
+    ).split(';')[0].trim() || defaultMimeType;
+
+    for (const [url, body] of [
+        [`${base}/message/downloadMedia/${enc}`, JSON.stringify(msgData)],
+        [`${base}/chat/getBase64FromMediaMessage/${enc}`, JSON.stringify({ message: msgData })],
+    ] as const) {
+        try {
+            const resp = await fetch(url, { method: 'POST', headers, body });
+            const text = await resp.text();
+            if (resp.ok) {
+                const json = JSON.parse(text);
+                if (json.base64) {
+                    const rawMime = (json.mimetype || json.mediaType || '').split(';')[0].trim();
+                    const mimeType = (rawMime && rawMime !== 'application/octet-stream') ? rawMime : knownMimeType;
+                    return {
+                        base64: json.base64,
+                        mimeType,
+                        source: url.includes('/chat/getBase64FromMediaMessage/') ? 'getBase64FromMediaMessage' : 'downloadMedia',
+                    };
+                }
+            }
+        } catch (err: any) {
+            console.error(`[ImageFetcher] user=${userId} — Erro ao baixar via Evolution ${url}:`, err?.message || err);
+        }
+    }
+
+    return null;
+}
+
 async function buildResponse(rawMessage: InboxMessage): Promise<ResponseBuildResult> {
     const message = rawMessage;
 
@@ -814,23 +915,51 @@ async function buildResponse(rawMessage: InboxMessage): Promise<ResponseBuildRes
     }
     // ─────────────────────────────────────────────────────────────────────────
 
-    if (message.messageType === 'imageMessage' && message.mediaBase64) {
-        const buffer = Buffer.from(message.mediaBase64, 'base64');
-        const response = await chatService.processImage(
-            new Uint8Array(buffer),
-            message.userId,
-            message.storageUserId || message.userId,
-        );
-        console.log(`[INTENT_RESOLVED] user=${message.userId} channel=whatsapp source=imageMessage`);
-        return {
-            text: response.text,
-            shouldSend: true,
-            usedFallback: false,
-            reason: 'image_processed',
-        };
-    }
+    if (message.messageType === 'imageMessage') {
+        let imageBase64: string | null = null;
+        let mimeType = 'image/jpeg';
 
-    if (message.messageType === 'imageMessage' && !message.mediaBase64) {
+        if (message.mediaBase64) {
+            imageBase64 = message.mediaBase64;
+        } else if (message.rawMessageJson) {
+            const extracted = extractMediaBase64FromRawMessage(message.rawMessageJson, 'imageMessage');
+            imageBase64 = extracted.base64;
+            if (extracted.mimeType) mimeType = extracted.mimeType;
+        }
+
+        if (!imageBase64 && message.mediaUrl) {
+            const fetched = await fetchMediaUrlAsBase64(message.mediaUrl, mimeType);
+            if (fetched) {
+                imageBase64 = fetched.base64;
+                mimeType = fetched.mimeType;
+            }
+        }
+
+        if (!imageBase64 && message.rawMessageJson) {
+            const downloaded = await downloadMediaViaEvolution(message.rawMessageJson, message.userId, mimeType);
+            if (downloaded) {
+                imageBase64 = downloaded.base64;
+                mimeType = downloaded.mimeType;
+            }
+        }
+
+        if (imageBase64) {
+            const buffer = Buffer.from(imageBase64, 'base64');
+            const response = await chatService.processImage(
+                new Uint8Array(buffer),
+                message.userId,
+                message.storageUserId || message.userId,
+                mimeType,
+            );
+            console.log(`[INTENT_RESOLVED] user=${message.userId} channel=whatsapp source=imageMessage`);
+            return {
+                text: response.text,
+                shouldSend: true,
+                usedFallback: false,
+                reason: 'image_processed',
+            };
+        }
+
         console.warn(`[FALLBACK_TRIGGERED] user=${message.userId} reason=invalid_media imageMessage_without_mediaBase64`);
         return {
             text: 'Recebi sua imagem, mas ela chegou incompleta pra mim. Pode mandar de novo, de preferência mais nítida?',

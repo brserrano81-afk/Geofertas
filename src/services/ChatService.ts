@@ -9,7 +9,7 @@ import { aiService, type Intent } from './AiService';
 import { offerEngine } from './OfferEngine';
 import { ListManager } from './ListManager';
 import { PurchaseManager } from './PurchaseManager';
-import { ingestionPipeline, type PipelineResult } from './IngestionPipeline';
+import { ingestionPipeline } from './IngestionPipeline';
 import { matchReceiptToList, type MatchResult } from './ReceiptMatcher';
 import { ConversationStateService, type PendingResolution } from './ConversationStateService';
 import { PurchaseAnalyticsService } from './PurchaseAnalyticsService';
@@ -38,7 +38,6 @@ export interface ChatResponse {
 }
 
 const INTENT_CONFIDENCE_THRESHOLD = 0.45;
-const RECEIPT_AUTO_SAVE_THRESHOLD = 0.85;
 const CHAT_FALLBACK_TEXT = 'Ainda não entendi bem o que você quer fazer. Posso te ajudar com preço de produto, ofertas de mercado, lista de compras ou seus gastos.';
 
 interface ListItem {
@@ -168,7 +167,9 @@ function looksLikeNeighborhoodFallback(message: string): boolean {
     if (!/[a-zA-ZÀ-ÿ]/.test(trimmed)) return false;
     if (COURTESY_WORDS.has(normalized)) return false;
     if (trimmed.split(/\s+/).length > 8) return false;
-    if (/\d/.test(trimmed)) return false;
+    // Rejeitar dígitos EXCETO se parecer endereço (rua, av, travessa, etc)
+    const looksLikeAddress = /\b(rua|avenida|av|travessa|tv|alameda|al|praca|pca|rodovia|estrada|beco|largo)\b/i.test(normalized);
+    if (/\d/.test(trimmed) && !looksLikeAddress) return false;
     if (/\b(ajuda|help|socorro|nao sei|não sei|sei la|sei lá)\b/.test(normalized)) return false;
 
     return !/\b(quanto|valor|preco|precos|oferta|ofertas|lista|mercado|mercados|comprar|compra|quero|produto|produtos)\b/.test(normalized);
@@ -200,14 +201,6 @@ function isActionableIntent(intent: Intent, hasProducts: boolean): boolean {
     }
 
     return !['saudacao', 'ajuda', 'desconhecido'].includes(intent);
-}
-
-function shouldAutoSaveReceipt(pipelineResult: PipelineResult, receiptData: any): boolean {
-    if (pipelineResult.source === 'receipt_sefaz') {
-        return true;
-    }
-
-    return Number(receiptData?.confidence || 0) >= RECEIPT_AUTO_SAVE_THRESHOLD;
 }
 
 function parseGpsLocationUpdate(message: string): PendingGpsLocation | null {
@@ -337,19 +330,29 @@ class ChatSession {
         }
 
         const consentGate = await lgpdConsentService.evaluateConsentGate(this.context.userId, message);
-        if (consentGate.justConsented && conversationState.current === 'AWAITING_LGPD_CONSENT') {
-            const pendingLocation = isPendingGpsLocation(conversationState.data)
-                ? conversationState.data
-                : null;
-            if (pendingLocation) {
-                return this.handleCoords(pendingLocation.lat, pendingLocation.lng);
+        if (consentGate.justConsented) {
+            // GPS pendente do gate anterior
+            if (conversationState.current === 'AWAITING_LGPD_CONSENT') {
+                const pendingLocation = isPendingGpsLocation(conversationState.data)
+                    ? conversationState.data
+                    : null;
+                if (pendingLocation) {
+                    return this.handleCoords(pendingLocation.lat, pendingLocation.lng);
+                }
             }
 
             conversationState.reset();
+            // Após LGPD, se não temos localização, pedir
+            if (!this.context.userLocation && !this.context.neighborhood) {
+                this.context.isFirstContact = false;
+                conversationState.transition('AWAITING_INITIAL_LOCATION', 'initial_location', null, 'Me manda sua localização para eu buscar mercados perto de você.');
+                return this.handleSaudacao();
+            }
             return { text: 'Aceite registrado. Pode mandar um produto, sua lista ou pedir ofertas de um mercado.' };
         }
 
         if (!consentGate.allowed) {
+            conversationState.transition('AWAITING_LGPD_CONSENT', 'lgpd_consent', null, 'Aguardando aceite LGPD');
             return { text: consentGate.responseText || '' };
         }
 
@@ -502,13 +505,17 @@ class ChatSession {
         const asksForProfile = /\b(o que (voce|vc) sabe sobre mim|o que sabe sobre mim|o que lembra de mim|me fala meu historico|meu perfil|meu historico|me fala meu historico)\b/.test(normalizedMessage);
 
         // ─── INTERCEPTOR DE BAIRRO (Antes do AI para evitar instabilidades) ───
-        if (conversationState.current === 'AWAITING_INITIAL_LOCATION') {
+        if (conversationState.current === 'AWAITING_INITIAL_LOCATION'
+            || conversationState.current === 'AWAITING_LOCATION_CONFIRMATION') {
             const normalized = normalizeText(message);
             const isCourtesy = COURTESY_WORDS.has(normalized);
+            // Em AWAITING_LOCATION_CONFIRMATION, "sim/não" são confirmações, não bairros
+            const isConfirmOrDeny = conversationState.current === 'AWAITING_LOCATION_CONFIRMATION'
+                && (this.conversationState.isConfirmation(message) || this.conversationState.isNegation(message));
             
-            if (looksLikeNeighborhoodFallback(message) && !isCourtesy) {
+            if (looksLikeNeighborhoodFallback(message) && !isCourtesy && !isConfirmOrDeny) {
                 console.log(`[ChatService] Neighborhood Fallback Detectado (PRE-AI): ${message}`);
-                return this.handleNeighborhoodFallback(message);
+                return await this.handleNeighborhoodFallback(message);
             }
         }
 
@@ -611,7 +618,10 @@ class ChatSession {
             return { text: "Tudo bem! Se precisar de algo mais, Ã© sÃ³ chamar. ðŸ‘‹" };
         }
 
-        if (conversationState.current !== 'IDLE' && (intent === 'saudacao' || intent === 'desconhecido')) {
+        // Exceção: no estado de localização, endereços são processados como fallback
+        const isLocationState = conversationState.current === 'AWAITING_LOCATION_CONFIRMATION'
+            || conversationState.current === 'AWAITING_INITIAL_LOCATION';
+        if (conversationState.current !== 'IDLE' && (intent === 'saudacao' || intent === 'desconhecido') && !isLocationState) {
             console.log(`[ChatService] Amnesia Guard: State "${conversationState.current}" blocked intent "${intent}".`);
             return { text: `Desculpe, ainda estou aguardando sua resposta anterior: **${conversationState.prompt}**` };
         }
@@ -1237,11 +1247,11 @@ class ChatSession {
         }
     }
 
-    public async processImage(imageData: Uint8Array): Promise<ChatResponse> {
+    public async processImage(imageData: Uint8Array, mimeType: string = 'image/jpeg'): Promise<ChatResponse> {
         await this.ready;
         await this.refreshRichContext();
         const conversationState = this.conversationState;
-        console.log(`[ChatService] >>> INCOMING IMAGE`);
+        console.log(`[ChatService] >>> INCOMING IMAGE mimeType=${mimeType}`);
         this.context.isFirstContact = false;
         conversationState.incrementTurn();
         this.context.lastIntent = 'processar_comprovante_compra';
@@ -1252,7 +1262,7 @@ class ChatSession {
             intent: 'processar_comprovante_compra',
         });
 
-        const pipelineResult = await ingestionPipeline.processUserSubmission(imageData);
+        const pipelineResult = await ingestionPipeline.processUserSubmission(imageData, mimeType);
         const receiptData = pipelineResult.data;
 
         if (!pipelineResult.success || !pipelineResult.data) {
@@ -1273,7 +1283,7 @@ class ChatSession {
             return { text: `🏷️ Identifiquei este preço:\n• ${receiptData.product}\n• R$ ${Number(receiptData.price).toFixed(2).replace('.', ',')}\n\nEstá correto? (Sim/Não)` };
         }
 
-        const response = await this.handlePersonalReceiptFlow(pipelineResult, receiptData);
+        const response = await this.handlePersonalReceiptFlow(receiptData);
         conversationState.addMessage(this.context.userId, 'assistant', response.text);
         await userProfileService.recordInteraction(this.context.userId, {
             role: 'assistant',
@@ -1316,7 +1326,7 @@ class ChatSession {
         }
 
         const modeLabel = mode === 'car' ? '🚗 Carro' : mode === 'bus' ? '🚌 Ônibus' : '🚶 A pé';
-        conversationState.transition('AWAITING_TRANSPORT_CONFIRMATION', 'confirm_transport', { mode, ticket }, 'Confirmar transporte?');
+        this.conversationState.transition('AWAITING_TRANSPORT_CONFIRMATION', 'confirm_transport', { mode, ticket }, 'Confirmar transporte?');
         return { text: `Entendido! Você vai de **${modeLabel}**?\n\n(Diga *Sim* para confirmar ou mude o transporte)` };
     }
 
@@ -1324,7 +1334,7 @@ class ChatSession {
         const match = msg.match(/\d+([.,]\d+)?/);
         if (match) {
             const val = parseFloat(match[0].replace(',', '.'));
-            conversationState.transition('AWAITING_CONSUMPTION_CONFIRMATION', 'confirm_consumption', { val }, 'Confirmar consumo?');
+            this.conversationState.transition('AWAITING_CONSUMPTION_CONFIRMATION', 'confirm_consumption', { val }, 'Confirmar consumo?');
             return { text: `Você disse que o consumo do seu carro é **${val} km/l**?\n\n(Diga *Sim* para confirmar)` };
         }
         return { text: "Não consegui identificar o valor. Pode digitar apenas o número do consumo (ex: 12.5)?" };
@@ -1333,16 +1343,23 @@ class ChatSession {
     private handleCoords(
         lat: number,
         lng: number,
-        locationSource: 'user_declared' | 'gps_auto' = 'gps_auto',
     ): ChatResponse {
         this.context.userLocation = { lat, lng, address: `${lat.toFixed(4)}, ${lng.toFixed(4)}` };
-        conversationState.transition('AWAITING_LOCATION_CONFIRMATION', 'confirm_location', this.context.userLocation, 'Confirmar localização?');
+        this.conversationState.transition('AWAITING_LOCATION_CONFIRMATION', 'confirm_location', this.context.userLocation, 'Confirmar localização?');
         return { text: `📍 Recebi sua localização (GPS: ${lat.toFixed(4)}, ${lng.toFixed(4)}).\n\nPosso usar essa região para buscar as ofertas e mercados mais próximos de você? (Sim/Não)` };
     }
 
-    private handleNeighborhoodFallback(message: string): ChatResponse {
+    private async handleNeighborhoodFallback(message: string): Promise<ChatResponse> {
         const neighborhood = message.trim().replace(/\s+/g, ' ');
-        conversationState.transition('AWAITING_LOCATION_CONFIRMATION', 'confirm_location', { neighborhood }, 'Confirmar bairro?');
+        
+        // Tentar Geocoding via Gemini
+        const geoResult = await aiService.geocodeAddress(neighborhood);
+        if (geoResult) {
+            console.log(`[ChatService] Geocoding success: ${geoResult.address} (${geoResult.lat}, ${geoResult.lng})`);
+            return this.handleCoords(geoResult.lat, geoResult.lng);
+        }
+
+        this.conversationState.transition('AWAITING_LOCATION_CONFIRMATION', 'confirm_location', { neighborhood }, 'Confirmar bairro?');
         return { text: `Entendi! Você está na região de **${capitalize(neighborhood)}**?\n\n(Diga *Sim* para confirmar ou envie o GPS para mais precisão)` };
     }
 
@@ -1371,7 +1388,6 @@ class ChatSession {
     }
 
     private async handleCalcularTotalLista(): Promise<ChatResponse> {
-        const conversationState = this.conversationState;
         if (this.context.shoppingList.length === 0) {
             return { text: 'Sua lista está vazia.' };
         }
@@ -1391,7 +1407,7 @@ class ChatSession {
         const suggestion = await offerEngine.getSmartSuggestion(this.context.shoppingList);
         const suggestionText = suggestion ? suggestion.text : '';
 
-        conversationState.transition('AWAITING_SHARE_CONFIRMATION', 'share_list', { list: this.context.shoppingList, topMarketName }, 'Quer compartilhar essa lista?');
+        this.conversationState.transition('AWAITING_SHARE_CONFIRMATION', 'share_list', { list: this.context.shoppingList, topMarketName }, 'Quer compartilhar essa lista?');
         return { text: `${comparativeText}${suggestionText}\n\nQuer calcular o transporte também? 🚗` };
     }
 
@@ -1731,6 +1747,7 @@ class ChatSession {
                 return this.handlePendingMarketName(message);
             case 'AWAITING_RECEIPT_CORRECTION':
                 return this.handlePendingReceiptCorrection(message);
+            case 'confirm_location':
             case 'AWAITING_LOCATION_CONFIRMATION':
                 return this.handlePendingLocationConfirmation(pending);
             case 'AWAITING_TABLOID_CONFIRMATION':
@@ -1797,7 +1814,12 @@ class ChatSession {
         }
 
         this.context.isFirstContact = false;
-        return { text: '✅ Localização confirmada! Agora já consigo buscar as melhores ofertas perto de você. O que vamos comprar hoje?' };
+        
+        // Fluxo Proativo: Já buscar mercados próximos imediatamente após a confirmação
+        const marketsResponse = await this.handleFindNearbyMarkets();
+        return { 
+            text: `✅ Localização confirmada!\n\n${marketsResponse.text}` 
+        };
     }
 
     private async handlePendingTabloidConfirmation(pending: PendingResolution): Promise<ChatResponse> {
@@ -1855,8 +1877,8 @@ class ChatSession {
         this.context.optimizationPreference = preference;
         await userPreferencesService.savePreferences(this.context.userId, { optimizationPreference: preference });
         await this.refreshRichContext(true);
-        const labels = { economizar: 'o menor preço', perto: 'o mercado mais perto', equilibrar: 'um equilíbrio (custo-benefício)' };
-        return { text: `✅ Preferência por **${labels[preference]}** confirmada! Pode mudar quando quiser! 😊` };
+        const labels: Record<string, string> = { economizar: 'o menor preço', perto: 'o mercado mais perto', equilibrar: 'um equilíbrio (custo-benefício)' };
+        return { text: `✅ Preferência por **${labels[preference as string]}** confirmada! Pode mudar quando quiser! 😊` };
     }
 
     private async handlePendingListRecovery(pending: PendingResolution): Promise<ChatResponse> {
@@ -2021,7 +2043,7 @@ class ChatSession {
             return this.enqueueTabloidToQueue(receiptData);
         }
 
-        return this.handlePersonalReceiptFlow(pipelineResult, receiptData);
+        return this.handlePersonalReceiptFlow(receiptData);
     }
 
     private async handlePurchaseConfirmation(): Promise<ChatResponse> {
@@ -2247,7 +2269,7 @@ class ChatSession {
         this.conversationState.reset();
     }
 
-    private async handlePersonalReceiptFlow(pipelineResult: PipelineResult, receiptData: any): Promise<ChatResponse> {
+    private async handlePersonalReceiptFlow(receiptData: any): Promise<ChatResponse> {
         // 1. Caso a imagem esteja ilegível (Segurança)
         if (receiptData.isReadable === false) {
             this.conversationState.transition('AWAITING_RECEIPT_CORRECTION', 'correct_receipt', receiptData, 'Solicitando correção de imagem');
@@ -2314,8 +2336,8 @@ class ChatService {
         return this.getSession(userId, storageUserId).processMessage(message);
     }
 
-    public async processImage(imageData: Uint8Array, userId: string = 'default_user', storageUserId: string = userId): Promise<ChatResponse> {
-        return this.getSession(userId, storageUserId).processImage(imageData);
+    public async processImage(imageData: Uint8Array, userId: string = 'default_user', storageUserId: string = userId, mimeType: string = 'image/jpeg'): Promise<ChatResponse> {
+        return this.getSession(userId, storageUserId).processImage(imageData, mimeType);
     }
 }
 
